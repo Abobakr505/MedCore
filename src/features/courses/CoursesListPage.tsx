@@ -27,7 +27,14 @@ import { useToast } from "@/contexts/ToastContext";
 import { useAuth } from "@/contexts/AuthContext";
 
 const PAGE_SIZE = 9;
-
+type SortOption =
+  | "rating"
+  | "newest"
+  | "oldest"
+  | "price_asc"
+  | "price_desc"
+  | "popular";
+  
 const collegeLabels: Record<string, string> = {
   medicine: "طب بشري",
   dentistry: "طب أسنان",
@@ -57,7 +64,17 @@ export default function CoursesListPage() {
   );
 
   const college = searchParams.get("college") ?? "";
-  const sort = searchParams.get("sort") ?? "newest";
+const sortParam = searchParams.get("sort");
+
+const sort: SortOption =
+  sortParam === "rating" ||
+  sortParam === "newest" ||
+  sortParam === "oldest" ||
+  sortParam === "price_asc" ||
+  sortParam === "price_desc" ||
+  sortParam === "popular"
+    ? sortParam
+    : "newest";
 
   const rawPage = Number(searchParams.get("page") ?? 1);
   const page = Number.isFinite(rawPage) && rawPage > 0 ? rawPage : 1;
