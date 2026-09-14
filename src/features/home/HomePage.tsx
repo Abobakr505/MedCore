@@ -110,9 +110,17 @@ function StudentHome() {
             : 0;
         setAvgProgress(avg);
 
-        // الاختبارات المجتازة من إجمالي المحاولات المسلَّمة
-        const attempts = await fetchStudentAttempts(userId);
-        const passed = attempts.filter((a) => a.percentage >= (a.quiz?.passing_score ?? 60)).length;
+// الاختبارات المجتازة من إجمالي المحاولات المسلَّمة
+const attempts = await fetchStudentAttempts(userId);
+const passed = attempts.filter((a) => {
+  const percentage = a.percentage ?? 0;
+  const quizInfo = a as unknown as { quiz?: { passing_score?: number } };
+  const passingScore = quizInfo.quiz?.passing_score ?? 60;
+  return percentage >= passingScore;
+}).length;
+
+setPassedExamsCount(passed);
+setTotalExamsCount(attempts.length);
         setPassedExamsCount(passed);
         setTotalExamsCount(attempts.length);
       } catch (err) {
