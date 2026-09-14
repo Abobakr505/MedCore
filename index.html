@@ -1,19 +1,237 @@
+```html
 <!doctype html>
 <html lang="ar" dir="rtl">
   <head>
+    <!-- =========================
+         Basic
+    ========================== -->
     <meta charset="UTF-8" />
-    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Med Core | منصة التعليم الطبي</title>
-    <meta name="description" content="منصة Med Core التعليمية لطلاب كليات الطب وطب الأسنان والصيدلة — كورسات احترافية من نخبة المعلمين." />
-    <meta property="og:title" content="Med Core" />
-    <meta property="og:description" content="منصة تعليمية متخصصة لطلاب الكليات الطبية." />
-    <meta property="og:type" content="website" />
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Arabic:wght@100;200;300;400;500;600;700&display=swap" rel="stylesheet">  </head>
+
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, viewport-fit=cover"
+    />
+
+    <meta
+      name="theme-color"
+      content="#0f172a"
+    />
+
+    <meta
+      name="color-scheme"
+      content="dark light"
+    />
+
+    <meta
+      name="robots"
+      content="index, follow, max-image-preview:large, max-snippet:-1, max-video-preview:-1"
+    />
+
+    <meta
+      name="googlebot"
+      content="index, follow, max-image-preview:large, max-snippet:-1, max-video-preview:-1"
+    />
+
+    <meta
+      name="author"
+      content="Med Core"
+    />
+
+    <meta
+      name="publisher"
+      content="Med Core"
+    />
+
+    <meta
+      name="application-name"
+      content="Med Core"
+    />
+
+    <meta
+      name="keywords"
+      content="Med Core, التعليم الطبي, منصة تعليم طبي, كورسات طبية, طلاب الطب, طب الأسنان, الصيدلة, كورسات طب, تعليم طبي أونلاين, كورسات طبية أونلاين"
+    />
+
+    <!-- =========================
+         Title & Description
+    ========================== -->
+    <title>
+      Med Core | منصة التعليم الطبي لطلاب الطب وطب الأسنان والصيدلة
+    </title>
+
+    <meta
+      name="description"
+      content="Med Core منصة تعليمية طبية متخصصة تساعد طلاب الطب وطب الأسنان والصيدلة على التعلم من خلال كورسات ومحتوى طبي احترافي مقدم من نخبة من المعلمين."
+    />
+
+    <!-- =========================
+         Canonical
+         غيّر الدومين إذا كان الدومين النهائي مختلفًا
+    ========================== -->
+    <link
+      rel="canonical"
+      href="https://med--core.vercel.app/"
+    />
+
+    <!-- =========================
+         Favicons
+    ========================== -->
+    <link
+      rel="icon"
+      type="image/svg+xml"
+      href="/favicon.svg"
+    />
+
+    <link
+      rel="apple-touch-icon"
+      href="/apple-touch-icon.png"
+    />
+
+    <link
+      rel="manifest"
+      href="/site.webmanifest"
+    />
+
+    <!-- =========================
+         Open Graph / Facebook
+    ========================== -->
+    <meta
+      property="og:locale"
+      content="ar_AR"
+    />
+
+    <meta
+      property="og:type"
+      content="website"
+    />
+
+    <meta
+      property="og:site_name"
+      content="Med Core"
+    />
+
+    <meta
+      property="og:title"
+      content="Med Core | منصة التعليم الطبي"
+    />
+
+    <meta
+      property="og:description"
+      content="منصة تعليمية متخصصة لطلاب الطب وطب الأسنان والصيدلة، تقدم كورسات ومحتوى طبي احترافي."
+    />
+
+    <meta
+      property="og:url"
+      content="https://med--core.vercel.app/"
+    />
+
+    <meta
+      property="og:image"
+      content="https://med--core.vercel.app/"
+    />
+
+    <meta
+      property="og:image:width"
+      content="1200"
+    />
+
+    <meta
+      property="og:image:height"
+      content="630"
+    />
+
+    <meta
+      property="og:image:alt"
+      content="Med Core - منصة التعليم الطبي"
+    />
+
+    <!-- =========================
+         Twitter / X
+    ========================== -->
+    <meta
+      name="twitter:card"
+      content="summary_large_image"
+    />
+
+    <meta
+      name="twitter:title"
+      content="Med Core | منصة التعليم الطبي"
+    />
+
+    <meta
+      name="twitter:description"
+      content="منصة تعليمية متخصصة لطلاب الطب وطب الأسنان والصيدلة."
+    />
+
+    <meta
+      name="twitter:image"
+      content="https://med--core.vercel.app/favicon.svg"
+    />
+
+    <meta
+      name="twitter:image:alt"
+      content="Med Core - منصة التعليم الطبي"
+    />
+
+    <!-- =========================
+         Fonts
+    ========================== -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link
+      rel="preconnect"
+      href="https://fonts.gstatic.com"
+      crossorigin
+    />
+
+    <link
+      href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Arabic:wght@100;200;300;400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
+
+    <!-- =========================
+         Structured Data - Organization
+    ========================== -->
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "EducationalOrganization",
+        "name": "Med Core",
+        "alternateName": "MedCore",
+        "url": "https://med--core.vercel.app/",
+        "logo": "https://med--core.vercel.app/favicon.svg",
+        "description": "منصة تعليمية طبية متخصصة لطلاب الطب وطب الأسنان والصيدلة.",
+        "sameAs": []
+      }
+    </script>
+
+    <!-- =========================
+         Structured Data - Website
+    ========================== -->
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "WebSite",
+        "name": "Med Core",
+        "alternateName": "منصة Med Core للتعليم الطبي",
+        "url": "https://med--core.vercel.app/",
+        "inLanguage": "ar"
+      }
+    </script>
+  </head>
+
   <body>
     <div id="root"></div>
-    <script type="module" src="/src/main.tsx"></script>
+
+    <noscript>
+      <div>
+        تحتاج إلى تفعيل JavaScript لاستخدام منصة Med Core التعليمية.
+      </div>
+    </noscript>
+
+    <script
+      type="module"
+      src="/src/main.tsx"
+    ></script>
   </body>
 </html>
+```
