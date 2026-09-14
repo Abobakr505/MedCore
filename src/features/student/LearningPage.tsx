@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { useParams, Link } from "react-router-dom";
-import { motion } from "framer-motion";
+import { motion, AnimatePresence } from "framer-motion";
 import {
-  CheckCircle2, Circle, ChevronRight, ChevronLeft, PlayCircle, Lock, Menu, X, ClipboardList,
+  CheckCircle2, Circle, ChevronRight, ChevronLeft, Lock, Menu, X, ClipboardList, ListVideo,
 } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { Skeleton } from "@/components/ui/Skeleton";
@@ -106,6 +106,7 @@ export default function LearningPage() {
     if (prev) setActiveLesson(prev);
   };
 
+  const isActiveDone = activeLesson ? !!progressMap[activeLesson.id]?.completed : false;
   const completedCount = allLessons.filter((l) => progressMap[l.id]?.completed).length;
   const courseProgress = computeCourseProgress(allLessons.length, completedCount);
 
@@ -121,12 +122,23 @@ export default function LearningPage() {
 
   return (
     <div className="flex h-screen flex-col bg-slate-50">
-      <header className="flex h-14 items-center justify-between border-b border-slate-100 bg-white px-4">
+      <header className="flex h-14 shrink-0 items-center justify-between border-b border-slate-100 bg-white px-4 shadow-sm">
         <div className="flex items-center gap-3 min-w-0">
-          <Link to="/app/student/courses" className="text-slate-400 hover:text-brand-500"><ChevronRight className="w-5 h-5" /></Link>
-          <p className="truncate font-bold text-slate-800">{course.title}</p>
+          <Link to="/app/student/courses" className="text-slate-400 hover:text-brand-500 transition-colors">
+            <ChevronRight className="w-5 h-5" />
+          </Link>
+          <div className="min-w-0">
+            <p className="truncate font-bold text-slate-800 leading-tight">{course.title}</p>
+            <p className="text-[11px] text-slate-400">{completedCount} / {allLessons.length} درس مكتمل</p>
+          </div>
         </div>
-        <button className="lg:hidden" onClick={() => setSidebarOpen(!sidebarOpen)}>
+        <div className="hidden items-center gap-2 sm:flex">
+          <div className="h-1.5 w-28 overflow-hidden rounded-full bg-slate-100">
+            <div className="h-full rounded-full bg-brand-500 transition-all" style={{ width: `${courseProgress}%` }} />
+          </div>
+          <span className="text-xs font-bold text-brand-500">{courseProgress}%</span>
+        </div>
+        <button className="lg:hidden text-slate-500" onClick={() => setSidebarOpen(!sidebarOpen)}>
           {sidebarOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
         </button>
       </header>
@@ -146,8 +158,17 @@ export default function LearningPage() {
           </div>
 
           <div className="mx-auto max-w-5xl p-6">
-            <h2 className="text-xl font-bold text-slate-800">{activeLesson?.title}</h2>
-            <p className="mt-2 text-sm text-slate-500 leading-relaxed">{activeLesson?.description}</p>
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <h2 className="text-xl font-bold text-slate-800">{activeLesson?.title}</h2>
+                <p className="mt-2 text-sm text-slate-500 leading-relaxed">{activeLesson?.description}</p>
+              </div>
+              {isActiveDone && (
+                <span className="flex shrink-0 items-center gap-1.5 rounded-full bg-emerald-50 px-3 py-1.5 text-xs font-bold text-emerald-600">
+                  <CheckCircle2 className="w-3.5 h-3.5" /> مكتمل
+                </span>
+              )}
+            </div>
 
             <div className="mt-6 flex flex-wrap gap-3">
               <Button variant="outline" onClick={goToPrev} disabled={currentIndex <= 0}>
@@ -156,19 +177,23 @@ export default function LearningPage() {
               <Button variant="outline" onClick={goToNext} disabled={currentIndex >= allLessons.length - 1}>
                 الدرس التالي <ChevronLeft className="w-4 h-4" />
               </Button>
-              <Button onClick={markComplete}>
-                <CheckCircle2 className="w-4 h-4" /> تحديد كمكتمل
+              <Button onClick={markComplete} disabled={isActiveDone}>
+                <CheckCircle2 className="w-4 h-4" /> {isActiveDone ? "تم الإكمال" : "تحديد كمكتمل"}
               </Button>
             </div>
 
             {quizzes.length > 0 && (
-              <div className="mt-8 rounded-2xl border border-brand-100 bg-brand-50/60 p-5">
+              <div className="mt-8 rounded-2xl border border-brand-100 bg-gradient-to-br from-brand-50/80 to-white p-5">
                 <h3 className="flex items-center gap-2 font-bold text-brand-900">
                   <ClipboardList className="w-5 h-5" /> اختبارات هذا الكورس
                 </h3>
                 <div className="mt-3 space-y-2">
                   {quizzes.map((q) => (
-                    <Link key={q.id} to={`/app/student/quizzes/${q.id}`} className="flex items-center justify-between rounded-xl bg-white px-4 py-3 text-sm hover:shadow-sm">
+                    <Link
+                      key={q.id}
+                      to={`/app/student/quizzes/${q.id}`}
+                      className="flex items-center justify-between rounded-xl bg-white px-4 py-3 text-sm shadow-sm hover:shadow-md transition-shadow"
+                    >
                       <span className="font-semibold text-slate-700">{q.title}</span>
                       <span className="text-xs text-slate-400">{q.duration_minutes} دقيقة</span>
                     </Link>
@@ -179,47 +204,62 @@ export default function LearningPage() {
           </div>
         </main>
 
-        <aside className={`w-80 shrink-0 border-r border-slate-100 bg-white overflow-y-auto lg:block ${sidebarOpen ? "block absolute inset-y-14 left-0 z-30 shadow-xl" : "hidden"}`}>
-          <div className="p-4 border-b border-slate-100">
-            <div className="flex items-center justify-between text-sm">
-              <span className="font-semibold text-slate-700">تقدّمك في الكورس</span>
-              <span className="font-bold text-brand-500">{courseProgress}%</span>
-            </div>
-            <div className="mt-2 h-2 w-full rounded-full bg-slate-100">
-              <motion.div
-                className="h-2 rounded-full bg-brand-500"
-                initial={{ width: 0 }}
-                animate={{ width: `${courseProgress}%` }}
-                transition={{ duration: 0.6 }}
-              />
-            </div>
-          </div>
-          {sections.map((section) => (
-            <div key={section.id} className="border-b border-slate-50 p-3">
-              <p className="px-2 py-1 text-xs font-bold text-slate-400">{section.title}</p>
-              {section.lessons?.map((lesson) => {
-                const done = progressMap[lesson.id]?.completed;
-                const isActive = lesson.id === activeLesson?.id;
-                return (
-                  <button
-                    key={lesson.id}
-                    onClick={() => {
-                      setActiveLesson(lesson);
-                      setSidebarOpen(false);
-                    }}
-                    className={`flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm transition-colors ${
-                      isActive ? "bg-brand-50 text-brand-900 font-semibold" : "text-slate-600 hover:bg-slate-50"
-                    }`}
-                  >
-                    {done ? <CheckCircle2 className="w-4 h-4 shrink-0 text-emerald-500" /> : <Circle className="w-4 h-4 shrink-0 text-slate-300" />}
-                    <span className="flex-1 truncate text-right">{lesson.title}</span>
-                    <span className="shrink-0 text-xs text-slate-400">{formatDuration(lesson.duration_seconds)}</span>
-                  </button>
-                );
-              })}
-            </div>
-          ))}
-        </aside>
+        <AnimatePresence>
+          {(sidebarOpen || true) && (
+            <aside
+              className={`w-80 shrink-0 border-r border-slate-100 bg-white overflow-y-auto lg:block ${
+                sidebarOpen ? "block absolute inset-y-14 left-0 z-30 shadow-xl" : "hidden"
+              }`}
+            >
+              <div className="sticky top-0 z-10 bg-white p-4 border-b border-slate-100">
+                <div className="flex items-center gap-2 text-sm font-semibold text-slate-700">
+                  <ListVideo className="w-4 h-4 text-brand-500" /> محتوى الكورس
+                </div>
+                <div className="mt-3 flex items-center justify-between text-sm">
+                  <span className="text-slate-500">تقدّمك في الكورس</span>
+                  <span className="font-bold text-brand-500">{courseProgress}%</span>
+                </div>
+                <div className="mt-2 h-2 w-full rounded-full bg-slate-100">
+                  <motion.div
+                    className="h-2 rounded-full bg-gradient-to-l from-brand-500 to-brand-900"
+                    initial={{ width: 0 }}
+                    animate={{ width: `${courseProgress}%` }}
+                    transition={{ duration: 0.6 }}
+                  />
+                </div>
+              </div>
+              {sections.map((section) => (
+                <div key={section.id} className="border-b border-slate-50 p-3">
+                  <p className="px-2 py-1 text-xs font-bold text-slate-400">{section.title}</p>
+                  {section.lessons?.map((lesson) => {
+                    const done = progressMap[lesson.id]?.completed;
+                    const isActive = lesson.id === activeLesson?.id;
+                    return (
+                      <button
+                        key={lesson.id}
+                        onClick={() => {
+                          setActiveLesson(lesson);
+                          setSidebarOpen(false);
+                        }}
+                        className={`flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm transition-colors ${
+                          isActive ? "bg-brand-50 text-brand-900 font-semibold ring-1 ring-brand-100" : "text-slate-600 hover:bg-slate-50"
+                        }`}
+                      >
+                        {done ? (
+                          <CheckCircle2 className="w-4 h-4 shrink-0 text-emerald-500" />
+                        ) : (
+                          <Circle className="w-4 h-4 shrink-0 text-slate-300" />
+                        )}
+                        <span className="flex-1 truncate text-right">{lesson.title}</span>
+                        <span className="shrink-0 text-xs text-slate-400">{formatDuration(lesson.duration_seconds)}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              ))}
+            </aside>
+          )}
+        </AnimatePresence>
       </div>
     </div>
   );
