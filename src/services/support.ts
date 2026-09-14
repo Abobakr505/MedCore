@@ -1,6 +1,15 @@
 import { supabase } from "@/lib/supabase";
 import type { SupportTicket, TicketMessage, TicketCategory } from "@/types";
 
+export interface ContactMessage {
+  id: string;
+  name: string;
+  email: string;
+  message: string;
+  status: "new" | "read" | "replied";
+  created_at: string;
+}
+
 export async function fetchMyTickets(userId: string) {
   const { data, error } = await supabase
     .from("support_tickets")
@@ -49,5 +58,47 @@ export async function updateTicketStatus(ticketId: string, status: string) {
 
 export async function updateTicketPriority(ticketId: string, priority: string) {
   const { error } = await supabase.from("support_tickets").update({ priority }).eq("id", ticketId);
+  if (error) throw error;
+}
+
+// ===== رسائل صفحة التواصل =====
+
+export async function sendContactMessage(data: {
+  name: string;
+  email: string;
+  message: string;
+}) {
+  const { error } = await supabase.from("contact_messages").insert({
+    name: data.name,
+    email: data.email,
+    message: data.message,
+  });
+  if (error) throw error;
+}
+
+export async function fetchContactMessages(status?: string) {
+  let query = supabase
+    .from("contact_messages")
+    .select("*")
+    .order("created_at", { ascending: false });
+  if (status) query = query.eq("status", status);
+  const { data, error } = await query;
+  if (error) throw error;
+  return (data ?? []) as ContactMessage[];
+}
+
+export async function markContactMessageAsRead(id: string) {
+  const { error } = await supabase
+    .from("contact_messages")
+    .update({ status: "read" })
+    .eq("id", id);
+  if (error) throw error;
+}
+
+export async function markContactMessageAsReplied(id: string) {
+  const { error } = await supabase
+    .from("contact_messages")
+    .update({ status: "replied" })
+    .eq("id", id);
   if (error) throw error;
 }

@@ -15,6 +15,7 @@ import {
 import { Input } from "@/components/ui/Input";
 import { Button } from "@/components/ui/Button";
 import { useToast } from "@/contexts/ToastContext";
+import { sendContactMessage } from "@/services/support";
 
 const contactInfo = [
   {
@@ -104,21 +105,29 @@ export default function ContactPage() {
   const { showToast } = useToast();
   const [loading, setLoading] = useState(false);
 
-  const onSubmit = (e: React.FormEvent<HTMLFormElement>) => {
-    e.preventDefault();
+const onSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
+  e.preventDefault();
+  setLoading(true);
 
-    setLoading(true);
+  const form = e.currentTarget;
+  const formData = new FormData(form);
 
-    setTimeout(() => {
-      setLoading(false);
-      showToast(
-        "تم إرسال رسالتك بنجاح، سنتواصل معك قريبًا",
-        "success"
-      );
+  try {
+    await sendContactMessage({
+      name: formData.get("name") as string,
+      email: formData.get("email") as string,
+      message: formData.get("message") as string,
+    });
 
-      e.currentTarget.reset();
-    }, 900);
-  };
+    showToast("تم إرسال رسالتك بنجاح، سنتواصل معك قريبًا", "success");
+    form.reset();
+  }  catch (err) {
+  console.error("Contact form error:", err);
+  showToast("حدث خطأ أثناء الإرسال، حاول مرة أخرى", "error");
+}finally {
+    setLoading(false);
+  }
+};
 
   return (
     <div className="relative min-h-screen overflow-hidden bg-gradient-to-b from-brand-50 via-white to-white pb-20">
@@ -271,12 +280,14 @@ export default function ContactPage() {
                 <div className="grid gap-5 sm:grid-cols-2">
                   <Input
                     label="الاسم"
+                     name="name"
                     required
                     placeholder="اسمك الكامل"
                   />
 
                   <Input
                     label="البريد الإلكتروني"
+                    name="email"
                     type="email"
                     required
                     placeholder="example@medcore.app"
@@ -291,6 +302,7 @@ export default function ContactPage() {
                   <textarea
                     required
                     rows={7}
+                    name="message"
                     className="w-full resize-none rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm leading-7 text-slate-800 outline-none transition placeholder:text-slate-400 focus:border-brand-500 focus:bg-white focus:ring-4 focus:ring-brand-500/10"
                     placeholder="اكتب رسالتك أو استفسارك هنا..."
                   />

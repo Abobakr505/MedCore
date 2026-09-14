@@ -24,6 +24,7 @@ import {
   ChevronLeft,
   Bell,
   Sparkles,
+  Mail,
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import clsx from "clsx";
@@ -63,6 +64,7 @@ const ADMIN_NAV: NavItem[] = [
   { to: "/app/admin/enrollments", label: "الاشتراكات", icon: ListChecks },
   { to: "/app/admin/tickets", label: "الشكاوى والدعم", icon: Ticket },
   { to: "/app/admin/devices", label: "الأجهزة", icon: Smartphone },
+  { to: "/app/admin/messages",label: "رسائل التواصل",  icon: Mail },
   { to: "/app/admin/reports", label: "التقارير", icon: BarChart3 },
   { to: "/app/admin/settings", label: "الإعدادات", icon: Settings },
 ];

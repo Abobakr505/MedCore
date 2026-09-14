@@ -17,6 +17,7 @@ import {
   Clock3,
   CircleDollarSign,
   BarChart3,
+  Mail,
 } from "lucide-react";
 import { Card } from "@/components/ui/Card";
 import { Skeleton } from "@/components/ui/Skeleton";
@@ -408,6 +409,7 @@ function AdminHome() {
         {[
           { label: "الطلاب", href: "/app/admin/students", icon: GraduationCap },
           { label: "الكورسات", href: "/app/admin/courses", icon: FileStack },
+          { label: "رسائل التواصل", href: "/app/admin/messages", icon: Mail },
           { label: "التقارير", href: "/app/admin/reports", icon: BarChart3 },
         ].map(({ label, href, icon: Icon }) => (
           <Link key={label} to={href} className="rounded-[22px] border border-slate-200 bg-white p-4 shadow-soft transition hover:-translate-y-0.5 hover:shadow-md">

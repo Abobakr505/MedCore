@@ -83,3 +83,97 @@ export async function fetchDashboardStats(): Promise<DashboardStats> {
     activeEnrollments: enrollments.count ?? 0,
   };
 }
+
+export interface MonthlyStat {
+  month: string;
+  users: number;
+  revenue: number;
+}
+
+export interface TeacherPerformance {
+  name: string;
+  students: number;
+  revenue: number;
+}
+
+const ARABIC_MONTHS = [
+  "يناير", "فبراير", "مارس", "أبريل", "مايو", "يونيو",
+  "يوليو", "أغسطس", "سبتمبر", "أكتوبر", "نوفمبر", "ديسمبر",
+];
+
+function lastNMonthsKeys(n: number) {
+  const keys: { key: string; label: string }[] = [];
+  const now = new Date();
+  for (let i = n - 1; i >= 0; i--) {
+    const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+    keys.push({ key: `${d.getFullYear()}-${d.getMonth()}`, label: ARABIC_MONTHS[d.getMonth()] });
+  }
+  return keys;
+}
+
+export async function fetchMonthlyGrowth(months = 6): Promise<MonthlyStat[]> {
+  const buckets = lastNMonthsKeys(months);
+  const fromDate = new Date();
+  fromDate.setMonth(fromDate.getMonth() - (months - 1));
+  fromDate.setDate(1);
+
+  const [{ data: users, error: usersErr }, { data: payments, error: paymentsErr }] =
+    await Promise.all([
+      supabase
+        .from("profiles")
+        .select("created_at")
+        .gte("created_at", fromDate.toISOString()),
+      supabase
+        .from("payments")
+        .select("created_at, amount, status")
+        .eq("status", "approved")
+        .gte("created_at", fromDate.toISOString()),
+    ]);
+
+  if (usersErr) throw usersErr;
+  if (paymentsErr) throw paymentsErr;
+
+  const usersMap = new Map<string, number>();
+  const revenueMap = new Map<string, number>();
+
+  (users ?? []).forEach((u: any) => {
+    const d = new Date(u.created_at);
+    const key = `${d.getFullYear()}-${d.getMonth()}`;
+    usersMap.set(key, (usersMap.get(key) ?? 0) + 1);
+  });
+
+  (payments ?? []).forEach((p: any) => {
+    const d = new Date(p.created_at);
+    const key = `${d.getFullYear()}-${d.getMonth()}`;
+    revenueMap.set(key, (revenueMap.get(key) ?? 0) + Number(p.amount));
+  });
+
+  return buckets.map(({ key, label }) => ({
+    month: label,
+    users: usersMap.get(key) ?? 0,
+    revenue: revenueMap.get(key) ?? 0,
+  }));
+}
+
+export async function fetchTeacherPerformance(limit = 6): Promise<TeacherPerformance[]> {
+  const { data: courses, error } = await supabase
+    .from("courses")
+    .select("students_count, price, teacher:profiles!courses_teacher_id_fkey(full_name)");
+
+  if (error) throw error;
+
+  const map = new Map<string, { students: number; revenue: number }>();
+
+  (courses ?? []).forEach((c: any) => {
+    const teacherName = c.teacher?.full_name ?? "غير معروف";
+    const current = map.get(teacherName) ?? { students: 0, revenue: 0 };
+    current.students += c.students_count ?? 0;
+    current.revenue += (c.students_count ?? 0) * (c.price ?? 0);
+    map.set(teacherName, current);
+  });
+
+  return Array.from(map.entries())
+    .map(([name, v]) => ({ name, ...v }))
+    .sort((a, b) => b.revenue - a.revenue)
+    .slice(0, limit);
+}

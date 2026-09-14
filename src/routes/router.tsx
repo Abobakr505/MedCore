@@ -52,6 +52,7 @@ import SupportPage from "@/features/support/SupportPage";
 import TicketDetailPage from "@/features/support/TicketDetailPage";
 
 import NotFoundPage from "@/features/NotFoundPage";
+import ContactMessagesAdminPage from "@/features/admin/ContactMessagesAdminPage";
 
 export const router = createBrowserRouter([
   {
@@ -116,6 +117,7 @@ export const router = createBrowserRouter([
       { path: "admin/students", element: <StudentsAdminPage /> },
       { path: "admin/teachers", element: <TeachersAdminPage /> },
       { path: "admin/courses", element: <CoursesAdminPage /> },
+      { path: "admin/messages", element: <ContactMessagesAdminPage /> },
       { path: "admin/payments", element: <PaymentsAdminPage /> },
       { path: "admin/enrollments", element: <EnrollmentsAdminPage /> },
       { path: "admin/tickets", element: <TicketsAdminPage /> },

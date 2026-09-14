@@ -1,5 +1,5 @@
 export function formatCurrency(amount: number): string {
-  return new Intl.NumberFormat("ar-EG", { style: "currency", currency: "SAR", maximumFractionDigits: 0 }).format(amount);
+  return new Intl.NumberFormat("ar-EG", { style: "currency", currency: "EGP", maximumFractionDigits: 0 }).format(amount);
 }
 
 export function formatDate(dateStr: string | null | undefined): string {
