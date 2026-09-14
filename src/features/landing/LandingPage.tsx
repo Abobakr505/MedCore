@@ -4,7 +4,7 @@ import { motion } from "framer-motion";
 import {
   Stethoscope,
   Pill,
-  Bone,
+  ToothbrushSparkles,
   ArrowLeft,
   ShieldCheck,
   Video,
@@ -33,6 +33,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { fetchStudentEnrollments } from "@/services/enrollments";
 import { fetchTeacherCourses } from "@/services/teacherCourses";
 import type { Course, Enrollment } from "@/types";
+import { fetchCourses } from "@/services/courses";
 
 /* =========================================================
    Animation System
@@ -469,7 +470,7 @@ function HeroSection() {
                       value: "كورسات متقدمة",
                     },
                     {
-                      icon: Bone,
+                      icon: ToothbrushSparkles,
                       label: "طب أسنان",
                       value: "محتوى عملي",
                     },
@@ -723,7 +724,7 @@ const COLLEGES = [
     gradient: "from-brand-500 to-cyan-500",
   },
   {
-    icon: Bone,
+    icon: ToothbrushSparkles,
     title: "طب أسنان",
     desc: "محتوى عملي ومنظم يساعدك على بناء أساس قوي.",
     value: "dentistry",
@@ -972,35 +973,54 @@ function WhyMedCoreSection() {
 /* =========================================================
    Featured Courses
 ========================================================= */
-
 function FeaturedCoursesSection() {
-  const courses = [
-    {
-      title: "أساسيات علم التشريح",
-      teacher: "د. محمد علي",
-      college: "طب بشري",
-      price: 250,
-      icon: Stethoscope,
-      gradient: "from-brand-500 to-cyan-500",
-    },
-    {
-      title: "تقويم الأسنان للمبتدئين",
-      teacher: "د. لمى حسن",
-      college: "طب أسنان",
-      price: 300,
-      icon: Bone,
-      gradient: "from-violet-500 to-brand-500",
-    },
-    {
-      title: "علم الأدوية التطبيقي",
-      teacher: "د. يوسف كريم",
-      college: "صيدلة",
-      price: 220,
-      icon: Pill,
-      gradient: "from-emerald-500 to-teal-500",
-    },
-  ];
+  const [courses, setCourses] = useState<Course[]>([]);
+  const [loading, setLoading] = useState(true);
 
+  useEffect(() => {
+    let active = true;
+
+    fetchCourses({ sort: "popular", page: 1, pageSize: 3 })
+      .then(({ courses: fetchedCourses }) => {
+        if (!active) return;
+        setCourses(fetchedCourses);
+      })
+      .catch((error) => {
+        console.error("[FeaturedCoursesSection] fetchCourses error:", error);
+        if (active) setCourses([]);
+      })
+      .finally(() => {
+        if (active) setLoading(false);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  type CollegeMeta = {
+  icon: typeof Stethoscope;
+  gradient: string;
+  label: string;
+};
+
+const collegeMeta: Record<string, CollegeMeta> = {
+  medicine: {
+    icon: Stethoscope,
+    gradient: "from-brand-500 to-cyan-500",
+    label: "طب بشري",
+  },
+  dentistry: {
+    icon: ToothbrushSparkles,
+    gradient: "from-violet-500 to-brand-500",
+    label: "طب أسنان",
+  },
+  pharmacy: {
+    icon: Pill,
+    gradient: "from-emerald-500 to-teal-500",
+    label: "صيدلة",
+  },
+};
   return (
     <section className="bg-white px-5 py-24 sm:px-6">
       <div className="mx-auto max-w-7xl">
@@ -1011,70 +1031,93 @@ function FeaturedCoursesSection() {
         />
 
         <div className="mt-12 grid gap-6 md:grid-cols-3">
-          {courses.map((course, index) => (
-            <motion.article
-              key={course.title}
-              initial="hidden"
-              whileInView="show"
-              viewport={{ once: true }}
-              custom={index}
-              variants={fadeUp}
-              whileHover={{ y: -8 }}
-              className="group overflow-hidden rounded-[2rem] border border-slate-100 bg-white shadow-sm transition-all hover:shadow-[0_25px_70px_rgba(12,70,60,0.10)]"
-            >
+          {loading ? (
+            Array.from({ length: 3 }).map((_, index) => (
               <div
-                className={`relative flex h-52 items-center justify-center overflow-hidden bg-gradient-to-br ${course.gradient}`}
-              >
-                <div className="absolute -right-10 -top-10 h-40 w-40 rounded-full bg-white/10" />
-                <div className="absolute -bottom-16 -left-8 h-44 w-44 rounded-full bg-black/10" />
+                key={index}
+                className="h-[380px] animate-pulse rounded-[2rem] border border-slate-100 bg-slate-50"
+              />
+            ))
+          ) : courses.length === 0 ? (
+            <div className="col-span-full rounded-[2rem] border border-slate-100 bg-slate-50 p-10 text-center text-sm text-slate-400">
+              لا توجد كورسات متاحة حاليًا
+            </div>
+          ) : (
+            courses.map((course, index) => {
+              const meta = collegeMeta[course.college as string];
+              const Icon = meta?.icon ?? Stethoscope;
+              const gradient = meta?.gradient ?? "from-brand-500 to-cyan-500";
+              const collegeLabel = meta?.label ?? "تخصص طبي";
+              const teacherName = course.teacher?.full_name;
 
-                <motion.div
-                  whileHover={{ scale: 1.12, rotate: 4 }}
-                  className="relative grid h-20 w-20 place-items-center rounded-3xl border border-white/20 bg-white/10 text-white shadow-2xl backdrop-blur"
+              return (
+                <motion.article
+                  key={course.id}
+                  initial="hidden"
+                  whileInView="show"
+                  viewport={{ once: true }}
+                  custom={index}
+                  variants={fadeUp}
+                  whileHover={{ y: -8 }}
+                  className="group overflow-hidden rounded-[2rem] border border-slate-100 bg-white shadow-sm transition-all hover:shadow-[0_25px_70px_rgba(12,70,60,0.10)]"
                 >
-                  <course.icon className="h-10 w-10" />
-                </motion.div>
+                  <div
+                    className={`relative flex h-52 items-center justify-center overflow-hidden bg-gradient-to-br ${gradient}`}
+                  >
+                    <div className="absolute -right-10 -top-10 h-40 w-40 rounded-full bg-white/10" />
+                    <div className="absolute -bottom-16 -left-8 h-44 w-44 rounded-full bg-black/10" />
 
-                <span className="absolute right-4 top-4 rounded-full bg-white/15 px-3 py-1 text-[10px] font-bold text-white backdrop-blur">
-                  مميز
-                </span>
-              </div>
+                    <motion.div
+                      whileHover={{ scale: 1.12, rotate: 4 }}
+                      className="relative grid h-20 w-20 place-items-center rounded-3xl border border-white/20 bg-white/10 text-white shadow-2xl backdrop-blur"
+                    >
+                      <Icon className="h-10 w-10" />
+                    </motion.div>
 
-              <div className="p-6">
-                <span className="text-xs font-bold text-brand-500">
-                  {course.college}
-                </span>
-
-                <h3 className="mt-2 text-lg font-black text-slate-900">
-                  {course.title}
-                </h3>
-
-                <p className="mt-2 flex items-center gap-2 text-xs text-slate-400">
-                  <GraduationCap className="h-4 w-4" />
-                  {course.teacher}
-                </p>
-
-                <div className="mt-6 flex items-center justify-between border-t border-slate-100 pt-5">
-                  <div>
-                    <span className="text-xl font-black text-slate-900">
-                      {course.price}
-                    </span>
-                    <span className="mr-1 text-xs text-slate-400">
-                      ر.س
+                    <span className="absolute right-4 top-4 rounded-full bg-white/15 px-3 py-1 text-[10px] font-bold text-white backdrop-blur">
+                      مميز
                     </span>
                   </div>
 
-                  <Link
-                    to="/courses"
-                    className="group/link inline-flex items-center gap-1 text-xs font-bold text-brand-600"
-                  >
-                    التفاصيل
-                    <ChevronLeft className="h-4 w-4 transition-transform group-hover/link:-translate-x-1" />
-                  </Link>
-                </div>
-              </div>
-            </motion.article>
-          ))}
+                  <div className="p-6">
+                    <span className="text-xs font-bold text-brand-500">
+                      {collegeLabel}
+                    </span>
+
+                    <h3 className="mt-2 text-lg font-black text-slate-900">
+                      {course.title}
+                    </h3>
+
+                    {teacherName && (
+                      <p className="mt-2 flex items-center gap-2 text-xs text-slate-400">
+                        <GraduationCap className="h-4 w-4" />
+                        {teacherName}
+                      </p>
+                    )}
+
+                    <div className="mt-6 flex items-center justify-between border-t border-slate-100 pt-5">
+                      <div>
+                        <span className="text-xl font-black text-slate-900">
+                          {course.price}
+                        </span>
+                        <span className="mr-1 text-xs text-slate-400">
+                          ر.س
+                        </span>
+                      </div>
+
+                      <Link
+                        to={`/courses/${course.slug ?? course.id}`}
+                        className="group/link inline-flex items-center gap-1 text-xs font-bold text-brand-600"
+                      >
+                        التفاصيل
+                        <ChevronLeft className="h-4 w-4 transition-transform group-hover/link:-translate-x-1" />
+                      </Link>
+                    </div>
+                  </div>
+                </motion.article>
+              );
+            })
+          )}
         </div>
 
         <div className="mt-12 text-center">
@@ -1092,7 +1135,6 @@ function FeaturedCoursesSection() {
     </section>
   );
 }
-
 /* =========================================================
    How It Works
 ========================================================= */

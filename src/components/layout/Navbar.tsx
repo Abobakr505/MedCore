@@ -195,31 +195,44 @@ export function Navbar() {
               {/* Cart */}
 
               {role === "student" && (
-                <Link
-                  to="/app/cart"
-                  className={`group relative grid h-10 w-10 place-items-center rounded-xl transition-all ${
-                    isActive("/app/cart")
-                      ? "bg-brand-50 text-brand-600"
-                      : "text-slate-500 hover:bg-slate-50 hover:text-brand-600"
-                  }`}
-                >
-                  <ShoppingCart className="h-[18px] w-[18px] transition-transform group-hover:scale-110" />
+  <Link
+    to="/app/cart"
+    className={`group relative grid h-10 w-10 place-items-center rounded-xl transition-all ${
+      isActive("/app/cart")
+        ? "bg-brand-50 text-brand-600"
+        : "text-slate-500 hover:bg-slate-50 hover:text-brand-600"
+    }`}
+  >
+    <ShoppingCart className="h-[18px] w-[18px] transition-transform group-hover:scale-110" />
 
-                  <AnimatePresence>
-                    {cartCount > 0 && (
-                      <motion.span
-                        initial={{ scale: 0 }}
-                        animate={{ scale: 1 }}
-                        exit={{ scale: 0 }}
-                        className="absolute -right-1 -top-1 grid min-h-5 min-w-5 place-items-center rounded-full border-2 border-white bg-brand-500 px-1 text-[9px] font-black text-white shadow-md"
-                      >
-                        {cartCount > 99 ? "99+" : cartCount}
-                      </motion.span>
-                    )}
-                  </AnimatePresence>
-                </Link>
-              )}
-
+    <AnimatePresence>
+      {cartCount > 0 && (
+        <motion.span
+          key={cartCount} // يخلي الأنيميشن يشتغل كل مرة العدد يتغيّر
+          initial={{ scale: 0, opacity: 0 }}
+          animate={{ scale: 1, opacity: 1 }}
+          exit={{ scale: 0, opacity: 0 }}
+          transition={{ type: "spring", stiffness: 500, damping: 20 }}
+          className="absolute -right-1.5 -top-1.5 grid min-h-[20px] min-w-[20px] place-items-center rounded-full border-2 border-white bg-gradient-to-br from-brand-500 to-brand-600 px-1 text-[10px] font-black text-white shadow-md shadow-brand-500/40"
+        >
+          {/* هالة نابضة خلف الرقم */}
+          <motion.span
+            className="absolute inset-0 rounded-full bg-brand-400"
+            animate={{ scale: [1, 1.6], opacity: [0.6, 0] }}
+            transition={{
+              duration: 1.4,
+              repeat: Infinity,
+              ease: "easeOut",
+            }}
+          />
+          <span className="relative z-10">
+            {cartCount > 99 ? "99+" : cartCount}
+          </span>
+        </motion.span>
+      )}
+    </AnimatePresence>
+  </Link>
+)}
               {/* User */}
 
               <div className="flex items-center gap-2 rounded-2xl border border-slate-100 bg-slate-50/70 px-2 py-1.5">

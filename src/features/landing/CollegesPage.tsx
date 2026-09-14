@@ -2,7 +2,7 @@ import { motion } from "framer-motion";
 import { Link } from "react-router-dom";
 import {
   Stethoscope,
-  Bone,
+  ToothbrushSparkles,
   Pill,
   ArrowLeft,
   GraduationCap,
@@ -20,7 +20,7 @@ const COLLEGES = [
     topics: ["التشريح", "الفسيولوجي", "الجراحة", "الباطنة"],
   },
   {
-    icon: Bone,
+    icon: ToothbrushSparkles,
     title: "طب أسنان",
     value: "dentistry",
     desc: "كورسات متخصصة في طب الأسنان الترميمي، الجراحي، والتقويمي.",
