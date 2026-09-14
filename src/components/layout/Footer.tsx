@@ -140,7 +140,7 @@ export function Footer() {
               <ContactItem
                 icon={MapPin}
                 label="الموقع"
-                value="المملكة العربية السعودية"
+                value="  سوهاج ، مصر "
               />
             </div>
           </div>

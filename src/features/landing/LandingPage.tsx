@@ -1101,7 +1101,7 @@ const collegeMeta: Record<string, CollegeMeta> = {
                           {course.price}
                         </span>
                         <span className="mr-1 text-xs text-slate-400">
-                          ر.س
+                          ج.م
                         </span>
                       </div>
 
