@@ -99,7 +99,7 @@ export default function ReportsAdminPage() {
                   <XAxis dataKey="month" tick={{ fontSize: 12 }} stroke="#94a3b8" />
                   <YAxis tick={{ fontSize: 12 }} stroke="#94a3b8" allowDecimals={false} />
                   <Tooltip
-                    formatter={(value: number) => [value, "مستخدم جديد"]}
+                    formatter={(value: any) => [value as number, "مستخدم جديد"]}
                     contentStyle={{ direction: "rtl", fontSize: 13, borderRadius: 12 }}
                   />
                   <Line
@@ -131,7 +131,7 @@ export default function ReportsAdminPage() {
                   <XAxis dataKey="month" tick={{ fontSize: 12 }} stroke="#94a3b8" />
                   <YAxis tick={{ fontSize: 12 }} stroke="#94a3b8" />
                   <Tooltip
-                    formatter={(value: number) => [formatCurrency(value), "الإيرادات"]}
+                    formatter={(value: any) => [formatCurrency(value as number), "الإيرادات"]}
                     contentStyle={{ direction: "rtl", fontSize: 13, borderRadius: 12 }}
                   />
                   <Bar dataKey="revenue" fill="#10b981" radius={[6, 6, 0, 0]} />
@@ -167,10 +167,10 @@ export default function ReportsAdminPage() {
                   width={110}
                 />
                 <Tooltip
-                  formatter={(value: number, key: string) => [
-                    key === "revenue" ? formatCurrency(value) : value,
-                    key === "revenue" ? "الإيرادات" : "عدد الطلاب",
-                  ]}
+                  formatter={(value: any, key: any) => [
+                  key === "revenue" ? formatCurrency(Number(value)) : (value as number),
+                  key === "revenue" ? "الإيرادات" : "عدد الطلاب",
+                ]}
                   contentStyle={{ direction: "rtl", fontSize: 13, borderRadius: 12 }}
                 />
                 <Bar dataKey="revenue" fill="#14b8a6" radius={[0, 6, 6, 0]} />
