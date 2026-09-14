@@ -238,7 +238,7 @@ export default function LoginPage() {
 
             {/* Password */}
             <div>
-              <div className="relative">
+              <div className="relative ">
                 <Input
                   label="كلمة المرور"
                   type={showPassword ? "text" : "password"}
