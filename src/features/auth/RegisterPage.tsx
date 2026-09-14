@@ -321,6 +321,7 @@ export default function RegisterPage() {
             {/* Name */}
             <Input
               label="الاسم الكامل"
+              className="bg-white"
               autoComplete="name"
               placeholder="أحمد محمد"
               value={values.fullName ?? ""}
@@ -333,6 +334,7 @@ export default function RegisterPage() {
             {/* Email */}
             <Input
               label="البريد الإلكتروني"
+              className="bg-white"
               type="email"
               inputMode="email"
               autoComplete="email"
@@ -347,6 +349,7 @@ export default function RegisterPage() {
             {/* Phone */}
             <Input
               label="رقم الهاتف"
+              className="bg-white"
               type="tel"
               inputMode="tel"
               autoComplete="tel"
@@ -379,6 +382,7 @@ export default function RegisterPage() {
                 <div className="relative">
                   <Input
                     label="كلمة المرور"
+                    className="bg-white"
                     type={showPassword ? "text" : "password"}
                     autoComplete="new-password"
                     placeholder="••••••••"
@@ -443,6 +447,7 @@ export default function RegisterPage() {
               <div className="relative">
                 <Input
                   label="تأكيد كلمة المرور"
+                  className="bg-white"
                   type={
                     showConfirmPassword ? "text" : "password"
                   }

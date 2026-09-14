@@ -21,13 +21,15 @@ import {
 import { Card } from "@/components/ui/Card";
 import { Skeleton } from "@/components/ui/Skeleton";
 import { useAuth } from "@/contexts/AuthContext";
-import { fetchStudentEnrollments } from "@/services/enrollments";
 import { fetchTeacherCourses } from "@/services/teacherCourses";
 import { fetchTeacherPayments } from "@/services/payments";
 import { fetchDashboardStats, type DashboardStats } from "@/services/admin";
 import type { Enrollment, Course } from "@/types";
 import { CourseCard } from "@/features/courses/CourseCard";
 import { formatCurrency } from "@/utils/format";
+import { fetchStudentEnrollments, fetchLessonProgress, computeCourseProgress } from "@/services/enrollments";
+import { fetchCourseSections } from "@/services/courses";
+import { fetchStudentAttempts } from "@/services/quizzes";
 
 const COLLEGE_LABELS = {
   medicine: "الطب",
@@ -74,6 +76,9 @@ export default function HomePage() {
 function StudentHome() {
   const { profile, session } = useAuth();
   const [enrollments, setEnrollments] = useState<Enrollment[]>([]);
+  const [avgProgress, setAvgProgress] = useState<number>(0);
+  const [passedExamsCount, setPassedExamsCount] = useState<number>(0);
+  const [totalExamsCount, setTotalExamsCount] = useState<number>(0);
   const [loading, setLoading] = useState(true);
 
   const firstName = profile?.full_name?.split(" ")[0] ?? "عزيزي";
@@ -82,7 +87,40 @@ function StudentHome() {
 
   useEffect(() => {
     if (!session?.user) return;
-    fetchStudentEnrollments(session.user.id).then(setEnrollments).finally(() => setLoading(false));
+    const userId = session.user.id;
+
+    (async () => {
+      try {
+        const enrollmentsData = await fetchStudentEnrollments(userId);
+        setEnrollments(enrollmentsData);
+
+        // متوسط التقدم عبر كل الكورسات المسجَّل بها الطالب
+        const progressValues: number[] = [];
+        for (const e of enrollmentsData) {
+          if (!e.course) continue;
+          const sections = await fetchCourseSections(e.course.id);
+          const lessons = sections.flatMap((s) => s.lessons ?? []);
+          const progress = await fetchLessonProgress(userId, lessons.map((l) => l.id));
+          const completed = progress.filter((p) => p.completed).length;
+          progressValues.push(computeCourseProgress(lessons.length, completed));
+        }
+        const avg =
+          progressValues.length > 0
+            ? Math.round(progressValues.reduce((a, b) => a + b, 0) / progressValues.length)
+            : 0;
+        setAvgProgress(avg);
+
+        // الاختبارات المجتازة من إجمالي المحاولات المسلَّمة
+        const attempts = await fetchStudentAttempts(userId);
+        const passed = attempts.filter((a) => a.percentage >= (a.quiz?.passing_score ?? 60)).length;
+        setPassedExamsCount(passed);
+        setTotalExamsCount(attempts.length);
+      } catch (err) {
+        console.error("StudentHome load error:", err);
+      } finally {
+        setLoading(false);
+      }
+    })();
   }, [session?.user?.id]);
 
   return (
@@ -92,7 +130,6 @@ function StudentHome() {
         animate={{ opacity: 1, y: 0 }}
         className={`relative overflow-hidden rounded-[32px] border border-brand-100 bg-gradient-to-br ${accent.panel} p-6 text-white bg-brand-500 shadow-soft ${accent.glow}`}
       >
-        <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_left,rgba(255,255,255,0.22),transparent_28%)]" />
         <div className="relative flex flex-col gap-6 md:flex-row md:items-end md:justify-between">
           <div className="max-w-xl">
             <span className={`inline-flex items-center rounded-full px-3 py-1 text-xs font-bold ring-1 ${accent.badge}`}>
@@ -132,9 +169,61 @@ function StudentHome() {
 
       <div className="grid gap-4 sm:grid-cols-3">
         <StatCard icon={BookOpen} label="كورساتي" value={enrollments.length} color="blue" />
-        <StatCard icon={TrendingUp} label="متوسط التقدّم" value="—" color="green" />
-        <StatCard icon={Award} label="الاختبارات المجتازة" value="—" color="amber" />
+        <StatCard
+          icon={TrendingUp}
+          label="متوسط التقدّم"
+          value={loading ? "—" : `${avgProgress}%`}
+          color="green"
+        />
+        <StatCard
+          icon={Award}
+          label="الاختبارات المجتازة"
+          value={loading ? "—" : `${passedExamsCount}/${totalExamsCount}`}
+          color="amber"
+        />
       </div>
+
+      {/* شريط التقدم الإجمالي */}
+      {!loading && (
+        <motion.section
+          initial={{ opacity: 0, y: 8 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="relative overflow-hidden rounded-[28px] border border-slate-200 bg-white p-6 shadow-soft"
+        >
+          <div className="mb-4 flex items-center justify-between">
+            <div>
+              <h3 className="text-base font-extrabold text-slate-800">تقدّمك الإجمالي</h3>
+              <p className="mt-1 text-xs text-slate-400">
+                {avgProgress >= 80
+                  ? "أداء رائع! أنت قريب جدًا من إتمام كورساتك"
+                  : avgProgress >= 50
+                  ? "استمر! أنت في منتصف الطريق"
+                  : avgProgress > 0
+                  ? "بداية جيدة، واصل التقدّم"
+                  : "ابدأ رحلتك التعليمية الآن"}
+              </p>
+            </div>
+            <span className="text-2xl font-black text-brand-600">{avgProgress}%</span>
+          </div>
+
+          <div className="relative h-4 w-full overflow-hidden rounded-full bg-slate-100">
+            <motion.div
+              initial={{ width: 0 }}
+              animate={{ width: `${avgProgress}%` }}
+              transition={{ duration: 1, ease: "easeOut" }}
+              className="relative h-full rounded-full bg-gradient-to-r from-brand-500 via-brand-600 to-sky-500"
+            >
+              <div className="absolute inset-0 bg-[linear-gradient(110deg,transparent,rgba(255,255,255,0.4),transparent)] bg-[length:200%_100%] animate-[shimmer_2s_infinite]" />
+            </motion.div>
+          </div>
+
+          <div className="mt-3 flex justify-between text-[11px] font-semibold text-slate-400">
+            <span>0%</span>
+            <span>50%</span>
+            <span>100%</span>
+          </div>
+        </motion.section>
+      )}
 
       <section className="rounded-[28px] border border-slate-200 bg-white/80 p-5 shadow-soft backdrop-blur-sm">
         <div className="mb-4 flex items-center justify-between">

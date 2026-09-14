@@ -217,6 +217,7 @@ export default function LoginPage() {
             <div>
               <Input
                 label="البريد الإلكتروني"
+                className="bg-white"
                 type="email"
                 inputMode="email"
                 autoComplete="email"
@@ -241,6 +242,7 @@ export default function LoginPage() {
               <div className="relative ">
                 <Input
                   label="كلمة المرور"
+                  className="bg-white"
                   type={showPassword ? "text" : "password"}
                   autoComplete="current-password"
                   placeholder="••••••••"
