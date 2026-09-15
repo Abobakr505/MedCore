@@ -725,7 +725,7 @@ function TrustBar() {
   const items = [
     { icon: ShieldCheck, text: "محتوى تعليمي موثوق" },
     { icon: Video, text: "تعلم في أي وقت" },
-    { icon: Award, text: "شهادات إتمام" },
+    { icon: Award, text: " متابعة إنجازاتك " },
     { icon: Users, text: "مجتمع طلابي" },
   ];
 
