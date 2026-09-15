@@ -151,7 +151,7 @@ export default function AdminLoginPage() {
         "success"
       );
 
-      navigate("/app/admin/reports", {
+      navigate("/app/admin/home", {
         replace: true,
       });
     } catch (error) {

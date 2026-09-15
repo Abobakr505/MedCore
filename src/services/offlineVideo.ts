@@ -229,7 +229,7 @@ export async function downloadLessonForOffline(
       const reader =
         response.body.getReader();
 
-      const chunks: Uint8Array[] = [];
+      const chunks: BlobPart[] = [];
 
       let received = 0;
 
@@ -242,9 +242,10 @@ export async function downloadLessonForOffline(
         }
 
         if (value) {
-          chunks.push(value);
+          const chunk = new Uint8Array(value);
+          chunks.push(chunk);
 
-          received += value.byteLength;
+          received += chunk.byteLength;
 
           const progress = Math.min(
             100,

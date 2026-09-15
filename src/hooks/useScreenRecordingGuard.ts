@@ -24,7 +24,7 @@ export function useScreenRecordingGuard({ onSuspiciousActivity }: Options) {
     const originalGetDisplayMedia =
       navigator.mediaDevices?.getDisplayMedia?.bind(navigator.mediaDevices);
 
-    if (originalGetDisplayMedia) {
+    if (typeof originalGetDisplayMedia === "function") {
       navigator.mediaDevices.getDisplayMedia = async (...args) => {
         if (!triggeredRef.current) {
           triggeredRef.current = true;
@@ -39,7 +39,7 @@ export function useScreenRecordingGuard({ onSuspiciousActivity }: Options) {
     }
 
     return () => {
-      if (originalGetDisplayMedia) {
+      if (typeof originalGetDisplayMedia === "function") {
         navigator.mediaDevices.getDisplayMedia = originalGetDisplayMedia;
       }
     };

@@ -691,22 +691,19 @@ export default function TicketsAdminPage() {
       {/* Delete Confirmation */}
       <ConfirmDialog
         open={!!deleteTarget}
-        onOpenChange={(open) => {
-          if (!open && !deleting) {
-            setDeleteTarget(null);
-          }
-        }}
         title="حذف التذكرة؟"
         description={
           deleteTarget
             ? `سيتم حذف التذكرة "${deleteTarget.subject || "بدون عنوان"}" نهائيًا. هذا الإجراء لا يمكن التراجع عنه.`
             : "سيتم حذف التذكرة نهائيًا."
         }
-        confirmText={deleting ? "جاري الحذف..." : "حذف التذكرة"}
-        cancelText="إلغاء"
+        confirmLabel={deleting ? "جاري الحذف..." : "حذف التذكرة"}
         onConfirm={handleDelete}
-        loading={deleting}
-        variant="danger"
+        onCancel={() => {
+          if (!deleting) setDeleteTarget(null);
+        }}
+        isLoading={deleting}
+        danger
       />
     </div>
   );
