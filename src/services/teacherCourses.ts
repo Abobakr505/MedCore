@@ -104,27 +104,20 @@ export async function createLesson(params: { sectionId: string; title: string; d
   return data as Lesson;
 }
 
+/**
+ * @deprecated Kept for backward compatibility / any other callers.
+ * The Course Builder page now uploads via a direct XHR call to the Supabase
+ * Storage REST endpoint (see CourseBuilderPage.tsx) so it can report real
+ * upload progress, which supabase-js's `.storage.upload()` does not expose.
+ * New code that needs to attach an already-uploaded video's storage path to
+ * a lesson should call `updateLessonVideoPath` below instead.
+ */
 export async function uploadLessonVideo(
   courseId: string,
   lessonId: string,
   file: File,
   onProgress?: (pct: number) => void
 ) {
-  // 🔍 كود تشخيص مؤقت — امسحه بعد ما تحل مشكلة RLS
-  const { data: { user } } = await supabase.auth.getUser();
-  console.log("🔍 current uid:", user?.id);
-
-  const { data: courseRow, error: courseErr } = await supabase
-    .from("courses")
-    .select("id, teacher_id")
-    .eq("id", courseId)
-    .single();
-
-  console.log("🔍 course row:", courseRow, "| error:", courseErr);
-  console.log("🔍 courseId param received:", courseId);
-  // 🔍 نهاية كود التشخيص
-
-  // التحقق من الملف
   if (!(file instanceof File)) {
     throw new Error("الملف المرفوع غير صالح");
   }
@@ -133,24 +126,16 @@ export async function uploadLessonVideo(
     throw new Error("الفيديو فارغ");
   }
 
-  // التأكد من وجود الامتداد
   const originalExt = file.name.split(".").pop()?.toLowerCase();
-
   const allowedExtensions = ["mp4", "webm", "mov", "m4v"];
 
   if (!originalExt || !allowedExtensions.includes(originalExt)) {
-    throw new Error(
-      "صيغة الفيديو غير مدعومة. استخدم MP4 أو WebM أو MOV"
-    );
+    throw new Error("صيغة الفيديو غير مدعومة. استخدم MP4 أو WebM أو MOV");
   }
 
-  // الأفضل أن يكون MP4 في الإنتاج
   const ext = originalExt;
-
-  // المسار داخل bucket course-videos
   const path = `${courseId}/${lessonId}.${ext}`;
 
-  // تحديد MIME type
   const contentType =
     file.type ||
     ({
@@ -159,16 +144,6 @@ export async function uploadLessonVideo(
       mov: "video/quicktime",
       m4v: "video/x-m4v",
     }[ext] ?? "application/octet-stream");
-
-  console.log("Uploading lesson video:", {
-    bucket: "course-videos",
-    path,
-    name: file.name,
-    type: file.type,
-    contentType,
-    size: file.size,
-    sizeMB: (file.size / 1024 / 1024).toFixed(2),
-  });
 
   const { error: uploadError } = await supabase.storage
     .from("course-videos")
@@ -179,38 +154,51 @@ export async function uploadLessonVideo(
     });
 
   if (uploadError) {
-    console.error("Supabase video upload error:", uploadError);
-
-    throw new Error(
-      `فشل رفع الفيديو: ${uploadError.message}`
-    );
+    throw new Error(`فشل رفع الفيديو: ${uploadError.message}`);
   }
 
   onProgress?.(100);
 
-  // حفظ مسار الفيديو داخل الدرس
-  const { error: updateError } = await supabase
-    .from("lessons")
-    .update({
-      video_path: path,
-    })
-    .eq("id", lessonId);
-
-  if (updateError) {
-    console.error("Lesson video_path update error:", updateError);
-
-    // لو رفع الفيديو نجح لكن تحديث الدرس فشل،
-    // نحاول حذف الفيديو حتى لا يظل ملفًا بدون استخدام.
-    await supabase.storage
-      .from("course-videos")
-      .remove([path]);
-
-    throw new Error(
-      `تم رفع الفيديو لكن تعذر ربطه بالدرس: ${updateError.message}`
-    );
-  }
+  await updateLessonVideoPath(lessonId, path);
 
   return path;
+}
+
+/**
+ * Links an already-uploaded storage path to a lesson row. Used after the
+ * XHR-based upload in CourseBuilderPage.tsx succeeds. If linking fails, the
+ * caller is responsible for deciding whether to remove the orphaned file.
+ */
+export async function updateLessonVideoPath(lessonId: string, path: string) {
+  const { error } = await supabase
+    .from("lessons")
+    .update({ video_path: path })
+    .eq("id", lessonId);
+
+  if (error) {
+    // Best-effort cleanup so we don't leave an orphaned file in storage.
+    await supabase.storage.from("course-videos").remove([path]);
+    throw new Error(`تم رفع الفيديو لكن تعذر ربطه بالدرس: ${error.message}`);
+  }
+}
+
+export async function deleteLessonVideo(lessonId: string, videoPath: string) {
+  const { error: storageError } = await supabase.storage
+    .from("course-videos")
+    .remove([videoPath]);
+
+  if (storageError) {
+    throw new Error(`تعذّر حذف الفيديو من التخزين: ${storageError.message}`);
+  }
+
+  const { error: dbError } = await supabase
+    .from("lessons")
+    .update({ video_path: null })
+    .eq("id", lessonId);
+
+  if (dbError) {
+    throw new Error(`تم حذف الملف لكن تعذر تحديث الدرس: ${dbError.message}`);
+  }
 }
 
 export async function deleteLesson(lessonId: string) {
@@ -239,6 +227,14 @@ export async function updateLessonTitle(lessonId: string, title: string) {
   const { error } = await supabase
     .from("lessons")
     .update({ title })
+    .eq("id", lessonId);
+  if (error) throw error;
+}
+
+export async function updateLessonDescription(lessonId: string, description: string) {
+  const { error } = await supabase
+    .from("lessons")
+    .update({ description })
     .eq("id", lessonId);
   if (error) throw error;
 }

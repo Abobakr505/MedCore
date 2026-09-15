@@ -70,7 +70,9 @@ export async function fetchCourseBySlug(slug: string) {
 export async function fetchCourseSections(courseId: string) {
   const { data, error } = await supabase
     .from("course_sections")
-    .select("*, lessons(id, section_id, title, description, duration_seconds, order_index, is_preview)")
+    .select(
+      "*, lessons(id, section_id, title, description, duration_seconds, order_index, is_preview, video_path)"
+    )
     .eq("course_id", courseId)
     .order("order_index", { ascending: true });
   if (error) throw error;

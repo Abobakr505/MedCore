@@ -15,11 +15,13 @@ import {
   GraduationCap,
   ShieldCheck,
   BookOpen,
+  X,
 } from "lucide-react";
 
 import { Button } from "@/components/ui/Button";
 import { Badge } from "@/components/ui/Badge";
 import { Skeleton } from "@/components/ui/Skeleton";
+import { Modal } from "@/components/ui/Modal";
 
 import {
   fetchCourseBySlug,
@@ -31,7 +33,7 @@ import { addToCart } from "@/services/cart";
 import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/contexts/ToastContext";
 
-import type { Course, CourseSection } from "@/types";
+import type { Course, CourseSection, Lesson } from "@/types";
 import { COLLEGE_LABELS } from "@/types";
 
 import { formatCurrency, formatDuration } from "@/utils/format";
@@ -49,6 +51,7 @@ export default function CourseDetailsPage() {
   const [loading, setLoading] = useState(true);
   const [openSection, setOpenSection] = useState<string | null>(null);
   const [addingToCart, setAddingToCart] = useState(false);
+  const [playingLesson, setPlayingLesson] = useState<Lesson | null>(null);
 
   useEffect(() => {
     if (!slug) return;
@@ -160,6 +163,27 @@ export default function CourseDetailsPage() {
     }
   };
 
+  const handleLessonClick = (lesson: Lesson, accessible: boolean) => {
+    if (!accessible) {
+      showToast("اشترك في الكورس لمشاهدة هذا الدرس", "info");
+      return;
+    }
+
+    if (!lesson.video_path) {
+      showToast("لم يتم رفع فيديو لهذا الدرس بعد", "info");
+      return;
+    }
+
+    // Enrolled students go to the full learning page with progress tracking.
+    // Only free-preview lessons open in this lightweight in-page player.
+    if (enrolled && !lesson.is_preview) {
+      navigate(`/app/student/courses/${course!.id}/learn`);
+      return;
+    }
+
+    setPlayingLesson(lesson);
+  };
+
   if (loading) {
     return (
       <div className="min-h-screen bg-slate-50">
@@ -216,6 +240,10 @@ export default function CourseDetailsPage() {
   const rating = Number(course.rating ?? 0);
   const ratingsCount = Number(course.ratings_count ?? 0);
   const studentsCount = Number(course.students_count ?? 0);
+
+  const playingVideoUrl = playingLesson?.video_path
+    ? getPublicUrl("course-videos", playingLesson.video_path)
+    : null;
 
   return (
     <div className="min-h-screen bg-slate-50">
@@ -478,15 +506,22 @@ export default function CourseDetailsPage() {
                                   enrolled;
 
                                 return (
-                                  <div
+                                  <button
+                                    type="button"
                                     key={lesson.id}
-                                    className="group flex items-center justify-between gap-4 border-b border-slate-50 px-5 py-4 last:border-0 hover:bg-slate-50"
+                                    onClick={() =>
+                                      handleLessonClick(
+                                        lesson,
+                                        accessible
+                                      )
+                                    }
+                                    className="group flex w-full items-center justify-between gap-4 border-b border-slate-50 px-5 py-4 text-right last:border-0 transition hover:bg-slate-50"
                                   >
                                     <div className="flex min-w-0 items-center gap-3">
                                       <div
-                                        className={`grid h-9 w-9 shrink-0 place-items-center rounded-xl ${
+                                        className={`grid h-9 w-9 shrink-0 place-items-center rounded-xl transition ${
                                           accessible
-                                            ? "bg-brand-50 text-brand-600"
+                                            ? "bg-brand-50 text-brand-600 group-hover:bg-brand-600 group-hover:text-white"
                                             : "bg-slate-50 text-slate-300"
                                         }`}
                                       >
@@ -498,7 +533,13 @@ export default function CourseDetailsPage() {
                                       </div>
 
                                       <div className="min-w-0">
-                                        <p className="truncate text-sm font-semibold text-slate-700">
+                                        <p
+                                          className={`truncate text-sm font-semibold ${
+                                            accessible
+                                              ? "text-slate-700 group-hover:text-brand-600"
+                                              : "text-slate-500"
+                                          }`}
+                                        >
                                           {lesson.title}
                                         </p>
 
@@ -515,7 +556,7 @@ export default function CourseDetailsPage() {
                                         lesson.duration_seconds
                                       )}
                                     </span>
-                                  </div>
+                                  </button>
                                 );
                               }
                             )}
@@ -574,6 +615,38 @@ export default function CourseDetailsPage() {
           </aside>
         </div>
       </main>
+
+      {/* Free preview player */}
+      <Modal
+        open={!!playingLesson}
+        onClose={() => setPlayingLesson(null)}
+        title={playingLesson?.title ?? ""}
+      >
+        <div className="space-y-3">
+          {playingVideoUrl ? (
+            <div className="overflow-hidden rounded-2xl bg-black">
+              <video
+                key={playingVideoUrl}
+                src={playingVideoUrl}
+                controls
+                autoPlay
+                className="aspect-video w-full"
+              />
+            </div>
+          ) : (
+            <div className="flex aspect-video items-center justify-center rounded-2xl bg-slate-100 text-sm text-slate-400">
+              لا يوجد فيديو لهذا الدرس بعد
+            </div>
+          )}
+
+          {playingLesson?.is_preview && (
+            <div className="flex items-center gap-2 rounded-xl bg-emerald-50 px-3 py-2 text-xs font-bold text-emerald-600">
+              <CheckCircle2 className="h-3.5 w-3.5" />
+              هذه معاينة مجانية من الكورس
+            </div>
+          )}
+        </div>
+      </Modal>
     </div>
   );
 }
