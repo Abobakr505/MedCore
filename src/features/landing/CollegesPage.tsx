@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import { motion } from "framer-motion";
 import { Link } from "react-router-dom";
 import {
@@ -9,6 +10,7 @@ import {
   Sparkles,
   BookOpen,
 } from "lucide-react";
+import { fetchCourses } from "@/services/courses";
 
 const COLLEGES = [
   {
@@ -16,7 +18,6 @@ const COLLEGES = [
     title: "طب بشري",
     value: "medicine",
     desc: "برامج شاملة تغطي كل مراحل دراسة الطب البشري من العلوم الأساسية إلى التخصصات السريرية.",
-    courses: 120,
     topics: ["التشريح", "الفسيولوجي", "الجراحة", "الباطنة"],
   },
   {
@@ -24,7 +25,6 @@ const COLLEGES = [
     title: "طب أسنان",
     value: "dentistry",
     desc: "كورسات متخصصة في طب الأسنان الترميمي، الجراحي، والتقويمي.",
-    courses: 65,
     topics: ["الترميمي", "التقويم", "جراحة الفم", "اللبية"],
   },
   {
@@ -32,7 +32,6 @@ const COLLEGES = [
     title: "صيدلة",
     value: "pharmacy",
     desc: "من علم الأدوية إلى الكيمياء الصيدلانية والصيدلة السريرية.",
-    courses: 80,
     topics: ["علم الأدوية", "الكيمياء الصيدلانية", "الصيدلة السريرية"],
   },
 ];
@@ -62,6 +61,37 @@ const cardVariants = {
 };
 
 export default function CollegesPage() {
+  const [courseCounts, setCourseCounts] = useState<Record<string, number>>({});
+  const [loadingCounts, setLoadingCounts] = useState(true);
+
+  useEffect(() => {
+    let active = true;
+
+    Promise.all(
+      COLLEGES.map(async (college) => {
+        const { total } = await fetchCourses({
+          college: college.value,
+          page: 1,
+          pageSize: 1,
+        });
+        return [college.value, total] as const;
+      })
+    )
+      .then((results) => {
+        if (active) setCourseCounts(Object.fromEntries(results));
+      })
+      .catch((error) => {
+        console.error("[CollegesPage] fetch course counts error:", error);
+      })
+      .finally(() => {
+        if (active) setLoadingCounts(false);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, []);
+
   return (
     <div className="relative min-h-screen overflow-hidden bg-gradient-to-b from-brand-50 via-white to-white pb-20">
       <div className="pointer-events-none absolute inset-0 overflow-hidden">
@@ -129,7 +159,7 @@ export default function CollegesPage() {
 
                     <div className="text-left">
                       <p className="text-2xl font-black text-brand-900">
-                        {college.courses}+
+                        {loadingCounts ? "..." : courseCounts[college.value] ?? 0}
                       </p>
                       <p className="text-xs text-slate-400">كورس متاح</p>
                     </div>

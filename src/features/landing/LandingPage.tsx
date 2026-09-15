@@ -30,8 +30,13 @@ import {
 
 import { Button } from "@/components/ui/Button";
 import { useAuth } from "@/contexts/AuthContext";
-import { fetchStudentEnrollments } from "@/services/enrollments";
+import {
+  computeCourseProgress,
+  fetchLessonProgress,
+  fetchStudentEnrollments,
+} from "@/services/enrollments";
 import { fetchTeacherCourses } from "@/services/teacherCourses";
+import { fetchCourseSections } from "@/services/courses";
 import type { Course, Enrollment } from "@/types";
 import { fetchCourses } from "@/services/courses";
 
@@ -150,6 +155,10 @@ function HeroSection() {
   const [studentCourses, setStudentCourses] = useState<Enrollment[]>([]);
   const [teacherCourses, setTeacherCourses] = useState<Course[]>([]);
   const [loadingProfileData, setLoadingProfileData] = useState(false);
+  const [studentProgress, setStudentProgress] = useState(0);
+  const [studentCourseProgress, setStudentCourseProgress] = useState<
+    Record<string, { completed: number; total: number }>
+  >({});
 
   useEffect(() => {
     if (!session?.user || !profile) return;
@@ -161,6 +170,41 @@ function HeroSection() {
         if (profile.role === "student") {
           const data = await fetchStudentEnrollments(session.user.id);
           setStudentCourses(data);
+
+          const progressValues: number[] = [];
+          const courseProgress: Record<
+            string,
+            { completed: number; total: number }
+          > = {};
+          for (const enrollment of data) {
+            if (!enrollment.course) continue;
+
+            const sections = await fetchCourseSections(enrollment.course.id);
+            const lessons = sections.flatMap((section) => section.lessons ?? []);
+            const progress = await fetchLessonProgress(
+              session.user.id,
+              lessons.map((lesson) => lesson.id)
+            );
+            const completedLessons = progress.filter((item) => item.completed).length;
+            courseProgress[enrollment.course.id] = {
+              completed: completedLessons,
+              total: lessons.length,
+            };
+
+            progressValues.push(
+              computeCourseProgress(lessons.length, completedLessons)
+            );
+          }
+
+          setStudentCourseProgress(courseProgress);
+          setStudentProgress(
+            progressValues.length > 0
+              ? Math.round(
+                  progressValues.reduce((sum, value) => sum + value, 0) /
+                    progressValues.length
+                )
+              : 0
+          );
         }
 
         if (profile.role === "teacher") {
@@ -501,10 +545,7 @@ function HeroSection() {
                       key={item.id}
                       icon={CheckCircle2}
                       label={item.course?.title ?? "كورس"}
-                      value={`${index + 1} / ${Math.max(
-                        studentCourses.length,
-                        3
-                      )}`}
+                      value={`${studentCourseProgress[item.course_id]?.completed ?? 0} / ${studentCourseProgress[item.course_id]?.total ?? 0}`}
                       index={index}
                     />
                   ))
@@ -557,7 +598,7 @@ function HeroSection() {
                     {isGuest
                       ? "58%"
                       : isStudent
-                      ? "67%"
+                      ? `${studentProgress}%`
                       : isTeacher
                       ? "82%"
                       : "94%"}
@@ -571,7 +612,7 @@ function HeroSection() {
                       width: isGuest
                         ? "58%"
                         : isStudent
-                        ? "67%"
+                        ? `${studentProgress}%`
                         : isTeacher
                         ? "82%"
                         : "94%",

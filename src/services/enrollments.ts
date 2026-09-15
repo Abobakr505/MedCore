@@ -58,3 +58,4 @@ export function computeCourseProgress(totalLessons: number, completedLessons: nu
   if (totalLessons === 0) return 0;
   return Math.round((completedLessons / totalLessons) * 100);
 }
+
