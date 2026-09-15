@@ -249,17 +249,49 @@ useEffect(() => {
             <div className="flex items-center gap-2 sm:gap-3">
 {profile?.role === "student" && (
   <Link
-    to="/app/student/cart"
+    to="/app/cart"
+    className={`group relative grid h-10 w-10 place-items-center rounded-xl transition-all ${
+      location.pathname.startsWith("/app/cart")
+        ? "bg-brand-50 text-brand-600"
+        : "text-slate-500 hover:bg-slate-50 hover:text-brand-600"
+    }`}
     aria-label="السلة"
-    className="relative grid h-10 w-10 place-items-center rounded-xl border border-slate-200 bg-white text-slate-500 shadow-sm transition hover:border-brand-200 hover:bg-brand-50 hover:text-brand-600"
   >
-    <ShoppingCart className="h-[18px] w-[18px]" />
+    <ShoppingCart className="h-[18px] w-[18px] transition-transform group-hover:scale-110" />
 
-    {cartCount > 0 && (
-      <span className="absolute -right-1 -top-1 grid min-h-[18px] min-w-[18px] place-items-center rounded-full bg-brand-500 px-1 text-[9px] font-black text-white ring-2 ring-white">
-        {cartCount > 99 ? "99+" : cartCount}
-      </span>
-    )}
+    <AnimatePresence>
+      {cartCount > 0 && (
+        <motion.span
+          key={cartCount}
+          initial={{ scale: 0, opacity: 0 }}
+          animate={{ scale: 1, opacity: 1 }}
+          exit={{ scale: 0, opacity: 0 }}
+          transition={{
+            type: "spring",
+            stiffness: 500,
+            damping: 20,
+          }}
+          className="absolute -right-1.5 -top-1.5 grid min-h-[20px] min-w-[20px] place-items-center rounded-full border-2 border-white bg-gradient-to-br from-brand-500 to-brand-600 px-1 text-[10px] font-black text-white shadow-md shadow-brand-500/40"
+        >
+          <motion.span
+            className="absolute inset-0 rounded-full bg-brand-400"
+            animate={{
+              scale: [1, 1.6],
+              opacity: [0.6, 0],
+            }}
+            transition={{
+              duration: 1.4,
+              repeat: Infinity,
+              ease: "easeOut",
+            }}
+          />
+
+          <span className="relative z-10">
+            {cartCount > 99 ? "99+" : cartCount}
+          </span>
+        </motion.span>
+      )}
+    </AnimatePresence>
   </Link>
 )}
 
