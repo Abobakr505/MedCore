@@ -4,7 +4,6 @@ import {
   UploadCloud,
   CheckCircle2,
   Copy,
-  Banknote,
   Smartphone,
   CreditCard,
   ExternalLink,
@@ -28,39 +27,31 @@ import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/contexts/ToastContext";
 import type { CartItem } from "@/types";
 import { formatCurrency } from "@/utils/format";
-import { supabase } from "@/lib/supabase";
 
 /**
- * بيانات الدفع البنكي العامة.
+ * بيانات الدفع الثابتة (Orange Cash / InstaPay).
  *
- * Vodafone Cash و InstaPay يتم جلبهما
- * من بيانات المعلم الخاصة بالكورس.
+ * تم إلغاء التحويل البنكي، وتم استبدال Vodafone Cash بـ Orange Cash.
+ * غيّر القيم دي براحتك.
  */
 const PAYMENT_INFO = {
-  bank: {
-    bankName: "البنك الأهلي",
-    accountName: "شركة Med Core التعليمية",
-    accountNumber: "0000000000000000",
+  orange: {
+    number: "01xxxxxxxxx", // TODO: ضع رقم Orange Cash الثابت
   },
 
   instapay: {
+    username: "yourname@instapay", // TODO: ضع عنوان InstaPay الثابت
     link: "https://ipn.eg/",
   },
 };
 
 type PaymentMethod =
-  | "bank"
-  | "vodafone"
+  | "orange"
   | "instapay";
 
 type PurchaseMode =
   | "full"
   | "installment";
-
-type TeacherPayment = {
-  vodafone_number: string | null;
-  instapay_username: string | null;
-};
 
 export default function CheckoutPage() {
   const { session } = useAuth();
@@ -91,17 +82,7 @@ export default function CheckoutPage() {
     useState<string[]>([]);
 
   const [paymentMethod, setPaymentMethod] =
-    useState<PaymentMethod>("vodafone");
-
-  /**
-   * بيانات الدفع الخاصة بالمعلمين.
-   *
-   * المفتاح = teacher_id
-   */
-  const [teacherPayments, setTeacherPayments] =
-    useState<Record<string, TeacherPayment>>(
-      {}
-    );
+    useState<PaymentMethod>("orange");
 
   // =========================
   // Load Cart
@@ -118,16 +99,6 @@ export default function CheckoutPage() {
 
     fetchCart(session.user.id)
       .then((cart) => {
-        console.log(
-          "CHECKOUT CART:",
-          cart
-        );
-
-        console.log(
-          "CHECKOUT FIRST TEACHER:",
-          cart[0]?.course?.teacher_id
-        );
-
         setItems(cart);
       })
       .catch((error) => {
@@ -149,103 +120,6 @@ export default function CheckoutPage() {
   }, [session?.user?.id]);
 
   // =========================
-  // Load Teacher Payment Info
-  // =========================
-
-  useEffect(() => {
-    if (!items.length) {
-      setTeacherPayments({});
-      return;
-    }
-
-    const loadTeacherPayments =
-      async () => {
-        /**
-         * استخراج جميع teacher IDs
-         * الموجودة في السلة.
-         */
-        const teacherIds = [
-          ...new Set(
-            items
-              .map(
-                (item) =>
-                  item.course?.teacher_id
-              )
-              .filter(
-                (
-                  id
-                ): id is string =>
-                  Boolean(id)
-              )
-          ),
-        ];
-
-        console.log(
-          "CHECKOUT TEACHER IDS:",
-          teacherIds
-        );
-
-        if (!teacherIds.length) {
-          setTeacherPayments({});
-          return;
-        }
-
-        const {
-          data,
-          error,
-        } = await supabase
-          .from("profiles")
-          .select(
-            "id, vodafone_number, instapay_username"
-          )
-          .in("id", teacherIds);
-
-        if (error) {
-          console.error(
-            "LOAD TEACHER PAYMENT ERROR:",
-            error
-          );
-
-          setTeacherPayments({});
-          return;
-        }
-
-        console.log(
-          "CHECKOUT TEACHERS PAYMENT DATA:",
-          data
-        );
-
-        const payments: Record<
-          string,
-          TeacherPayment
-        > = {};
-
-        (data ?? []).forEach(
-          (teacher) => {
-            payments[teacher.id] = {
-              vodafone_number:
-                teacher.vodafone_number ??
-                null,
-
-              instapay_username:
-                teacher.instapay_username ??
-                null,
-            };
-          }
-        );
-
-        console.log(
-          "CHECKOUT TEACHER PAYMENTS MAP:",
-          payments
-        );
-
-        setTeacherPayments(payments);
-      };
-
-    loadTeacherPayments();
-  }, [items]);
-
-  // =========================
   // Total
   // =========================
 
@@ -259,27 +133,6 @@ export default function CheckoutPage() {
       ),
     [items]
   );
-
-  // =========================
-  // Active Teacher Payment
-  // =========================
-
-const selectedPaymentCourse =
-  activeItem?.course ?? items[0]?.course ?? null;
-
-const selectedTeacherId =
-  selectedPaymentCourse?.teacher_id ?? null;
-
-const selectedTeacherPayment =
-  selectedTeacherId
-    ? teacherPayments[selectedTeacherId]
-    : null;
-
-const teacherVodafoneNumber =
-  selectedTeacherPayment?.vodafone_number ?? "";
-
-const teacherInstapayUsername =
-  selectedTeacherPayment?.instapay_username ?? "";
 
   // =========================
   // Copy Helper
@@ -321,21 +174,6 @@ const teacherInstapayUsername =
     item: CartItem,
     mode: PurchaseMode
   ) => {
-    console.log(
-      "OPEN PAYMENT:",
-      item
-    );
-
-    console.log(
-      "OPEN PAYMENT COURSE:",
-      item.course
-    );
-
-    console.log(
-      "OPEN PAYMENT TEACHER ID:",
-      item.course?.teacher_id
-    );
-
     setActiveItem(item);
     setFile(null);
     setPurchaseMode(mode);
@@ -591,40 +429,40 @@ const teacherInstapayUsername =
             طرق الدفع المتاحة
           </h2>
 
-          <div className="grid gap-4 md:grid-cols-3">
+          <div className="grid gap-4 sm:grid-cols-2">
 
-            {/* Vodafone */}
+            {/* Orange Cash */}
             <button
               type="button"
               onClick={() =>
                 setPaymentMethod(
-                  "vodafone"
+                  "orange"
                 )
               }
               className={`group rounded-3xl border p-5 text-right transition ${
                 paymentMethod ===
-                "vodafone"
+                "orange"
                   ? "border-brand-500 bg-brand-50 shadow-md ring-2 ring-brand-100"
                   : "border-slate-200 bg-white hover:border-brand-200 hover:shadow-sm"
               }`}
             >
               <div className="flex items-center justify-between">
-                <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-red-50 text-red-500">
+                <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-orange-50 text-orange-500">
                   <Smartphone className="h-6 w-6" />
                 </div>
 
                 {paymentMethod ===
-                  "vodafone" && (
+                  "orange" && (
                   <CheckCircle2 className="h-5 w-5 text-brand-500" />
                 )}
               </div>
 
               <h3 className="mt-4 font-black text-slate-800">
-                Vodafone Cash
+                Orange Cash
               </h3>
 
               <p className="mt-1 text-xs text-slate-500">
-                تحويل مباشر من محفظة فودافون كاش
+                تحويل مباشر من محفظة Orange Cash
               </p>
             </button>
 
@@ -662,38 +500,6 @@ const teacherInstapayUsername =
                 تحويل سريع باستخدام InstaPay
               </p>
             </button>
-
-            {/* Bank */}
-            <button
-              type="button"
-              onClick={() =>
-                setPaymentMethod("bank")
-              }
-              className={`group rounded-3xl border p-5 text-right transition ${
-                paymentMethod === "bank"
-                  ? "border-brand-500 bg-brand-50 shadow-md ring-2 ring-brand-100"
-                  : "border-slate-200 bg-white hover:border-brand-200 hover:shadow-sm"
-              }`}
-            >
-              <div className="flex items-center justify-between">
-                <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-emerald-50 text-emerald-600">
-                  <Banknote className="h-6 w-6" />
-                </div>
-
-                {paymentMethod ===
-                  "bank" && (
-                  <CheckCircle2 className="h-5 w-5 text-brand-500" />
-                )}
-              </div>
-
-              <h3 className="mt-4 font-black text-slate-800">
-                تحويل بنكي
-              </h3>
-
-              <p className="mt-1 text-xs text-slate-500">
-                تحويل مباشر إلى الحساب البنكي
-              </p>
-            </button>
           </div>
         </section>
 
@@ -704,10 +510,7 @@ const teacherInstapayUsername =
             <div className="flex items-center gap-3">
 
               {paymentMethod ===
-              "bank" ? (
-                <Banknote className="h-6 w-6" />
-              ) : paymentMethod ===
-                "vodafone" ? (
+              "orange" ? (
                 <Smartphone className="h-6 w-6" />
               ) : (
                 <CreditCard className="h-6 w-6" />
@@ -716,11 +519,8 @@ const teacherInstapayUsername =
               <div>
                 <h2 className="font-black">
                   {paymentMethod ===
-                  "bank"
-                    ? "بيانات التحويل البنكي"
-                    : paymentMethod ===
-                      "vodafone"
-                    ? "بيانات Vodafone Cash"
+                  "orange"
+                    ? "بيانات Orange Cash"
                     : "بيانات InstaPay"}
                 </h2>
 
@@ -733,22 +533,21 @@ const teacherInstapayUsername =
 
           <div className="p-5 sm:p-6">
 
-            {/* Vodafone */}
+            {/* Orange Cash */}
             {paymentMethod ===
-              "vodafone" && (
+              "orange" && (
               <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
 
                 <div>
                   <p className="text-xs text-slate-400">
-                    رقم Vodafone Cash
+                    رقم Orange Cash
                   </p>
 
                   <p
                     dir="ltr"
                     className="mt-1 text-2xl font-black tracking-wide text-slate-800"
                   >
-                    {teacherVodafoneNumber ||
-                      "لم يحدد المعلم الرقم بعد"}
+                    {PAYMENT_INFO.orange.number}
                   </p>
                 </div>
 
@@ -756,12 +555,9 @@ const teacherInstapayUsername =
                   variant="secondary"
                   onClick={() =>
                     copyText(
-                      teacherVodafoneNumber,
-                      "تم نسخ رقم Vodafone Cash"
+                      PAYMENT_INFO.orange.number,
+                      "تم نسخ رقم Orange Cash"
                     )
-                  }
-                  disabled={
-                    !teacherVodafoneNumber
                   }
                 >
                   <Copy className="h-4 w-4" />
@@ -771,128 +567,45 @@ const teacherInstapayUsername =
             )}
 
             {/* InstaPay */}
-            {paymentMethod ===
-              "instapay" && (
-              <div className="space-y-5">
+            {paymentMethod === "instapay" && (
+              <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                  <p className="text-xs text-slate-400">
+                    InstaPay Address
+                  </p>
 
-                <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                  <p
+                    dir="ltr"
+                    className="mt-1 text-xl font-black text-slate-800"
+                  >
+                    {PAYMENT_INFO.instapay.username}
+                  </p>
+                </div>
 
-                  <div>
-                    <p className="text-xs text-slate-400">
-                      InstaPay Address
-                    </p>
+                <div className="flex gap-2">
+                  <Button
+                    variant="secondary"
+                    onClick={() =>
+                      copyText(
+                        PAYMENT_INFO.instapay.username,
+                        "تم نسخ عنوان InstaPay"
+                      )
+                    }
+                  >
+                    <Copy className="h-4 w-4" />
+                    نسخ
+                  </Button>
 
-                    <p
-                      dir="ltr"
-                      className="mt-1 text-xl font-black text-slate-800"
-                    >
-                      {teacherInstapayUsername ||
-                        "لم يحدد المعلم العنوان بعد"}
-                    </p>
-                  </div>
-
-                  <div className="flex gap-2">
-
-                    <Button
-                      variant="secondary"
-                      onClick={() =>
-                        copyText(
-                          teacherInstapayUsername,
-                          "تم نسخ عنوان InstaPay"
-                        )
-                      }
-                      disabled={
-                        !teacherInstapayUsername
-                      }
-                    >
-                      <Copy className="h-4 w-4" />
-                      نسخ
+                  <a
+                    href={PAYMENT_INFO.instapay.link}
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    <Button variant="secondary">
+                      فتح InstaPay
+                      <ExternalLink className="h-4 w-4" />
                     </Button>
-
-                    <a
-                      href={
-                        PAYMENT_INFO
-                          .instapay
-                          .link
-                      }
-                      target="_blank"
-                      rel="noreferrer"
-                    >
-                      <Button variant="secondary">
-                        فتح InstaPay
-                        <ExternalLink className="h-4 w-4" />
-                      </Button>
-                    </a>
-
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {/* Bank */}
-            {paymentMethod ===
-              "bank" && (
-              <div className="grid gap-5 sm:grid-cols-3">
-
-                <div>
-                  <p className="text-xs text-slate-400">
-                    البنك
-                  </p>
-
-                  <p className="mt-1 font-black text-slate-800">
-                    {
-                      PAYMENT_INFO.bank
-                        .bankName
-                    }
-                  </p>
-                </div>
-
-                <div>
-                  <p className="text-xs text-slate-400">
-                    اسم الحساب
-                  </p>
-
-                  <p className="mt-1 font-black text-slate-800">
-                    {
-                      PAYMENT_INFO.bank
-                        .accountName
-                    }
-                  </p>
-                </div>
-
-                <div>
-                  <p className="text-xs text-slate-400">
-                    رقم الحساب
-                  </p>
-
-                  <div className="mt-1 flex items-center gap-2">
-
-                    <p
-                      dir="ltr"
-                      className="font-black text-slate-800"
-                    >
-                      {
-                        PAYMENT_INFO.bank
-                          .accountNumber
-                      }
-                    </p>
-
-                    <button
-                      type="button"
-                      onClick={() =>
-                        copyText(
-                          PAYMENT_INFO
-                            .bank
-                            .accountNumber,
-                          "تم نسخ رقم الحساب"
-                        )
-                      }
-                      className="rounded-lg p-1.5 text-brand-500 hover:bg-brand-50"
-                    >
-                      <Copy className="h-4 w-4" />
-                    </button>
-
-                  </div>
+                  </a>
                 </div>
               </div>
             )}
@@ -1146,12 +859,9 @@ const teacherInstapayUsername =
 
               <p className="mt-1 text-sm text-brand-700">
                 {paymentMethod ===
-                "vodafone"
-                  ? "Vodafone Cash"
-                  : paymentMethod ===
-                    "instapay"
-                  ? "InstaPay"
-                  : "تحويل بنكي"}
+                "orange"
+                  ? "Orange Cash"
+                  : "InstaPay"}
               </p>
 
               <p className="mt-2 text-xs font-bold text-brand-800">

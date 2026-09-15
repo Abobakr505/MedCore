@@ -20,13 +20,13 @@ import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/contexts/ToastContext";
 import { supabase, getPublicUrl } from "@/lib/supabase";
 import { COLLEGE_LABELS } from "@/types";
+
 interface ProfileFormValues {
   full_name: string;
   phone: string;
   college: string;
-  vodafone_number: string;
-  instapay_username: string;
 }
+
 export default function ProfilePage() {
   const { profile, refreshProfile } = useAuth();
   const { showToast } = useToast();
@@ -37,80 +37,54 @@ export default function ProfilePage() {
       full_name: profile?.full_name ?? "",
       phone: profile?.phone ?? "",
       college: profile?.college ?? "",
-      vodafone_number: profile?.vodafone_number ?? "",
-      instapay_username: profile?.instapay_username ?? "",
     },
   });
   if (!profile) return null;
   const avatarUrl = getPublicUrl("avatars", profile.avatar_url);
-const onSubmit = async (values: ProfileFormValues) => {
-  if (!profile?.id) return;
 
-  setSaving(true);
+  const onSubmit = async (values: ProfileFormValues) => {
+    if (!profile?.id) return;
 
-  try {
-    // 1. تحديث البيانات الشخصية فقط
-    const profileUpdate: {
-      full_name: string;
-      phone: string | null;
-      college: string | null;
-    } = {
-      full_name: values.full_name.trim(),
-      phone: values.phone.trim() || null,
-      college: values.college || null,
-    };
+    setSaving(true);
 
-    const { error: profileError } = await supabase
-      .from("profiles")
-      .update(profileUpdate)
-      .eq("id", profile.id);
-
-    if (profileError) {
-      console.error("PROFILE UPDATE ERROR:", {
-        message: profileError.message,
-        details: profileError.details,
-        hint: profileError.hint,
-        code: profileError.code,
-      });
-
-      throw profileError;
-    }
-
-    // 2. تحديث بيانات الدفع للمدرس فقط
-    if (profile.role === "teacher") {
-      const paymentUpdate = {
-        vodafone_number: values.vodafone_number.trim() || null,
-        instapay_username: values.instapay_username.trim() || null,
+    try {
+      const profileUpdate: {
+        full_name: string;
+        phone: string | null;
+        college: string | null;
+      } = {
+        full_name: values.full_name.trim(),
+        phone: values.phone.trim() || null,
+        college: values.college || null,
       };
 
-      const { error: paymentError } = await supabase
+      const { error: profileError } = await supabase
         .from("profiles")
-        .update(paymentUpdate)
+        .update(profileUpdate)
         .eq("id", profile.id);
 
-      if (paymentError) {
-        console.error("PAYMENT INFO UPDATE ERROR:", {
-          message: paymentError.message,
-          details: paymentError.details,
-          hint: paymentError.hint,
-          code: paymentError.code,
+      if (profileError) {
+        console.error("PROFILE UPDATE ERROR:", {
+          message: profileError.message,
+          details: profileError.details,
+          hint: profileError.hint,
+          code: profileError.code,
         });
 
-        throw paymentError;
+        throw profileError;
       }
+
+      await refreshProfile();
+
+      showToast("تم تحديث بياناتك بنجاح", "success");
+    } catch (error) {
+      console.error("PROFILE SAVE FAILED:", error);
+
+      showToast("تعذّر حفظ التعديلات، حاول مرة أخرى", "error");
+    } finally {
+      setSaving(false);
     }
-
-    await refreshProfile();
-
-    showToast("تم تحديث بياناتك بنجاح", "success");
-  } catch (error) {
-    console.error("PROFILE SAVE FAILED:", error);
-
-    showToast("تعذّر حفظ التعديلات، حاول مرة أخرى", "error");
-  } finally {
-    setSaving(false);
-  }
-};
+  };
 
   const handleAvatarUpload = async (file: File) => {
     if (!file.type.startsWith("image/")) {
@@ -320,33 +294,6 @@ const onSubmit = async (values: ProfileFormValues) => {
                 placeholder="01xxxxxxxxx"
               />{" "}
             </div>{" "}
-            {profile.role === "teacher" && (
-              <div className="rounded-2xl border border-brand-100 bg-brand-50/30 p-4">
-                <div className="mb-3">
-                  <p className="text-sm font-black text-slate-800">
-                    بيانات استقبال المدفوعات
-                  </p>
-                  <p className="mt-1 text-xs text-slate-500">
-                    ستظهر هذه البيانات تلقائيًا للطلاب عند الدفع في كورساتك.
-                  </p>
-                </div>
-
-                <div className="grid gap-4 sm:grid-cols-2">
-                  <Input
-                    {...register("vodafone_number")}
-                    type="tel"
-                    dir="ltr"
-                    placeholder="رقم Vodafone Cash"
-                  />
-
-                  <Input
-                    {...register("instapay_username")}
-                    dir="ltr"
-                    placeholder="عنوان InstaPay"
-                  />
-                </div>
-              </div>
-            )}{" "}
             {/* College */}{" "}
             <div className="rounded-2xl border border-slate-100 bg-white p-4 transition-colors focus-within:border-brand-200">
               {" "}
