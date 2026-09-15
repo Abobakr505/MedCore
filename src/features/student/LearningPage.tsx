@@ -23,57 +23,45 @@ import {
   ChevronLeft,
   Menu,
   X,
+  PanelRightClose,
+  PanelRightOpen,
   ClipboardList,
   ListVideo,
   Download,
   Trash2,
   Wifi,
   WifiOff,
-  HardDriveDownload,
-  Loader2,
-  ShieldAlert,
+  FileText,
+  FileImage,
+  FileSpreadsheet,
+  FileArchive,
+  FileVideo,
+  File,
+  FolderOpen,
+  ExternalLink,
+  PlayCircle,
   BookOpen,
-  PanelRightClose,
-  PanelRightOpen,
+  Lock,
+  ArrowRight,
+  ArrowLeft,
+  Loader2,
+  AlertCircle,
+  Trophy,
+  Clock3,
 } from "lucide-react";
 
-import { Button } from "@/components/ui/Button";
-import { Skeleton } from "@/components/ui/Skeleton";
+import { supabase } from "@/lib/supabase";
+import { useAuth } from "@/contexts/AuthContext";
+import { VideoWatermark } from "@/components/video/VideoWatermark";
+import { useScreenRecordingGuard } from "@/hooks/useScreenRecordingGuard";
 
 import {
   fetchCourseBySlugOrId,
-} from "@/services/coursesById";
-
-import {
   fetchCourseSections,
-} from "@/services/courses";
-
-import {
   fetchLessonProgress,
-  upsertLessonProgress,
-  computeCourseProgress,
-} from "@/services/enrollments";
-
-import {
+  updateLessonProgress,
   fetchCourseQuizzes,
-} from "@/services/quizzes";
-
-import {
-  getSignedLessonVideoUrl,
-} from "@/services/video";
-
-import {
-  downloadLessonForOffline,
-  getOfflineVideoSource,
-  isLessonAvailableOffline,
-  removeLessonOffline,
-} from "@/services/offlineVideo";
-
-import { useAuth } from "@/contexts/AuthContext";
-import { useToast } from "@/contexts/ToastContext";
-
-import { VideoWatermark } from "@/components/video/VideoWatermark";
-import { useScreenRecordingGuard } from "@/hooks/useScreenRecordingGuard";
+} from "@/services/courses";
 
 import type {
   Course,
@@ -83,118 +71,1047 @@ import type {
   Quiz,
 } from "@/types";
 
-import { formatDuration } from "@/utils/format";
+/* -------------------------------------------------------------------------- */
+/* Types                                                                      */
+/* -------------------------------------------------------------------------- */
 
-export default function LearningPage() {
-  const {
-    courseId,
-  } = useParams<{
-    courseId: string;
-  }>();
+interface LessonFile {
+  id: string;
+  lesson_id: string;
+  title: string;
+  file_path: string;
+  file_name: string;
+  file_size: number | null;
+  mime_type: string | null;
+  order_index: number;
+  created_at: string;
+}
 
-  const {
-    session,
-  } = useAuth();
+interface LessonWithFiles extends Lesson {
+  files?: LessonFile[];
+}
 
-  const {
-    showToast,
-  } = useToast();
+interface SectionWithLessons extends CourseSection {
+  lessons?: LessonWithFiles[];
+}
 
-  const [
-    course,
-    setCourse,
-  ] = useState<Course | null>(null);
+interface StoredVideo {
+  lessonId: string;
+  blobUrl: string;
+  fileName: string;
+  createdAt: number;
+}
 
-  const [
-    sections,
-    setSections,
-  ] = useState<CourseSection[]>([]);
+interface LessonProgressMap {
+  [lessonId: string]: LessonProgress;
+}
 
-  const [
-    progressMap,
-    setProgressMap,
-  ] = useState<
-    Record<string, LessonProgress>
-  >({});
+/* -------------------------------------------------------------------------- */
+/* Constants                                                                  */
+/* -------------------------------------------------------------------------- */
 
-  const [
-    quizzes,
-    setQuizzes,
-  ] = useState<Quiz[]>([]);
+const FILE_BUCKET = "course-files";
 
-  const [
-    activeLesson,
-    setActiveLesson,
-  ] = useState<Lesson | null>(null);
+const VIDEO_CACHE_PREFIX =
+  "medcore-offline-video-";
 
-  const [
-    videoUrl,
-    setVideoUrl,
-  ] = useState<string | null>(null);
+const VIDEO_CACHE_DB = "medcore-video-cache";
 
-  const [
-    videoError,
-    setVideoError,
-  ] = useState<string | null>(null);
+const VIDEO_CACHE_STORE = "videos";
 
-  const [
-    loading,
-    setLoading,
-  ] = useState(true);
+/* -------------------------------------------------------------------------- */
+/* Helpers                                                                    */
+/* -------------------------------------------------------------------------- */
 
-  const [
-    sidebarOpen,
-    setSidebarOpen,
-  ] = useState(false);
+function formatFileSize(
+  bytes: number | null | undefined
+) {
+  if (!bytes) return "0 KB";
 
-  const [
-    desktopSidebarOpen,
-    setDesktopSidebarOpen,
-  ] = useState(true);
+  if (bytes < 1024) {
+    return `${bytes} B`;
+  }
 
-  const [
-    isOnline,
-    setIsOnline,
-  ] = useState(
-    typeof navigator !== "undefined"
-      ? navigator.onLine
-      : true
+  if (bytes < 1024 * 1024) {
+    return `${(bytes / 1024).toFixed(1)} KB`;
+  }
+
+  if (bytes < 1024 * 1024 * 1024) {
+    return `${(
+      bytes /
+      (1024 * 1024)
+    ).toFixed(1)} MB`;
+  }
+
+  return `${(
+    bytes /
+    (1024 * 1024 * 1024)
+  ).toFixed(1)} GB`;
+}
+
+function getFileIcon(
+  mimeType: string | null,
+  fileName: string
+) {
+  const mime = mimeType?.toLowerCase() ?? "";
+
+  const extension =
+    fileName
+      .split(".")
+      .pop()
+      ?.toLowerCase() ?? "";
+
+  if (
+    mime.includes("pdf") ||
+    extension === "pdf"
+  ) {
+    return FileText;
+  }
+
+  if (
+    mime.includes("image") ||
+    [
+      "png",
+      "jpg",
+      "jpeg",
+      "webp",
+      "gif",
+      "svg",
+    ].includes(extension)
+  ) {
+    return FileImage;
+  }
+
+  if (
+    mime.includes("spreadsheet") ||
+    mime.includes("excel") ||
+    ["xls", "xlsx", "csv"].includes(
+      extension
+    )
+  ) {
+    return FileSpreadsheet;
+  }
+
+  if (
+    mime.includes("video") ||
+    [
+      "mp4",
+      "mov",
+      "avi",
+      "mkv",
+      "webm",
+    ].includes(extension)
+  ) {
+    return FileVideo;
+  }
+
+  if (
+    mime.includes("zip") ||
+    mime.includes("rar") ||
+    ["zip", "rar", "7z"].includes(
+      extension
+    )
+  ) {
+    return FileArchive;
+  }
+
+  return File;
+}
+
+function getFileType(
+  mimeType: string | null,
+  fileName: string
+) {
+  const extension =
+    fileName
+      .split(".")
+      .pop()
+      ?.toUpperCase() ?? "FILE";
+
+  if (mimeType?.includes("pdf"))
+    return "PDF";
+
+  if (mimeType?.includes("word"))
+    return "Word";
+
+  if (mimeType?.includes("excel"))
+    return "Excel";
+
+  if (mimeType?.includes("powerpoint"))
+    return "PowerPoint";
+
+  if (mimeType?.includes("image"))
+    return "صورة";
+
+  if (mimeType?.includes("video"))
+    return "فيديو";
+
+  return extension;
+}
+
+/* -------------------------------------------------------------------------- */
+/* IndexedDB                                                                  */
+/* -------------------------------------------------------------------------- */
+
+function openVideoDB(): Promise<IDBDatabase> {
+  return new Promise((resolve, reject) => {
+    const request = indexedDB.open(
+      VIDEO_CACHE_DB,
+      1
+    );
+
+    request.onupgradeneeded = () => {
+      const db = request.result;
+
+      if (
+        !db.objectStoreNames.contains(
+          VIDEO_CACHE_STORE
+        )
+      ) {
+        db.createObjectStore(
+          VIDEO_CACHE_STORE,
+          {
+            keyPath: "lessonId",
+          }
+        );
+      }
+    };
+
+    request.onsuccess = () => {
+      resolve(request.result);
+    };
+
+    request.onerror = () => {
+      reject(request.error);
+    };
+  });
+}
+
+async function saveOfflineVideo(
+  lessonId: string,
+  blob: Blob,
+  fileName: string
+) {
+  const db = await openVideoDB();
+
+  await new Promise<void>(
+    (resolve, reject) => {
+      const transaction =
+        db.transaction(
+          VIDEO_CACHE_STORE,
+          "readwrite"
+        );
+
+      const store =
+        transaction.objectStore(
+          VIDEO_CACHE_STORE
+        );
+
+      store.put({
+        lessonId,
+        blob,
+        fileName,
+        createdAt: Date.now(),
+      });
+
+      transaction.oncomplete = () =>
+        resolve();
+
+      transaction.onerror = () =>
+        reject(transaction.error);
+    }
   );
 
-  const [
-    offlineAvailable,
-    setOfflineAvailable,
-  ] = useState(false);
+  db.close();
+}
 
-  const [
-    downloading,
-    setDownloading,
-  ] = useState(false);
+async function getOfflineVideo(
+  lessonId: string
+): Promise<StoredVideo | null> {
+  const db = await openVideoDB();
 
-  const [
-    downloadProgress,
-    setDownloadProgress,
-  ] = useState(0);
+  return new Promise((resolve) => {
+    const transaction =
+      db.transaction(
+        VIDEO_CACHE_STORE,
+        "readonly"
+      );
 
-  const [
-    removingOffline,
-    setRemovingOffline,
-  ] = useState(false);
+    const store =
+      transaction.objectStore(
+        VIDEO_CACHE_STORE
+      );
 
-  const [
-    recordingBlocked,
-    setRecordingBlocked,
-  ] = useState(false);
+    const request =
+      store.get(lessonId);
 
-  const videoContainerRef =
-    useRef<HTMLDivElement>(null);
+    request.onsuccess = () => {
+      db.close();
 
-  const videoElementRef =
-    useRef<HTMLVideoElement>(null);
+      const result = request.result;
 
-  /*
-   * جميع الدروس
-   */
+      if (!result) {
+        resolve(null);
+        return;
+      }
+
+      const blobUrl =
+        URL.createObjectURL(
+          result.blob
+        );
+
+      resolve({
+        lessonId: result.lessonId,
+        blobUrl,
+        fileName: result.fileName,
+        createdAt: result.createdAt,
+      });
+    };
+
+    request.onerror = () => {
+      db.close();
+      resolve(null);
+    };
+  });
+}
+
+async function deleteOfflineVideo(
+  lessonId: string
+) {
+  const db = await openVideoDB();
+
+  await new Promise<void>(
+    (resolve, reject) => {
+      const transaction =
+        db.transaction(
+          VIDEO_CACHE_STORE,
+          "readwrite"
+        );
+
+      const store =
+        transaction.objectStore(
+          VIDEO_CACHE_STORE
+        );
+
+      store.delete(lessonId);
+
+      transaction.oncomplete = () =>
+        resolve();
+
+      transaction.onerror = () =>
+        reject(transaction.error);
+    }
+  );
+
+  db.close();
+}
+
+/* -------------------------------------------------------------------------- */
+/* Lesson Files                                                               */
+/* -------------------------------------------------------------------------- */
+
+function LessonFiles({
+  files,
+  loading,
+}: {
+  files: LessonFile[];
+  loading: boolean;
+}) {
+  const [openingId, setOpeningId] =
+    useState<string | null>(null);
+
+  const openFile = async (
+    file: LessonFile
+  ) => {
+    setOpeningId(file.id);
+
+    try {
+      const {
+        data,
+        error,
+      } = await supabase.storage
+        .from(FILE_BUCKET)
+        .createSignedUrl(
+          file.file_path,
+          60 * 60
+        );
+
+      if (error) {
+        throw error;
+      }
+
+      if (data?.signedUrl) {
+        window.open(
+          data.signedUrl,
+          "_blank",
+          "noopener,noreferrer"
+        );
+      }
+    } catch (error) {
+      console.error(
+        "Open lesson file error:",
+        error
+      );
+
+      alert(
+        "تعذر فتح الملف. حاول مرة أخرى."
+      );
+    } finally {
+      setOpeningId(null);
+    }
+  };
+
+  if (loading) {
+    return (
+      <div className="mt-6 rounded-3xl border border-slate-200 bg-white p-5">
+        <div className="flex items-center gap-3">
+          <Loader2 className="h-5 w-5 animate-spin text-brand-600" />
+
+          <span className="text-sm text-slate-500">
+            جاري تحميل ملفات الدرس...
+          </span>
+        </div>
+      </div>
+    );
+  }
+
+  if (!files.length) {
+    return (
+      <div className="mt-6 rounded-3xl border border-slate-200 bg-white p-5">
+        <div className="flex items-center gap-3">
+          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-slate-100 text-slate-400">
+            <FolderOpen className="h-5 w-5" />
+          </div>
+
+          <div>
+            <h3 className="font-bold text-slate-800">
+              ملفات الدرس
+            </h3>
+
+            <p className="mt-1 text-xs text-slate-400">
+              لا توجد ملفات مرفقة بهذا الدرس.
+            </p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="mt-6 overflow-hidden rounded-3xl border border-slate-200 bg-white">
+      <div className="border-b border-slate-200 bg-slate-50 p-5">
+        <div className="flex items-center gap-3">
+          <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-amber-100 text-amber-700">
+            <FolderOpen className="h-5 w-5" />
+          </div>
+
+          <div>
+            <h3 className="font-black text-slate-900">
+              ملفات الدرس
+            </h3>
+
+            <p className="mt-1 text-xs text-slate-500">
+              {files.length} ملف متاح للتحميل
+            </p>
+          </div>
+        </div>
+      </div>
+
+      <div className="divide-y divide-slate-100">
+        {files.map((file) => {
+          const Icon = getFileIcon(
+            file.mime_type,
+            file.file_name
+          );
+
+          const opening =
+            openingId === file.id;
+
+          return (
+            <div
+              key={file.id}
+              className="flex flex-col gap-3 p-4 transition hover:bg-slate-50 sm:flex-row sm:items-center"
+            >
+              <div className="flex min-w-0 flex-1 items-center gap-3">
+                <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-slate-100 text-slate-600">
+                  <Icon className="h-5 w-5" />
+                </div>
+
+                <div className="min-w-0">
+                  <p className="truncate text-sm font-bold text-slate-800">
+                    {file.title}
+                  </p>
+
+                  <div className="mt-1 flex flex-wrap items-center gap-2 text-[11px] text-slate-400">
+                    <span>
+                      {getFileType(
+                        file.mime_type,
+                        file.file_name
+                      )}
+                    </span>
+
+                    <span>•</span>
+
+                    <span>
+                      {formatFileSize(
+                        file.file_size
+                      )}
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                disabled={opening}
+                onClick={() =>
+                  openFile(file)
+                }
+                className="inline-flex shrink-0 items-center justify-center gap-2 rounded-xl bg-slate-900 px-4 py-2.5 text-xs font-bold text-white transition hover:bg-slate-800 disabled:opacity-50"
+              >
+                {opening ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Download className="h-4 w-4" />
+                )}
+
+                فتح الملف
+              </button>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+/* -------------------------------------------------------------------------- */
+/* Sidebar                                                                    */
+/* -------------------------------------------------------------------------- */
+
+function SidebarContent({
+  sections,
+  activeLessonId,
+  progress,
+  onSelectLesson,
+  onClose,
+}: {
+  sections: SectionWithLessons[];
+  activeLessonId: string | null;
+  progress: LessonProgressMap;
+  onSelectLesson: (
+    lesson: LessonWithFiles
+  ) => void;
+  onClose?: () => void;
+}) {
+  return (
+    <div className="flex h-full min-h-0 flex-col rounded-lg ">
+      <div className="border-b border-slate-200 p-5">
+        <div className=" flex items-center justify-between">
+          <div>
+            <h2 className="font-black text-slate-900">
+              محتوى الكورس
+            </h2>
+
+            <p className="mt-1 text-xs text-slate-500">
+              اختر الدرس الذي تريد متابعته
+            </p>
+          </div>
+
+          {onClose && (
+            <button
+              type="button"
+              onClick={onClose}
+              className="rounded-xl p-2 text-slate-400 hover:bg-slate-100 hover:text-slate-700 lg:hidden"
+            >
+              <X className="h-5 w-5" />
+            </button>
+          )}
+        </div>
+      </div>
+
+      <div className="flex-1 overflow-y-auto p-3">
+        {sections.map(
+          (section, sectionIndex) => {
+            const lessons =
+              section.lessons ?? [];
+
+            return (
+              <div
+                key={section.id}
+                className="mb-4"
+              >
+                <div className="mb-2 flex items-center gap-2 px-2">
+                  <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-brand-50 text-xs font-black text-brand-700">
+                    {sectionIndex + 1}
+                  </span>
+
+                  <h3 className="min-w-0 flex-1 truncate text-xs font-black text-slate-700">
+                    {section.title}
+                  </h3>
+                </div>
+
+                <div className="space-y-1">
+                  {lessons.map(
+                    (lesson, index) => {
+                      const isActive =
+                        lesson.id ===
+                        activeLessonId;
+
+                      const lessonProgress =
+                        progress[
+                          lesson.id
+                        ];
+
+                      const completed =
+                        Boolean(
+                          lessonProgress?.completed
+                        );
+
+                      const filesCount =
+                        lesson.files?.length ??
+                        0;
+
+                      return (
+                        <button
+                          key={lesson.id}
+                          type="button"
+                          onClick={() => {
+                            onSelectLesson(
+                              lesson
+                            );
+                            onClose?.();
+                          }}
+                          className={`group flex w-full items-start gap-3 rounded-xl p-3 text-right transition ${
+                            isActive
+                              ? "bg-brand-50 text-brand-800"
+                              : "text-slate-600 hover:bg-slate-50"
+                          }`}
+                        >
+                          <div className="mt-0.5 shrink-0">
+                            {completed ? (
+                              <CheckCircle2 className="h-5 w-5 text-emerald-500" />
+                            ) : isActive ? (
+                              <PlayCircle className="h-5 w-5 text-brand-600" />
+                            ) : (
+                              <Circle className="h-5 w-5 text-slate-300" />
+                            )}
+                          </div>
+
+                          <div className="min-w-0 flex-1">
+                            <div className="flex items-start gap-2">
+                              <span
+                                className={`text-sm font-semibold leading-5 ${
+                                  isActive
+                                    ? "text-brand-800"
+                                    : "text-slate-700"
+                                }`}
+                              >
+                                {index + 1}.{" "}
+                                {lesson.title}
+                              </span>
+                            </div>
+
+                            <div className="mt-1 flex flex-wrap items-center gap-2 text-[10px]">
+                              {lesson.is_preview && (
+                                <span className="rounded-md bg-emerald-50 px-1.5 py-0.5 text-emerald-600">
+                                  معاينة
+                                </span>
+                              )}
+
+                              {filesCount > 0 && (
+                                <span className="inline-flex items-center gap-1 text-slate-400">
+                                  <FolderOpen className="h-3 w-3" />
+                                  {filesCount}
+                                </span>
+                              )}
+                            </div>
+
+                            {lessonProgress && (
+                              <div className="mt-2 h-1 overflow-hidden rounded-full bg-slate-200">
+                                <div
+                                  className="h-full rounded-full bg-brand-500 transition-all"
+                                  style={{
+                                    width: `${lessonProgress.completed ? 100 : 0}%`,
+                                  }}
+                                />
+                              </div>
+                            )}
+                          </div>
+                        </button>
+                      );
+                    }
+                  )}
+                </div>
+              </div>
+            );
+          }
+        )}
+
+        {sections.length === 0 && (
+          <div className="p-6 text-center text-sm text-slate-400">
+            لا توجد دروس في هذا الكورس.
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/* -------------------------------------------------------------------------- */
+/* Main Page                                                                  */
+/* -------------------------------------------------------------------------- */
+
+export default function LearningPage() {
+  const { courseId } =
+    useParams<{
+      courseId: string;
+    }>();
+
+  const { session, profile } = useAuth();
+
+  const videoRef =
+    useRef<HTMLVideoElement | null>(
+      null
+    );
+
+  const watermarkRef =
+    useRef<HTMLDivElement | null>(
+      null
+    );
+
+  const [course, setCourse] =
+    useState<Course | null>(null);
+
+  const [sections, setSections] =
+    useState<SectionWithLessons[]>(
+      []
+    );
+
+  const [quizzes, setQuizzes] =
+    useState<Quiz[]>([]);
+
+  const [lessonProgress, setLessonProgress] =
+    useState<LessonProgressMap>({});
+
+  const [activeLesson, setActiveLesson] =
+    useState<LessonWithFiles | null>(
+      null
+    );
+
+  const [activeVideoUrl, setActiveVideoUrl] =
+    useState<string | null>(null);
+
+  const [loading, setLoading] =
+    useState(true);
+
+  const [videoLoading, setVideoLoading] =
+    useState(false);
+
+  const [filesLoading, setFilesLoading] =
+    useState(false);
+
+  const [activeLessonFiles, setActiveLessonFiles] =
+    useState<LessonFile[]>([]);
+
+  const [mobileSidebarOpen, setMobileSidebarOpen] =
+    useState(false);
+
+  const [desktopSidebarOpen, setDesktopSidebarOpen] =
+    useState(true);
+
+  const [offlineVideo, setOfflineVideo] =
+    useState<StoredVideo | null>(null);
+
+  const [downloadingOffline, setDownloadingOffline] =
+    useState(false);
+
+  const [offlineProgress, setOfflineProgress] =
+    useState(0);
+
+  const [showOfflineMenu, setShowOfflineMenu] =
+    useState(false);
+
+  const [screenRecordingDetected, setScreenRecordingDetected] =
+    useState(false);
+
+  const handleSuspiciousActivity = useCallback(
+    (_reason: string) => {
+      setScreenRecordingDetected(true);
+      videoRef.current?.pause();
+
+      window.setTimeout(() => {
+        setScreenRecordingDetected(false);
+      }, 3000);
+    },
+    []
+  );
+
+  useScreenRecordingGuard({
+    onSuspiciousActivity: handleSuspiciousActivity,
+  });
+
+  /* ---------------------------------------------------------------------- */
+  /* Load course                                                             */
+  /* ---------------------------------------------------------------------- */
+
+  const loadCourse = useCallback(
+    async () => {
+      if (!courseId) return;
+
+      setLoading(true);
+
+      try {
+        const loadedCourse =
+          await fetchCourseBySlugOrId(
+            courseId
+          );
+
+        if (!loadedCourse) {
+          throw new Error(
+            "لم يتم العثور على الكورس"
+          );
+        }
+
+        setCourse(loadedCourse);
+
+        const loadedSections =
+          await fetchCourseSections(
+            loadedCourse.id
+          );
+
+        const normalizedSections =
+          (loadedSections ?? []) as SectionWithLessons[];
+
+        setSections(
+          normalizedSections
+        );
+
+        const allLessons =
+          normalizedSections.flatMap(
+            (section) =>
+              section.lessons ?? []
+          );
+
+        if (allLessons.length) {
+          setActiveLesson(
+            (current) =>
+              current
+                ? allLessons.find(
+                    (lesson) =>
+                      lesson.id ===
+                      current.id
+                  ) ?? allLessons[0]
+                : allLessons[0]
+          );
+        }
+
+        const loadedQuizzes =
+          await fetchCourseQuizzes(
+            loadedCourse.id
+          );
+
+        setQuizzes(
+          (loadedQuizzes ??
+            []) as Quiz[]
+        );
+
+        const userResult =
+          await supabase.auth.getUser();
+
+        const user =
+          userResult.data.user;
+
+        if (user) {
+          const progress =
+            await fetchLessonProgress(
+              user.id,
+              loadedCourse.id
+            );
+
+          const map: LessonProgressMap =
+            {};
+
+          for (const item of progress ??
+            []) {
+            map[item.lesson_id] =
+              item;
+          }
+
+          setLessonProgress(map);
+        }
+      } catch (error) {
+        console.error(
+          "Learning page load error:",
+          error
+        );
+      } finally {
+        setLoading(false);
+      }
+    },
+    [courseId]
+  );
+
+  useEffect(() => {
+    loadCourse();
+  }, [loadCourse]);
+
+  /* ---------------------------------------------------------------------- */
+  /* Load lesson files                                                       */
+  /* ---------------------------------------------------------------------- */
+
+  const loadLessonFiles = useCallback(
+    async (lessonId: string) => {
+      setFilesLoading(true);
+
+      try {
+        const {
+          data,
+          error,
+        } = await supabase
+          .from("lesson_files")
+          .select("*")
+          .eq("lesson_id", lessonId)
+          .order("order_index", {
+            ascending: true,
+          });
+
+        if (error) {
+          throw error;
+        }
+
+        setActiveLessonFiles(
+          (data ?? []) as LessonFile[]
+        );
+      } catch (error) {
+        console.error(
+          "Load lesson files error:",
+          error
+        );
+
+        setActiveLessonFiles([]);
+      } finally {
+        setFilesLoading(false);
+      }
+    },
+    []
+  );
+
+  /* ---------------------------------------------------------------------- */
+  /* Get video URL                                                           */
+  /* ---------------------------------------------------------------------- */
+
+  const loadLessonVideo =
+    useCallback(
+      async (
+        lesson: LessonWithFiles
+      ) => {
+        setVideoLoading(true);
+        setActiveVideoUrl(null);
+
+        try {
+          const cached =
+            await getOfflineVideo(
+              lesson.id
+            );
+
+          if (cached) {
+            setOfflineVideo(cached);
+            setActiveVideoUrl(
+              cached.blobUrl
+            );
+            setVideoLoading(false);
+            return;
+          }
+
+          setOfflineVideo(null);
+
+          const videoPath =
+            (
+              lesson as Lesson & {
+                video_path?: string | null;
+              }
+            ).video_path;
+
+          if (!videoPath) {
+            setVideoLoading(false);
+            return;
+          }
+
+          const {
+            data,
+            error,
+          } = await supabase.storage
+            .from("course-videos")
+            .createSignedUrl(
+              videoPath,
+              60 * 60
+            );
+
+          if (error) {
+            throw error;
+          }
+
+          setActiveVideoUrl(
+            data?.signedUrl ?? null
+          );
+        } catch (error) {
+          console.error(
+            "Load lesson video error:",
+            error
+          );
+
+          setActiveVideoUrl(null);
+        } finally {
+          setVideoLoading(false);
+        }
+      },
+      []
+    );
+
+  /* ---------------------------------------------------------------------- */
+  /* Active lesson                                                           */
+  /* ---------------------------------------------------------------------- */
+
+  useEffect(() => {
+    if (!activeLesson) return;
+
+    loadLessonFiles(
+      activeLesson.id
+    );
+
+    loadLessonVideo(
+      activeLesson
+    );
+  }, [
+    activeLesson,
+    loadLessonFiles,
+    loadLessonVideo,
+  ]);
+
+  /* ---------------------------------------------------------------------- */
+  /* Offline video cleanup                                                   */
+  /* ---------------------------------------------------------------------- */
+
+  useEffect(() => {
+    return () => {
+      if (activeVideoUrl?.startsWith("blob:")) {
+        URL.revokeObjectURL(
+          activeVideoUrl
+        );
+      }
+
+      if (offlineVideo?.blobUrl) {
+        URL.revokeObjectURL(
+          offlineVideo.blobUrl
+        );
+      }
+    };
+  }, []);
+
+  /* ---------------------------------------------------------------------- */
+  /* Navigation                                                              */
+  /* ---------------------------------------------------------------------- */
 
   const allLessons = useMemo(
     () =>
@@ -205,1289 +1122,1159 @@ export default function LearningPage() {
     [sections]
   );
 
-  /*
-   * Online / Offline
-   */
+  const activeLessonIndex =
+    activeLesson
+      ? allLessons.findIndex(
+          (lesson) =>
+            lesson.id ===
+            activeLesson.id
+        )
+      : -1;
 
-  useEffect(() => {
-    const handleOnline = () => {
-      setIsOnline(true);
-    };
+  const previousLesson =
+    activeLessonIndex > 0
+      ? allLessons[
+          activeLessonIndex - 1
+        ]
+      : null;
 
-    const handleOffline = () => {
-      setIsOnline(false);
-    };
+  const nextLesson =
+    activeLessonIndex >= 0 &&
+    activeLessonIndex <
+      allLessons.length - 1
+      ? allLessons[
+          activeLessonIndex + 1
+        ]
+      : null;
 
-    window.addEventListener(
-      "online",
-      handleOnline
+  const goToLesson = (
+    lesson: LessonWithFiles | null
+  ) => {
+    if (!lesson) return;
+
+    setActiveLesson(lesson);
+
+    window.scrollTo({
+      top: 0,
+      behavior: "smooth",
+    });
+  };
+
+  /* ---------------------------------------------------------------------- */
+  /* Mark progress                                                           */
+  /* ---------------------------------------------------------------------- */
+
+  const markLessonCompleted =
+    useCallback(
+      async () => {
+        if (!activeLesson) return;
+
+        const userResult =
+          await supabase.auth.getUser();
+
+        const user =
+          userResult.data.user;
+
+        if (!user || !course) return;
+
+        try {
+          const updated =
+            await updateLessonProgress(
+              user.id,
+              activeLesson.id,
+              course.id,
+              100,
+              true
+            );
+
+          setLessonProgress(
+            (current) => ({
+              ...current,
+              [activeLesson.id]:
+                updated,
+            })
+          );
+        } catch (error) {
+          console.error(
+            "Update lesson progress error:",
+            error
+          );
+        }
+      },
+      [activeLesson, course]
     );
 
-    window.addEventListener(
-      "offline",
-      handleOffline
-    );
+  /* ---------------------------------------------------------------------- */
+  /* Video progress                                                          */
+  /* ---------------------------------------------------------------------- */
 
-    return () => {
-      window.removeEventListener(
-        "online",
-        handleOnline
-      );
-
-      window.removeEventListener(
-        "offline",
-        handleOffline
-      );
-    };
-  }, []);
-
-  /*
-   * منع Scroll الصفحة خلف Drawer
-   */
-
-  useEffect(() => {
-    if (sidebarOpen) {
-      document.body.style.overflow = "hidden";
-    } else {
-      document.body.style.overflow = "";
-    }
-
-    return () => {
-      document.body.style.overflow = "";
-    };
-  }, [sidebarOpen]);
-
-  /*
-   * تحميل الكورس
-   */
-
-  useEffect(() => {
-    if (
-      !courseId ||
-      !session?.user
-    ) {
-      return;
-    }
-
-    let active = true;
-
-    setLoading(true);
-
-    (async () => {
-      try {
-        const currentCourse =
-          await fetchCourseBySlugOrId(
-            courseId
-          );
-
-        if (!active) {
-          return;
-        }
-
-        setCourse(currentCourse);
-
-        const currentSections =
-          await fetchCourseSections(
-            currentCourse.id
-          );
-
-        const lessons =
-          currentSections.flatMap(
-            (section) =>
-              section.lessons ?? []
-          );
-
-        const [
-          progress,
-          quizList,
-        ] = await Promise.all([
-          fetchLessonProgress(
-            session.user.id,
-            lessons.map(
-              (lesson) => lesson.id
-            )
-          ),
-
-          fetchCourseQuizzes(
-            currentCourse.id
-          ),
-        ]);
-
-        if (!active) {
-          return;
-        }
-
-        setSections(
-          currentSections
-        );
-
-        setQuizzes(
-          quizList
-        );
-
-        const map: Record<
-          string,
-          LessonProgress
-        > = {};
-
-        progress.forEach(
-          (item) => {
-            map[item.lesson_id] =
-              item;
-          }
-        );
-
-        setProgressMap(map);
-
-        setActiveLesson(
-          lessons[0] ?? null
-        );
-      } catch {
-        showToast(
-          "تعذّر تحميل الكورس",
-          "error"
-        );
-      } finally {
-        if (active) {
-          setLoading(false);
-        }
-      }
-    })();
-
-    return () => {
-      active = false;
-    };
-
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [
-    courseId,
-    session?.user?.id,
-  ]);
-
-  /*
-   * تحميل الفيديو
-   */
-
-  const loadVideo = useCallback(
-    async (lesson: Lesson) => {
-      setVideoUrl(null);
-      setVideoError(null);
-      setOfflineAvailable(false);
-      setRecordingBlocked(false);
-
-      try {
-        const offlineUrl =
-          await getOfflineVideoSource(
-            lesson.id
-          );
-
-        if (offlineUrl) {
-          setOfflineAvailable(true);
-          setVideoUrl(offlineUrl);
-          return;
-        }
-
-        if (!navigator.onLine) {
-          setVideoError(
-            "هذا الفيديو غير محفوظ للمشاهدة بدون إنترنت."
-          );
-
-          return;
-        }
-
-        const signedUrl =
-          await getSignedLessonVideoUrl(
-            lesson.id
-          );
-
-        setVideoUrl(signedUrl);
-      } catch {
-        setVideoError(
-          "لم يتم رفع فيديو لهذا الدرس بعد، أو لا تملك صلاحية الوصول إليه."
-        );
-      }
-    },
-    []
-  );
-
-  useEffect(() => {
-    if (!activeLesson) {
-      return;
-    }
-
-    loadVideo(activeLesson);
-  }, [
-    activeLesson?.id,
-    loadVideo,
-  ]);
-
-  /*
-   * Offline availability
-   */
-
-  useEffect(() => {
-    if (!activeLesson) {
-      return;
-    }
-
-    let mounted = true;
-
-    isLessonAvailableOffline(
-      activeLesson.id
-    )
-      .then((available) => {
-        if (mounted) {
-          setOfflineAvailable(
-            available
-          );
-        }
-      })
-      .catch(() => {
-        if (mounted) {
-          setOfflineAvailable(false);
-        }
-      });
-
-    return () => {
-      mounted = false;
-    };
-  }, [
-    activeLesson?.id,
-  ]);
-
-  /*
-   * حماية المحتوى
-   */
-
-  const handleSuspiciousActivity =
-    useCallback(() => {
-      const video =
-        videoElementRef.current;
-
-      if (video) {
-        video.pause();
-      }
-
-      setRecordingBlocked(true);
-      setVideoUrl(null);
-
-      showToast(
-        "تم إيقاف الفيديو لحماية المحتوى من التسجيل غير المصرح به",
-        "error"
-      );
-    }, [showToast]);
-
-  useScreenRecordingGuard({
-    onSuspiciousActivity:
-      handleSuspiciousActivity,
-  });
-
-  const handleRetryAfterBlock =
-    () => {
-      setRecordingBlocked(false);
-
-      if (activeLesson) {
-        loadVideo(activeLesson);
-      }
-    };
-
-  /*
-   * تحميل Offline
-   */
-
-  const handleDownloadOffline =
+  const handleVideoTimeUpdate =
     async () => {
       if (
+        !videoRef.current ||
         !activeLesson ||
-        !isOnline ||
-        downloading
+        !course
       ) {
         return;
       }
 
-      try {
-        setDownloading(true);
-        setDownloadProgress(0);
+      const video =
+        videoRef.current;
 
-        const signedUrl =
-          await getSignedLessonVideoUrl(
-            activeLesson.id
+      if (!video.duration) return;
+
+      const percentage = Math.round(
+        (video.currentTime /
+          video.duration) *
+          100
+      );
+
+      if (
+        percentage < 90
+      ) {
+        return;
+      }
+
+      await markLessonCompleted();
+    };
+
+  /* ---------------------------------------------------------------------- */
+  /* Offline download                                                        */
+  /* ---------------------------------------------------------------------- */
+
+  const downloadOfflineVideo =
+    async () => {
+      if (
+        !activeLesson ||
+        !course
+      ) {
+        return;
+      }
+
+      const videoPath =
+        (
+          activeLesson as Lesson & {
+            video_path?: string | null;
+          }
+        ).video_path;
+
+      if (!videoPath) {
+        alert(
+          "لا يوجد فيديو لهذا الدرس."
+        );
+        return;
+      }
+
+      setDownloadingOffline(true);
+      setOfflineProgress(0);
+      setShowOfflineMenu(false);
+
+      try {
+        const {
+          data,
+          error,
+        } = await supabase.storage
+          .from("course-videos")
+          .createSignedUrl(
+            videoPath,
+            60 * 60
           );
 
-        await downloadLessonForOffline(
-          activeLesson.id,
-          signedUrl,
-          (progress) => {
-            setDownloadProgress(
-              progress
+        if (error) {
+          throw error;
+        }
+
+        if (!data?.signedUrl) {
+          throw new Error(
+            "تعذر الحصول على رابط الفيديو"
+          );
+        }
+
+        const response =
+          await fetch(
+            data.signedUrl
+          );
+
+        if (!response.ok) {
+          throw new Error(
+            "تعذر تحميل الفيديو"
+          );
+        }
+
+        const contentLength =
+          response.headers.get(
+            "content-length"
+          );
+
+        const total =
+          Number(
+            contentLength ?? 0
+          );
+
+        const reader =
+          response.body?.getReader();
+
+        if (!reader) {
+          throw new Error(
+            "المتصفح لا يدعم تحميل الفيديو"
+          );
+        }
+
+        const chunks: ArrayBuffer[] =
+          [];
+
+        let received = 0;
+
+        while (true) {
+          const {
+            done,
+            value,
+          } = await reader.read();
+
+          if (done) break;
+
+          if (value) {
+            const chunk = new Uint8Array(
+              value.byteLength
             );
+
+            chunk.set(value);
+            chunks.push(
+              chunk.buffer as ArrayBuffer
+            );
+            received += value.length;
+
+            if (total > 0) {
+              setOfflineProgress(
+                Math.round(
+                  (received / total) *
+                    100
+                )
+              );
+            }
+          }
+        }
+
+        const blob = new Blob(
+          chunks,
+          {
+            type:
+              response.headers.get(
+                "content-type"
+              ) ??
+              "video/mp4",
           }
         );
 
-        setOfflineAvailable(true);
+        await saveOfflineVideo(
+          activeLesson.id,
+          blob,
+          `${activeLesson.title}.mp4`
+        );
 
-        const localUrl =
-          await getOfflineVideoSource(
+        const cached =
+          await getOfflineVideo(
             activeLesson.id
           );
 
-        if (localUrl) {
-          setVideoUrl(localUrl);
+        if (cached) {
+          setOfflineVideo(cached);
         }
 
-        showToast(
-          "تم حفظ الفيديو للمشاهدة بدون إنترنت",
-          "success"
-        );
+        setOfflineProgress(100);
       } catch (error) {
         console.error(
-          "[MedCore] Offline download failed:",
+          "Offline download error:",
           error
         );
 
-        showToast(
-          "تعذّر حفظ الفيديو على الجهاز",
-          "error"
+        alert(
+          "تعذر حفظ الفيديو بدون إنترنت."
         );
       } finally {
-        setDownloading(false);
+        setDownloadingOffline(false);
       }
     };
 
-  /*
-   * حذف Offline
-   */
+  /* ---------------------------------------------------------------------- */
+  /* Delete offline                                                          */
+  /* ---------------------------------------------------------------------- */
 
-  const handleRemoveOffline =
+  const removeOfflineVideo =
     async () => {
-      if (
-        !activeLesson ||
-        removingOffline
-      ) {
-        return;
-      }
+      if (!activeLesson) return;
 
-      try {
-        setRemovingOffline(true);
-
-        await removeLessonOffline(
-          activeLesson.id
+      const confirmed =
+        window.confirm(
+          "هل تريد حذف نسخة الفيديو المحفوظة بدون إنترنت؟"
         );
 
-        setOfflineAvailable(false);
+      if (!confirmed) return;
 
-        if (navigator.onLine) {
-          const signedUrl =
-            await getSignedLessonVideoUrl(
-              activeLesson.id
-            );
-
-          setVideoUrl(signedUrl);
-        } else {
-          setVideoUrl(null);
-
-          setVideoError(
-            "تم حذف الفيديو المحفوظ، ولا يوجد اتصال بالإنترنت."
+      try {
+        if (offlineVideo?.blobUrl) {
+          URL.revokeObjectURL(
+            offlineVideo.blobUrl
           );
         }
 
-        showToast(
-          "تم حذف الفيديو من التخزين Offline",
-          "success"
-        );
-      } catch {
-        showToast(
-          "تعذّر حذف الفيديو",
-          "error"
-        );
-      } finally {
-        setRemovingOffline(false);
-      }
-    };
-
-  /*
-   * Navigation
-   */
-
-  const currentIndex =
-    allLessons.findIndex(
-      (lesson) =>
-        lesson.id ===
-        activeLesson?.id
-    );
-
-  const goToNext = () => {
-    const next =
-      allLessons[
-        currentIndex + 1
-      ];
-
-    if (next) {
-      setActiveLesson(next);
-
-      /*
-       * إغلاق Sidebar على الهاتف
-       */
-      setSidebarOpen(false);
-
-      window.scrollTo({
-        top: 0,
-        behavior: "smooth",
-      });
-    }
-  };
-
-  const goToPrev = () => {
-    const previous =
-      allLessons[
-        currentIndex - 1
-      ];
-
-    if (previous) {
-      setActiveLesson(previous);
-
-      setSidebarOpen(false);
-
-      window.scrollTo({
-        top: 0,
-        behavior: "smooth",
-      });
-    }
-  };
-
-  /*
-   * إكمال الدرس
-   */
-
-  const markComplete =
-    async () => {
-      if (
-        !activeLesson ||
-        !session?.user
-      ) {
-        return;
-      }
-
-      try {
-        await upsertLessonProgress({
-          studentId:
-            session.user.id,
-
-          lessonId:
-            activeLesson.id,
-
-          progressSeconds:
-            activeLesson.duration_seconds,
-
-          completed: true,
-        });
-
-        setProgressMap(
-          (prev) => ({
-            ...prev,
-
-            [activeLesson.id]: {
-              ...prev[
-                activeLesson.id
-              ],
-
-              lesson_id:
-                activeLesson.id,
-
-              completed: true,
-            } as LessonProgress,
-          })
-        );
-
-        showToast(
-          "أحسنت! تم تسجيل إتمام الدرس",
-          "success"
-        );
-
-        goToNext();
-      } catch {
-        showToast(
-          "تعذّر تحديث تقدّمك",
-          "error"
-        );
-      }
-    };
-
-  /*
-   * Progress
-   */
-
-  const isActiveDone =
-    activeLesson
-      ? !!progressMap[
+        await deleteOfflineVideo(
           activeLesson.id
-        ]?.completed
-      : false;
+        );
 
-  const completedCount =
-    allLessons.filter(
-      (lesson) =>
-        progressMap[
-          lesson.id
-        ]?.completed
-    ).length;
+        setOfflineVideo(null);
 
-  const courseProgress =
-    computeCourseProgress(
-      allLessons.length,
-      completedCount
-    );
+        await loadLessonVideo(
+          activeLesson
+        );
+      } catch (error) {
+        console.error(
+          "Delete offline video error:",
+          error
+        );
+      }
+    };
 
-  /*
-   * Watermark
-   */
+  /* ---------------------------------------------------------------------- */
+  /* Keyboard protection                                                     */
+  /* ---------------------------------------------------------------------- */
 
-  const watermarkPhone =
-    (session?.user?.user_metadata
-      ?.phone as string | undefined) ??
-    (session?.user as any)?.phone ??
-    "";
+  useEffect(() => {
+    const handleKeyDown = (
+      event: KeyboardEvent
+    ) => {
+      const key = event.key.toLowerCase();
 
-  /*
-   * Sidebar content
-   */
+      if (
+        event.key === "PrintScreen" ||
+        (event.metaKey &&
+          event.shiftKey &&
+          ["3", "4", "5"].includes(event.key)) ||
+        (event.ctrlKey &&
+          event.shiftKey &&
+          key === "s")
+      ) {
+        handleSuspiciousActivity("screenshot_shortcut");
+      }
+    };
 
-  const SidebarContent = () => (
-    <>
-      <div className="border-b border-slate-100 bg-white p-4">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2.5">
-            <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-brand-50 text-brand-600">
-              <ListVideo className="h-4 w-4" />
-            </div>
+    window.addEventListener("keydown", handleKeyDown);
 
-            <div>
-              <p className="text-sm font-bold text-slate-800">
-                محتوى الكورس
-              </p>
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [handleSuspiciousActivity]);
 
-              <p className="text-[11px] text-slate-400">
-                {completedCount} من{" "}
-                {allLessons.length} درس
-              </p>
-            </div>
-          </div>
+  /* ---------------------------------------------------------------------- */
+  /* Calculate overall progress                                              */
+  /* ---------------------------------------------------------------------- */
 
-          <span className="text-sm font-bold text-brand-500">
-            {courseProgress}%
-          </span>
-        </div>
+  const overallProgress =
+    useMemo(() => {
+      if (!allLessons.length) return 0;
 
-        <div className="mt-4 h-2 overflow-hidden rounded-full bg-slate-100">
-          <motion.div
-            className="h-full rounded-full bg-gradient-to-l from-brand-500 to-brand-900"
-            initial={{
-              width: 0,
-            }}
-            animate={{
-              width: `${courseProgress}%`,
-            }}
-            transition={{
-              duration: 0.6,
-            }}
-          />
-        </div>
-      </div>
+      const completed =
+        allLessons.filter(
+          (lesson) =>
+            lessonProgress[
+              lesson.id
+            ]?.completed
+        ).length;
 
-      <div className="p-3">
-        {sections.map(
-          (section) => (
-            <div
-              key={section.id}
-              className="mb-5 last:mb-0"
-            >
-              <div className="mb-2 flex items-center gap-2 px-2">
-                <div className="h-1 w-1 rounded-full bg-brand-500" />
+      return Math.round(
+        (completed /
+          allLessons.length) *
+          100
+      );
+    }, [
+      allLessons,
+      lessonProgress,
+    ]);
 
-                <p className="text-[11px] font-bold uppercase tracking-wide text-slate-400">
-                  {section.title}
-                </p>
-              </div>
-
-              <div className="space-y-1">
-                {section.lessons?.map(
-                  (lesson) => {
-                    const done =
-                      progressMap[
-                        lesson.id
-                      ]?.completed;
-
-                    const isActive =
-                      lesson.id ===
-                      activeLesson?.id;
-
-                    return (
-                      <button
-                        key={lesson.id}
-                        onClick={() => {
-                          setActiveLesson(
-                            lesson
-                          );
-
-                          setSidebarOpen(
-                            false
-                          );
-                        }}
-                        className={`
-                          group
-                          flex
-                          w-full
-                          items-center
-                          gap-2.5
-                          rounded-xl
-                          px-3
-                          py-3
-                          text-sm
-                          text-right
-                          transition-all
-                          duration-200
-                          ${
-                            isActive
-                              ? "bg-brand-50 text-brand-900 shadow-sm ring-1 ring-brand-100"
-                              : "text-slate-600 hover:bg-slate-50"
-                          }
-                        `}
-                      >
-                        <div
-                          className={`
-                            flex
-                            h-7
-                            w-7
-                            shrink-0
-                            items-center
-                            justify-center
-                            rounded-lg
-                            ${
-                              done
-                                ? "bg-emerald-50"
-                                : isActive
-                                  ? "bg-white"
-                                  : "bg-slate-50"
-                            }
-                          `}
-                        >
-                          {done ? (
-                            <CheckCircle2 className="h-4 w-4 text-emerald-500" />
-                          ) : (
-                            <Circle
-                              className={`
-                                h-4 w-4
-                                ${
-                                  isActive
-                                    ? "text-brand-500"
-                                    : "text-slate-300"
-                                }
-                              `}
-                            />
-                          )}
-                        </div>
-
-                        <span className="min-w-0 flex-1 truncate font-medium">
-                          {lesson.title}
-                        </span>
-
-                        <div className="flex shrink-0 items-center gap-1.5">
-                          {lesson.id ===
-                            activeLesson?.id &&
-                            offlineAvailable && (
-                              <HardDriveDownload className="h-3.5 w-3.5 text-emerald-500" />
-                            )}
-
-                          <span className="text-[10px] text-slate-400">
-                            {formatDuration(
-                              lesson.duration_seconds
-                            )}
-                          </span>
-                        </div>
-                      </button>
-                    );
-                  }
-                )}
-              </div>
-            </div>
-          )
-        )}
-      </div>
-    </>
+  const activeSection = useMemo(
+    () =>
+      sections.find((section) =>
+        section.lessons?.some(
+          (lesson) => lesson.id === activeLesson?.id
+        )
+      ),
+    [sections, activeLesson]
   );
 
-  /*
-   * Loading
-   */
+  const visibleQuizzes = useMemo(
+    () =>
+      quizzes.filter(
+        (quiz) =>
+          (!quiz.section_id && !quiz.lesson_id) ||
+          quiz.lesson_id === activeLesson?.id ||
+          quiz.section_id === activeSection?.id
+      ),
+    [quizzes, activeLesson, activeSection]
+  );
+
+  const courseQuizzes = useMemo(
+    () =>
+      visibleQuizzes.filter(
+        (quiz) => !quiz.section_id && !quiz.lesson_id
+      ),
+    [visibleQuizzes]
+  );
+
+  const targetedQuizzes = useMemo(
+    () =>
+      visibleQuizzes.filter(
+        (quiz) => quiz.section_id || quiz.lesson_id
+      ),
+    [visibleQuizzes]
+  );
+
+  /* ---------------------------------------------------------------------- */
+  /* Loading                                                                 */
+  /* ---------------------------------------------------------------------- */
 
   if (loading) {
     return (
-      <div className="mx-auto max-w-6xl space-y-4 px-4 py-6 sm:px-6 sm:py-10">
-        <Skeleton className="aspect-video w-full rounded-2xl" />
+      <div
+        dir="rtl"
+        className="min-h-screen bg-slate-50 p-4"
+      >
+        <div className="mx-auto max-w-7xl animate-pulse space-y-5">
+          <div className="h-16 rounded-2xl bg-slate-200" />
+
+          <div className="grid gap-5 lg:grid-cols-[320px_1fr]">
+            <div className="h-[600px] rounded-3xl bg-slate-200" />
+
+            <div className="space-y-5">
+              <div className="aspect-video rounded-3xl bg-slate-200" />
+
+              <div className="h-48 rounded-3xl bg-slate-200" />
+            </div>
+          </div>
+        </div>
       </div>
     );
   }
 
   if (!course) {
-    return null;
+    return (
+      <div
+        dir="rtl"
+        className="flex min-h-screen items-center justify-center bg-slate-50 p-5"
+      >
+        <div className="rounded-3xl border border-red-200 bg-white p-8 text-center">
+          <AlertCircle className="mx-auto h-10 w-10 text-red-500" />
+
+          <h1 className="mt-4 font-black text-slate-900">
+            لم يتم العثور على الكورس
+          </h1>
+
+          <Link
+            to="/courses"
+            className="mt-5 inline-flex rounded-xl bg-slate-900 px-5 py-3 text-sm font-bold text-white"
+          >
+            العودة للكورسات
+          </Link>
+        </div>
+      </div>
+    );
   }
+
+  /* ---------------------------------------------------------------------- */
+  /* Render                                                                  */
+  /* ---------------------------------------------------------------------- */
 
   return (
     <div
       dir="rtl"
-      className="flex h-[100dvh] flex-col overflow-hidden bg-slate-50"
+      className="min-h-screen bg-slate-50"
     >
-      {/* ================================================================ */}
-      {/* HEADER                                                           */}
-      {/* ================================================================ */}
-
-      <header className="z-40 flex h-14 shrink-0 items-center justify-between border-b border-slate-100 bg-white/95 px-3 shadow-sm backdrop-blur sm:px-4">
-        <div className="flex min-w-0 items-center gap-2.5">
-          <Link
-            to="/app/student/courses"
-            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl text-slate-400 transition hover:bg-slate-50 hover:text-brand-500"
-          >
-            <ChevronRight className="h-5 w-5" />
-          </Link>
-
-          <div className="min-w-0">
-            <p className="truncate text-sm font-bold leading-tight text-slate-800 sm:text-base">
-              {course.title}
-            </p>
-
-            <p className="mt-0.5 text-[10px] text-slate-400 sm:text-[11px]">
-              {completedCount} /{" "}
-              {allLessons.length} درس مكتمل
-            </p>
-          </div>
-        </div>
-
-        <div className="flex items-center gap-2">
-          <div className="hidden items-center gap-2 sm:flex">
-            <div className="h-1.5 w-28 overflow-hidden rounded-full bg-slate-100">
-              <div
-                className="h-full rounded-full bg-brand-500 transition-all"
-                style={{
-                  width: `${courseProgress}%`,
-                }}
-              />
-            </div>
-
-            <span className="text-xs font-bold text-brand-500">
-              {courseProgress}%
-            </span>
-          </div>
-
+      {/* Header */}
+      <header className="sticky top-0 z-40 border-b border-slate-200 bg-white/95 backdrop-blur">
+        <div className="mx-auto flex h-16 max-w-[1600px] items-center gap-3 px-4 sm:px-6">
           <button
             type="button"
-            aria-label={
-              desktopSidebarOpen
-                ? "إغلاق الشريط الجانبي"
-                : "فتح الشريط الجانبي"
-            }
-            title={
-              desktopSidebarOpen
-                ? "إغلاق الشريط الجانبي"
-                : "فتح الشريط الجانبي"
-            }
             onClick={() =>
-              setDesktopSidebarOpen((open) => !open)
+              setMobileSidebarOpen(true)
             }
-            className="hidden h-9 w-9 items-center justify-center rounded-xl bg-slate-50 text-slate-600 transition hover:bg-brand-50 hover:text-brand-600 lg:flex"
-          >
-            {desktopSidebarOpen ? (
-              <PanelRightClose className="h-4 w-4" />
-            ) : (
-              <PanelRightOpen className="h-4 w-4" />
-            )}
-          </button>
-
-          <button
-            type="button"
-            aria-label="فتح محتوى الكورس"
-            onClick={() =>
-              setSidebarOpen(true)
-            }
-            className="flex h-9 w-9 items-center justify-center rounded-xl bg-slate-50 text-slate-600 transition hover:bg-brand-50 hover:text-brand-600 lg:hidden"
+            className="flex h-10 w-10 items-center justify-center rounded-xl bg-slate-100 text-slate-700 lg:hidden"
           >
             <Menu className="h-5 w-5" />
           </button>
+
+          <Link
+            to="/courses"
+            aria-label="العودة للكورسات"
+            title="العودة للكورسات"
+            className="flex h-10 w-10 items-center justify-center rounded-xl bg-slate-100 text-slate-700 transition hover:bg-brand-50 hover:text-brand-700 lg:hidden"
+          >
+            <ArrowRight className="h-5 w-5" />
+          </Link>
+
+          <button
+            type="button"
+            onClick={() =>
+              setDesktopSidebarOpen(
+                (value) => !value
+              )
+            }
+            aria-label={
+              desktopSidebarOpen
+                ? "إغلاق قائمة محتوى الكورس"
+                : "فتح قائمة محتوى الكورس"
+            }
+            title={
+              desktopSidebarOpen
+                ? "إغلاق قائمة المحتوى"
+                : "فتح قائمة المحتوى"
+            }
+            className="hidden h-10 w-10 items-center justify-center rounded-xl bg-slate-100 text-slate-700 transition hover:bg-brand-50 hover:text-brand-700 lg:flex"
+          >
+            {desktopSidebarOpen ? (
+              <PanelRightClose className="h-5 w-5" />
+            ) : (
+              <PanelRightOpen className="h-5 w-5" />
+            )}
+          </button>
+
+          <Link
+            to="/courses"
+            className="hidden items-center gap-2 rounded-xl px-3 py-2 text-sm font-bold text-slate-600 hover:bg-slate-100 lg:flex"
+          >
+            <ArrowRight className="h-4 w-4" />
+            الكورسات
+          </Link>
+
+          <div className="h-6 w-px bg-slate-200" />
+
+          <div className="min-w-0 flex-1">
+            <p className="truncate text-sm font-black text-slate-900">
+              {course.title}
+            </p>
+
+            <div className="mt-1 flex items-center gap-2">
+              <div className="h-1.5 w-20 overflow-hidden rounded-full bg-slate-200 sm:w-28">
+                <div
+                  className="h-full rounded-full bg-brand-500 transition-all"
+                  style={{
+                    width: `${overallProgress}%`,
+                  }}
+                />
+              </div>
+
+              <span className="text-[10px] font-bold text-slate-400">
+                {overallProgress}% مكتمل
+              </span>
+            </div>
+          </div>
+
+          <div className="hidden items-center gap-2 sm:flex">
+            <span className="inline-flex items-center gap-1.5 rounded-xl bg-emerald-50 px-3 py-2 text-xs font-bold text-emerald-700">
+              <Trophy className="h-3.5 w-3.5" />
+              {allLessons.filter(
+                (lesson) =>
+                  lessonProgress[
+                    lesson.id
+                  ]?.completed
+              ).length}
+              /{allLessons.length}
+            </span>
+          </div>
         </div>
       </header>
 
-      {/* ================================================================ */}
-      {/* MAIN                                                             */}
-      {/* ================================================================ */}
-
-      <div className="relative flex min-h-0 flex-1">
-        {/* ============================================================ */}
-        {/* CONTENT                                                       */}
-        {/* ============================================================ */}
-
-        <main className="min-w-0 flex-1 overflow-y-auto">
-          {/* VIDEO */}
-
-          <div className="bg-black">
-            <div
-              ref={videoContainerRef}
-              className="relative mx-auto aspect-video w-full max-w-5xl overflow-hidden"
-            >
-              {recordingBlocked ? (
-                <div className="flex h-full flex-col items-center justify-center gap-3 p-6 text-center text-white/80">
-                  <ShieldAlert className="h-10 w-10 text-red-400" />
-
-                  <p className="text-sm font-bold text-red-300">
-                    تم إيقاف تشغيل الفيديو لحماية حقوق المحتوى
-                  </p>
-
-                  <p className="max-w-xs text-xs leading-5 text-white/50">
-                    تم رصد نشاط قد يشير إلى محاولة تسجيل الشاشة.
-                  </p>
-
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={
-                      handleRetryAfterBlock
-                    }
-                  >
-                    إعادة المحاولة
-                  </Button>
-                </div>
-              ) : videoUrl ? (
-                <>
-                  <video
-                    ref={videoElementRef}
-                    key={videoUrl}
-                    src={videoUrl}
-                    controls
-                    controlsList="nodownload noremoteplayback"
-                    disablePictureInPicture
-                    playsInline
-                    preload="metadata"
-                    className="h-full w-full object-contain"
-                    onContextMenu={(event) =>
-                      event.preventDefault()
-                    }
-                  />
-
-                  {watermarkPhone && (
-                    <VideoWatermark
-                      phone={watermarkPhone}
-                      containerRef={
-                        videoContainerRef
-                      }
-                    />
-                  )}
-
-                  {offlineAvailable && (
-                    <div className="absolute right-3 top-3 z-10 flex items-center gap-1.5 rounded-full bg-emerald-500/90 px-2.5 py-1.5 text-[10px] font-bold text-white shadow-lg backdrop-blur sm:right-4 sm:top-4 sm:px-3 sm:text-xs">
-                      <HardDriveDownload className="h-3 w-3 sm:h-3.5 sm:w-3.5" />
-                      بدون إنترنت
-                    </div>
-                  )}
-                </>
-              ) : (
-                <div className="flex h-full flex-col items-center justify-center gap-3 p-6 text-center text-white/70">
-                  {!isOnline ? (
-                    <WifiOff className="h-9 w-9 text-white/30" />
-                  ) : (
-                    <Wifi className="h-9 w-9 text-white/30" />
-                  )}
-
-                  <p className="max-w-sm text-xs leading-5 sm:text-sm">
-                    {videoError ??
-                      "جاري تحميل الفيديو..."}
-                  </p>
-                </div>
-              )}
-            </div>
-          </div>
-
-          {/* LESSON */}
-
-          <div className="mx-auto max-w-5xl p-4 sm:p-6 lg:p-8">
-            <div className="rounded-2xl border border-slate-100 bg-white p-4 shadow-sm sm:p-6">
-              <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-                <div className="min-w-0">
-                  <div className="mb-2 flex items-center gap-2">
-                    <BookOpen className="h-4 w-4 text-brand-500" />
-
-                    <span className="text-xs font-semibold text-brand-600">
-                      الدرس الحالي
-                    </span>
-                  </div>
-
-                  <h2 className="text-lg font-bold leading-8 text-slate-800 sm:text-xl">
-                    {activeLesson?.title}
-                  </h2>
-
-                  {activeLesson?.description && (
-                    <p className="mt-2 text-sm leading-6 text-slate-500">
-                      {activeLesson.description}
-                    </p>
-                  )}
-                </div>
-
-                {isActiveDone && (
-                  <span className="flex w-fit shrink-0 items-center gap-1.5 rounded-full bg-emerald-50 px-3 py-1.5 text-xs font-bold text-emerald-600">
-                    <CheckCircle2 className="h-3.5 w-3.5" />
-                    مكتمل
-                  </span>
-                )}
-              </div>
-
-              {/* NAVIGATION */}
-
-              <div className="mt-5 grid grid-cols-2 gap-2 sm:flex sm:flex-wrap">
-                <Button
-                  variant="outline"
-                  onClick={goToPrev}
-                  disabled={
-                    currentIndex <= 0
-                  }
-                  className="w-full sm:w-auto"
-                >
-                  <ChevronRight className="h-4 w-4" />
-                  السابق
-                </Button>
-
-                <Button
-                  variant="outline"
-                  onClick={goToNext}
-                  disabled={
-                    currentIndex >=
-                    allLessons.length - 1
-                  }
-                  className="w-full sm:w-auto"
-                >
-                  التالي
-                  <ChevronLeft className="h-4 w-4" />
-                </Button>
-
-                <Button
-                  onClick={markComplete}
-                  disabled={isActiveDone}
-                  className="col-span-2 w-full sm:w-auto"
-                >
-                  <CheckCircle2 className="h-4 w-4" />
-
-                  {isActiveDone
-                    ? "تم الإكمال"
-                    : "تحديد كمكتمل"}
-                </Button>
-              </div>
-            </div>
-
-            {/* OFFLINE */}
-
-            <div className="mt-4 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:mt-6 sm:p-5">
-              <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-                <div className="flex min-w-0 items-start gap-3">
-                  <div
-                    className={`
-                      flex
-                      h-10
-                      w-10
-                      shrink-0
-                      items-center
-                      justify-center
-                      rounded-xl
-                      ${
-                        offlineAvailable
-                          ? "bg-emerald-50 text-emerald-600"
-                          : "bg-brand-50 text-brand-600"
-                      }
-                    `}
-                  >
-                    {offlineAvailable ? (
-                      <HardDriveDownload className="h-5 w-5" />
-                    ) : (
-                      <Download className="h-5 w-5" />
-                    )}
-                  </div>
-
-                  <div className="min-w-0">
-                    <p className="text-sm font-bold text-slate-800">
-                      المشاهدة بدون إنترنت
-                    </p>
-
-                    <p className="mt-1 text-xs leading-5 text-slate-500">
-                      {offlineAvailable
-                        ? "الفيديو محفوظ على جهازك ويمكن تشغيله بدون إنترنت."
-                        : "احفظ الفيديو لمشاهدته لاحقًا بدون إنترنت."}
-                    </p>
-                  </div>
-                </div>
-
-                {offlineAvailable ? (
-                  <Button
-                    variant="outline"
-                    onClick={
-                      handleRemoveOffline
-                    }
-                    disabled={
-                      removingOffline
-                    }
-                    className="w-full border-red-200 text-red-600 hover:bg-red-50 sm:w-auto"
-                  >
-                    {removingOffline ? (
-                      <Loader2 className="h-4 w-4 animate-spin" />
-                    ) : (
-                      <Trash2 className="h-4 w-4" />
-                    )}
-
-                    {removingOffline
-                      ? "جاري الحذف..."
-                      : "حذف من الجهاز"}
-                  </Button>
-                ) : (
-                  <Button
-                    onClick={
-                      handleDownloadOffline
-                    }
-                    disabled={
-                      !isOnline ||
-                      downloading
-                    }
-                    className="w-full sm:min-w-[180px] sm:w-auto"
-                  >
-                    {downloading ? (
-                      <>
-                        <Loader2 className="h-4 w-4 animate-spin" />
-                        جاري الحفظ{" "}
-                        {downloadProgress}%
-                      </>
-                    ) : (
-                      <>
-                        <Download className="h-4 w-4" />
-                        حفظ بدون إنترنت
-                      </>
-                    )}
-                  </Button>
-                )}
-              </div>
-
-              {downloading && (
-                <div className="mt-4">
-                  <div className="mb-2 flex items-center justify-between text-xs">
-                    <span className="text-slate-500">
-                      جاري حفظ الفيديو...
-                    </span>
-
-                    <span className="font-bold text-brand-600">
-                      {downloadProgress}%
-                    </span>
-                  </div>
-
-                  <div className="h-2 overflow-hidden rounded-full bg-slate-100">
-                    <motion.div
-                      className="h-full rounded-full bg-brand-500"
-                      initial={{
-                        width: 0,
-                      }}
-                      animate={{
-                        width: `${downloadProgress}%`,
-                      }}
-                    />
-                  </div>
-                </div>
-              )}
-
-              {!isOnline && (
-                <div className="mt-4 flex items-start gap-2 rounded-xl bg-amber-50 px-3 py-2.5 text-xs font-medium leading-5 text-amber-700">
-                  <WifiOff className="mt-0.5 h-4 w-4 shrink-0" />
-
-                  <span>
-                    {offlineAvailable
-                      ? "أنت غير متصل بالإنترنت، ويمكنك تشغيل هذا الفيديو لأنه محفوظ Offline."
-                      : "أنت غير متصل بالإنترنت، احفظ الفيديو أولًا أثناء الاتصال بالإنترنت."}
-                  </span>
-                </div>
-              )}
-            </div>
-
-            {/* QUIZZES */}
-
-            {quizzes.length > 0 && (
-              <div className="mt-4 rounded-2xl border border-brand-100 bg-gradient-to-br from-brand-50/80 to-white p-4 sm:mt-6 sm:p-5">
-                <h3 className="flex items-center gap-2 font-bold text-brand-900">
-                  <ClipboardList className="h-5 w-5" />
-
-                  اختبارات هذا الكورس
-                </h3>
-
-                <div className="mt-3 space-y-2">
-                  {quizzes.map(
-                    (quiz) => (
-                      <Link
-                        key={quiz.id}
-                        to={`/app/student/quizzes/${quiz.id}`}
-                        className="flex items-center justify-between gap-3 rounded-xl bg-white px-4 py-3 text-sm shadow-sm transition hover:shadow-md"
-                      >
-                        <span className="min-w-0 truncate font-semibold text-slate-700">
-                          {quiz.title}
-                        </span>
-
-                        <span className="shrink-0 text-xs text-slate-400">
-                          {quiz.duration_minutes}{" "}
-                          دقيقة
-                        </span>
-                      </Link>
-                    )
-                  )}
-                </div>
-              </div>
-            )}
-
-            <div className="h-6 sm:h-10" />
-          </div>
-        </main>
-
-        {/* ============================================================ */}
-        {/* DESKTOP SIDEBAR                                             */}
-        {/* ============================================================ */}
-
-        <aside
-          className={`hidden shrink-0 overflow-y-auto border-l border-slate-100 bg-white shadow-[-6px_0_18px_rgba(15,23,42,0.03)] transition-[width] duration-300 lg:block ${
-            desktopSidebarOpen
-              ? "w-80"
-              : "w-0 border-l-0 shadow-none"
-          }`}
-        >
+      {/* Main */}
+      <div className="mx-auto max-w-[1600px] px-0 lg:pl-4">
+        <div className="grid min-h-[calc(100vh-64px)] lg:grid-cols-[auto_minmax(0,1fr)]">
+          {/* Desktop Sidebar */}
           <div
-            className={`h-full w-80 transition-opacity duration-200 ${
+            className={`hidden overflow-hidden transition-[width] duration-300 ease-in-out lg:block bg-white ${
               desktopSidebarOpen
-                ? "opacity-100"
-                : "pointer-events-none opacity-0"
+                ? "w-[320px]"
+                : "w-0"
             }`}
           >
-            <SidebarContent />
+            <aside className="sticky top-16 h-[calc(100vh-64px)] w-[320px] border-l border-slate-200 bg-white shadow-[inset_-1px_0_0_rgba(226,232,240,0.7)]">
+              <SidebarContent
+                sections={sections}
+                activeLessonId={
+                  activeLesson?.id ?? null
+                }
+                progress={
+                  lessonProgress
+                }
+                onSelectLesson={
+                  setActiveLesson
+                }
+              />
+            </aside>
           </div>
-        </aside>
-      </div>
 
-      {/* ================================================================ */}
-      {/* MOBILE DRAWER                                                    */}
-      {/* ================================================================ */}
-
-      <AnimatePresence>
-        {sidebarOpen && (
-          <>
-            {/* Overlay */}
-
-            <motion.button
-              type="button"
-              aria-label="إغلاق القائمة"
-              className="fixed inset-0 z-50 bg-slate-950/50 backdrop-blur-[2px] lg:hidden"
-              initial={{
-                opacity: 0,
-              }}
-              animate={{
-                opacity: 1,
-              }}
-              exit={{
-                opacity: 0,
-              }}
-              transition={{
-                duration: 0.2,
-              }}
-              onClick={() =>
-                setSidebarOpen(false)
-              }
-            />
-
-            {/* Drawer */}
-
-            <motion.aside
-              initial={{
-                x: "100%",
-              }}
-              animate={{
-                x: 0,
-              }}
-              exit={{
-                x: "100%",
-              }}
-              transition={{
-                type: "spring",
-                stiffness: 380,
-                damping: 38,
-              }}
-              className="fixed inset-y-0 right-0 z-[60] flex w-[88%] max-w-[380px] flex-col overflow-hidden bg-white shadow-2xl lg:hidden"
-            >
-              {/* Drawer Header */}
-
-              <div className="flex h-16 shrink-0 items-center justify-between border-b border-slate-100 bg-white px-4">
-                <div className="flex items-center gap-3">
-                  <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-brand-50 text-brand-600">
-                    <ListVideo className="h-4 w-4" />
-                  </div>
-
-                  <div>
-                    <p className="text-sm font-bold text-slate-800">
-                      محتوى الكورس
-                    </p>
-
-                    <p className="text-[10px] text-slate-400">
-                      {completedCount} /{" "}
-                      {allLessons.length} مكتمل
-                    </p>
-                  </div>
-                </div>
-
-                <button
-                  type="button"
-                  aria-label="إغلاق القائمة"
+          {/* Mobile Sidebar */}
+          <AnimatePresence>
+            {mobileSidebarOpen && (
+              <>
+                <motion.div
+                  initial={{
+                    opacity: 0,
+                  }}
+                  animate={{
+                    opacity: 1,
+                  }}
+                  exit={{
+                    opacity: 0,
+                  }}
                   onClick={() =>
-                    setSidebarOpen(false)
+                    setMobileSidebarOpen(
+                      false
+                    )
                   }
-                  className="flex h-9 w-9 items-center justify-center rounded-xl bg-slate-50 text-slate-500 transition hover:bg-red-50 hover:text-red-500"
+                  className="fixed inset-0 z-50 bg-slate-950/50 backdrop-blur-sm lg:hidden"
+                />
+
+                <motion.aside
+                  initial={{
+                    x: "100%",
+                  }}
+                  animate={{
+                    x: 0,
+                  }}
+                  exit={{
+                    x: "100%",
+                  }}
+                  transition={{
+                    type: "spring",
+                    damping: 28,
+                    stiffness: 260,
+                  }}
+                  className="fixed inset-y-0 right-0 z-[60] w-[88%] max-w-sm bg-white shadow-2xl lg:hidden"
                 >
-                  <X className="h-5 w-5" />
-                </button>
-              </div>
-
-              {/* Mobile progress */}
-
-              <div className="shrink-0 border-b border-slate-100 bg-slate-50/70 px-4 py-3">
-                <div className="mb-2 flex items-center justify-between text-xs">
-                  <span className="text-slate-500">
-                    تقدمك في الكورس
-                  </span>
-
-                  <span className="font-bold text-brand-600">
-                    {courseProgress}%
-                  </span>
-                </div>
-
-                <div className="h-2 overflow-hidden rounded-full bg-slate-200">
-                  <motion.div
-                    className="h-full rounded-full bg-gradient-to-l from-brand-500 to-brand-900"
-                    initial={{
-                      width: 0,
-                    }}
-                    animate={{
-                      width: `${courseProgress}%`,
-                    }}
+                  <SidebarContent
+                    sections={sections}
+                    activeLessonId={
+                      activeLesson?.id ??
+                      null
+                    }
+                    progress={
+                      lessonProgress
+                    }
+                    onSelectLesson={
+                      setActiveLesson
+                    }
+                    onClose={() =>
+                      setMobileSidebarOpen(
+                        false
+                      )
+                    }
                   />
+                </motion.aside>
+              </>
+            )}
+          </AnimatePresence>
+
+          {/* Content */}
+          <main className="min-w-0 p-3 sm:p-5 lg:p-7">
+            {!activeLesson ? (
+              <div className="flex min-h-[70vh] items-center justify-center rounded-3xl border border-dashed border-slate-300 bg-white">
+                <div className="text-center">
+                  <BookOpen className="mx-auto h-12 w-12 text-slate-300" />
+
+                  <h2 className="mt-4 font-black text-slate-800">
+                    لا يوجد درس محدد
+                  </h2>
+
+                  <p className="mt-2 text-sm text-slate-400">
+                    اختر درسًا من قائمة محتوى الكورس.
+                  </p>
                 </div>
               </div>
+            ) : (
+              <div className="mx-auto max-w-5xl">
+                {/* Breadcrumb */}
+                <div className="mb-4 flex items-center gap-2 text-xs text-slate-400">
+                  <span>
+                    الكورس
+                  </span>
 
-              {/* Lessons */}
+                  <ChevronLeft className="h-3.5 w-3.5" />
 
-              <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-1 pb-6">
-                <SidebarContent />
+                  <span>
+                    {
+                      sections.find(
+                        (section) =>
+                          section.lessons?.some(
+                            (lesson) =>
+                              lesson.id ===
+                              activeLesson.id
+                          )
+                      )?.title
+                    }
+                  </span>
+
+                  <ChevronLeft className="h-3.5 w-3.5" />
+
+                  <span className="font-bold text-slate-600">
+                    {activeLesson.title}
+                  </span>
+                </div>
+
+                {/* Video */}
+                <div className="relative overflow-hidden rounded-3xl bg-black shadow-2xl">
+                  <div className="relative aspect-video">
+                    {videoLoading ? (
+                      <div className="absolute inset-0 flex items-center justify-center">
+                        <Loader2 className="h-10 w-10 animate-spin text-white" />
+                      </div>
+                    ) : activeVideoUrl ? (
+                      <video
+                        ref={videoRef}
+                        key={activeVideoUrl}
+                        src={
+                          activeVideoUrl
+                        }
+                        controls
+                        playsInline
+                        controlsList="nodownload"
+                        onContextMenu={(event) =>
+                          event.preventDefault()
+                        }
+                        className="h-full w-full object-contain"
+                        onTimeUpdate={
+                          handleVideoTimeUpdate
+                        }
+                        onEnded={
+                          markLessonCompleted
+                        }
+                      />
+                    ) : (
+                      <div className="absolute inset-0 flex flex-col items-center justify-center px-5 text-center">
+                        <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-white/10 text-white">
+                          <VideoIcon />
+                        </div>
+
+                        <h3 className="mt-4 font-bold text-white">
+                          لا يوجد فيديو لهذا الدرس
+                        </h3>
+
+                        <p className="mt-2 text-xs text-white/50">
+                          يمكنك الاطلاع على الملفات والوصف بالأسفل.
+                        </p>
+                      </div>
+                    )}
+
+                    {/* Fixed brand watermark */}
+                    <div className="pointer-events-none absolute left-4 top-4 rounded-lg bg-black/30 px-3 py-1.5 text-[10px] font-bold text-white/60 backdrop-blur">
+                      MedCore
+                    </div>
+
+                    <VideoWatermark
+                      phone={
+                        profile?.phone ??
+                        session?.user.phone ??
+                        "عضو MedCore"
+                      }
+                      name={
+                        profile?.full_name ??
+                        session?.user.user_metadata?.full_name ??
+                        "مستخدم MedCore"
+                      }
+                      containerRef={watermarkRef}
+                    />
+
+                    {/* Recording warning */}
+                    <AnimatePresence>
+                      {screenRecordingDetected && (
+                        <motion.div
+                          initial={{
+                            opacity: 0,
+                            scale: 0.95,
+                          }}
+                          animate={{
+                            opacity: 1,
+                            scale: 1,
+                          }}
+                          exit={{
+                            opacity: 0,
+                          }}
+                          className="absolute inset-0 z-20 flex items-center justify-center bg-black/80 p-5 text-center backdrop-blur-sm"
+                        >
+                          <div>
+                            <Lock className="mx-auto h-10 w-10 text-red-400" />
+
+                            <h3 className="mt-4 text-lg font-black text-white">
+                              المحتوى محمي
+                            </h3>
+
+                            <p className="mt-2 text-sm text-white/60">
+                              لا يسمح بتسجيل أو تصوير محتوى الدرس.
+                            </p>
+                          </div>
+                        </motion.div>
+                      )}
+                    </AnimatePresence>
+                  </div>
+                </div>
+
+                {/* Video Offline */}
+                {activeVideoUrl && (
+                  <div className="relative mt-3">
+                    <div className="flex flex-col gap-3 rounded-2xl border border-slate-200 bg-white p-4 sm:flex-row sm:items-center sm:justify-between">
+                      <div className="flex items-center gap-3">
+                        <div
+                          className={`flex h-10 w-10 items-center justify-center rounded-xl ${
+                            offlineVideo
+                              ? "bg-emerald-50 text-emerald-600"
+                              : "bg-slate-100 text-slate-500"
+                          }`}
+                        >
+                          {offlineVideo ? (
+                            <WifiOff className="h-5 w-5" />
+                          ) : (
+                            <Wifi className="h-5 w-5" />
+                          )}
+                        </div>
+
+                        <div>
+                          <p className="text-sm font-bold text-slate-800">
+                            {offlineVideo
+                              ? "الفيديو محفوظ بدون إنترنت"
+                              : "مشاهدة بدون إنترنت"}
+                          </p>
+
+                          <p className="mt-1 text-xs text-slate-400">
+                            {offlineVideo
+                              ? "يمكنك تشغيل الفيديو بدون اتصال."
+                              : "احفظ الفيديو على جهازك للمشاهدة لاحقًا."}
+                          </p>
+                        </div>
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (
+                            offlineVideo
+                          ) {
+                            setShowOfflineMenu(
+                              (value) =>
+                                !value
+                            );
+                          } else {
+                            downloadOfflineVideo();
+                          }
+                        }}
+                        disabled={
+                          downloadingOffline
+                        }
+                        className="inline-flex items-center justify-center gap-2 rounded-xl bg-slate-900 px-4 py-2.5 text-xs font-bold text-white disabled:opacity-50"
+                      >
+                        {downloadingOffline ? (
+                          <>
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                            {offlineProgress}%
+                          </>
+                        ) : offlineVideo ? (
+                          <>
+                            <WifiOff className="h-4 w-4" />
+                            إدارة النسخة
+                          </>
+                        ) : (
+                          <>
+                            <Download className="h-4 w-4" />
+                            حفظ بدون إنترنت
+                          </>
+                        )}
+                      </button>
+                    </div>
+
+                    <AnimatePresence>
+                      {showOfflineMenu &&
+                        offlineVideo && (
+                          <motion.div
+                            initial={{
+                              opacity: 0,
+                              y: -5,
+                            }}
+                            animate={{
+                              opacity: 1,
+                              y: 0,
+                            }}
+                            exit={{
+                              opacity: 0,
+                              y: -5,
+                            }}
+                            className="absolute left-0 top-full z-20 mt-2 w-full overflow-hidden rounded-2xl border border-slate-200 bg-white p-2 shadow-xl sm:w-64"
+                          >
+                            <button
+                              type="button"
+                              onClick={
+                                removeOfflineVideo
+                              }
+                              className="flex w-full items-center gap-3 rounded-xl px-3 py-3 text-right text-sm font-semibold text-red-600 hover:bg-red-50"
+                            >
+                              <Trash2 className="h-4 w-4" />
+                              حذف النسخة المحفوظة
+                            </button>
+                          </motion.div>
+                        )}
+                    </AnimatePresence>
+                  </div>
+                )}
+
+                {/* Lesson Info */}
+                <section className="mt-5 rounded-3xl border border-slate-200 bg-white p-5 sm:p-6">
+                  <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+                    <div className="min-w-0">
+                      <div className="mb-2 flex flex-wrap items-center gap-2">
+                        {activeLesson.is_preview && (
+                          <span className="rounded-full bg-emerald-50 px-2.5 py-1 text-[10px] font-bold text-emerald-700">
+                            معاينة مجانية
+                          </span>
+                        )}
+
+                        {lessonProgress[
+                          activeLesson.id
+                        ]?.completed && (
+                          <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2.5 py-1 text-[10px] font-bold text-emerald-700">
+                            <CheckCircle2 className="h-3 w-3" />
+                            مكتمل
+                          </span>
+                        )}
+                      </div>
+
+                      <h1 className="text-xl font-black leading-8 text-slate-900 sm:text-2xl">
+                        {activeLesson.title}
+                      </h1>
+                    </div>
+
+                    <div className="shrink-0">
+                      <div className="flex items-center gap-2 rounded-xl bg-slate-50 px-3 py-2">
+                        <Clock3 className="h-4 w-4 text-slate-400" />
+
+                        <span className="text-xs font-semibold text-slate-500">
+                          الدرس{" "}
+                          {activeLessonIndex +
+                            1}{" "}
+                          من{" "}
+                          {allLessons.length}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+
+                  {activeLesson.description && (
+                    <div className="mt-5 border-t border-slate-100 pt-5">
+                      <h2 className="mb-2 text-sm font-black text-slate-800">
+                        وصف الدرس
+                      </h2>
+
+                      <p className="whitespace-pre-line text-sm leading-8 text-slate-600">
+                        {
+                          activeLesson.description
+                        }
+                      </p>
+                    </div>
+                  )}
+                </section>
+
+                {/* Lesson Files - immediately after lesson */}
+                <LessonFiles
+                  files={
+                    activeLessonFiles
+                  }
+                  loading={filesLoading}
+                />
+
+                {/* Navigation */}
+                <div className="mt-5 grid gap-3 sm:grid-cols-2">
+                  <button
+                    type="button"
+                    disabled={!previousLesson}
+                    onClick={() =>
+                      goToLesson(
+                        previousLesson
+                      )
+                    }
+                    className="group flex items-center gap-3 rounded-2xl border border-slate-200 bg-white p-4 text-right transition hover:border-brand-200 hover:bg-brand-50 disabled:cursor-not-allowed disabled:opacity-40"
+                  >
+                    <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-slate-100 text-slate-500 transition group-hover:bg-white group-hover:text-brand-600">
+                      <ChevronRight className="h-5 w-5" />
+                    </div>
+
+                    <div className="min-w-0">
+                      <span className="text-[10px] font-bold text-slate-400">
+                        الدرس السابق
+                      </span>
+
+                      <p className="mt-1 truncate text-sm font-bold text-slate-700">
+                        {previousLesson?.title ??
+                          "لا يوجد"}
+                      </p>
+                    </div>
+                  </button>
+
+                  <button
+                    type="button"
+                    disabled={!nextLesson}
+                    onClick={() =>
+                      goToLesson(
+                        nextLesson
+                      )
+                    }
+                    className="group flex items-center justify-between gap-3 rounded-2xl border border-brand-200 bg-brand-50 p-4 text-right transition hover:bg-brand-100 disabled:cursor-not-allowed disabled:opacity-40"
+                  >
+                    <div className="flex items-center gap-3">
+                      <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-white text-brand-600">
+                        <ChevronLeft className="h-5 w-5" />
+                      </div>
+
+                      <div className="min-w-0">
+                        <span className="text-[10px] font-bold text-brand-600">
+                          الدرس التالي
+                        </span>
+
+                        <p className="mt-1 truncate text-sm font-bold text-brand-900">
+                          {nextLesson?.title ??
+                            "انتهت الدروس"}
+                        </p>
+                      </div>
+                    </div>
+
+                    {nextLesson && (
+                      <ArrowLeft className="hidden h-4 w-4 text-brand-600 sm:block" />
+                    )}
+                  </button>
+                </div>
+
+                {/* Quizzes / Assignments */}
+                {(courseQuizzes.length > 0 ||
+                  targetedQuizzes.length > 0) && (
+                  <div className="mt-6 space-y-4">
+                    <QuizSection
+                      quizzes={courseQuizzes}
+                      title="اختبارات الكورس"
+                      description="اختبارات عامة تشمل جميع دروس الكورس"
+                      tone="violet"
+                    />
+
+                    <QuizSection
+                      quizzes={targetedQuizzes}
+                      title="اختبارات مخصصة"
+                      description="اختبارات مرتبطة بهذا الدرس أو القسم"
+                      tone="amber"
+                    />
+                  </div>
+                )}
+
+                {/* Course completion */}
+                {overallProgress ===
+                  100 && (
+                  <div className="mt-6 rounded-3xl border border-emerald-200 bg-emerald-50 p-6 text-center">
+                    <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-white text-emerald-600 shadow-sm">
+                      <Trophy className="h-7 w-7" />
+                    </div>
+
+                    <h2 className="mt-4 text-xl font-black text-emerald-900">
+                      أحسنت! أكملت الكورس 🎉
+                    </h2>
+
+                    <p className="mt-2 text-sm text-emerald-700">
+                      لقد أكملت جميع دروس هذا الكورس.
+                    </p>
+                  </div>
+                )}
               </div>
-
-              {/* Bottom safe area */}
-
-              <div className="h-[env(safe-area-inset-bottom)] shrink-0 bg-white" />
-            </motion.aside>
-          </>
-        )}
-      </AnimatePresence>
+            )}
+          </main>
+        </div>
+      </div>
     </div>
   );
 }
 
+/* -------------------------------------------------------------------------- */
+/* Small Video Icon                                                           */
+/* -------------------------------------------------------------------------- */
+
+function QuizSection({
+  quizzes,
+  title,
+  description,
+  tone,
+}: {
+  quizzes: Quiz[];
+  title: string;
+  description: string;
+  tone: "violet" | "amber";
+}) {
+  if (!quizzes.length) return null;
+
+  const styles =
+    tone === "amber"
+      ? {
+          header: "bg-amber-50",
+          icon: "bg-amber-100 text-amber-700",
+          itemIcon: "bg-amber-50 text-amber-600",
+        }
+      : {
+          header: "bg-violet-50",
+          icon: "bg-violet-100 text-violet-700",
+          itemIcon: "bg-violet-50 text-violet-600",
+        };
+
+  return (
+    <section className="overflow-hidden rounded-3xl border border-slate-200 bg-white">
+      <div className={`border-b border-slate-200 p-5 ${styles.header}`}>
+        <div className="flex items-center gap-3">
+          <div
+            className={`flex h-11 w-11 items-center justify-center rounded-xl ${styles.icon}`}
+          >
+            <ClipboardList className="h-5 w-5" />
+          </div>
+
+          <div>
+            <h2 className="font-black text-slate-900">{title}</h2>
+            <p className="mt-1 text-xs text-slate-500">{description}</p>
+          </div>
+        </div>
+      </div>
+
+      <div className="divide-y divide-slate-100">
+        {quizzes.map((quiz, index) => (
+          <Link
+            key={quiz.id}
+            to={`/app/quizzes/${quiz.id}`}
+            className="flex items-center gap-4 p-4 transition hover:bg-slate-50"
+          >
+            <div
+              className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-xl ${styles.itemIcon}`}
+            >
+              <ClipboardList className="h-5 w-5" />
+            </div>
+
+            <div className="min-w-0 flex-1">
+              <p className="font-bold text-slate-800">
+                {index + 1}. {quiz.title}
+              </p>
+
+              {quiz.description && (
+                <p className="mt-1 line-clamp-1 text-xs text-slate-400">
+                  {quiz.description}
+                </p>
+              )}
+            </div>
+
+            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-slate-100 text-slate-500">
+              <ChevronLeft className="h-4 w-4" />
+            </div>
+          </Link>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function VideoIcon() {
+  return (
+    <PlayCircle className="h-8 w-8" />
+  );
+}

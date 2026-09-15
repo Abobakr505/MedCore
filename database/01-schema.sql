@@ -191,6 +191,8 @@ alter table public.enrollments
 create table public.quizzes (
   id uuid primary key default gen_random_uuid(),
   course_id uuid not null references public.courses(id) on delete cascade,
+  section_id uuid references public.course_sections(id) on delete set null,
+  lesson_id uuid references public.lessons(id) on delete set null,
   title text not null,
   description text default '',
   duration_minutes integer not null default 30 check (duration_minutes > 0),
@@ -199,6 +201,8 @@ create table public.quizzes (
 );
 
 create index idx_quizzes_course on public.quizzes(course_id);
+create index idx_quizzes_section on public.quizzes(section_id);
+create index idx_quizzes_lesson on public.quizzes(lesson_id);
 
 create table public.quiz_questions (
   id uuid primary key default gen_random_uuid(),

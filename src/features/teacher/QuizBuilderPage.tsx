@@ -33,13 +33,17 @@ import {
   addOption,
   deleteQuestion,
 } from "@/services/quizzes";
-import type { Quiz, QuizQuestion } from "@/types";
+import { fetchCourseSections } from "@/services/courses";
+import type { CourseSection, Quiz, QuizQuestion } from "@/types";
+
+type QuizScope = "course" | "section" | "lesson";
 
 export default function QuizBuilderPage() {
   const { courseId } = useParams<{ courseId: string }>();
   const { showToast } = useToast();
 
   const [quizzes, setQuizzes] = useState<Quiz[]>([]);
+  const [sections, setSections] = useState<CourseSection[]>([]);
   const [activeQuiz, setActiveQuiz] = useState<Quiz | null>(null);
   const [questions, setQuestions] = useState<QuizQuestion[]>([]);
   const [loading, setLoading] = useState(true);
@@ -47,6 +51,9 @@ export default function QuizBuilderPage() {
   const [quizForm, setQuizForm] = useState({
     title: "",
     description: "",
+    scope: "course" as QuizScope,
+    sectionId: "",
+    lessonId: "",
     durationMinutes: 30,
     passingScore: 60,
   });
@@ -59,6 +66,7 @@ export default function QuizBuilderPage() {
     try {
       const list = await fetchCourseQuizzes(courseId);
       setQuizzes(list);
+      setSections((await fetchCourseSections(courseId)) as CourseSection[]);
     } catch {
       showToast("تعذّر تحميل الاختبارات", "error");
     } finally {
@@ -86,10 +94,31 @@ export default function QuizBuilderPage() {
       return;
     }
 
+    if (
+      (quizForm.scope === "section" || quizForm.scope === "lesson") &&
+      !quizForm.sectionId
+    ) {
+      showToast("اختر القسم المرتبط بالاختبار", "error");
+      return;
+    }
+
+    if (quizForm.scope === "lesson" && !quizForm.lessonId) {
+      showToast("اختر الدرس المرتبط بالاختبار", "error");
+      return;
+    }
+
     try {
       await createQuiz({
         courseId,
-        ...quizForm,
+        title: quizForm.title,
+        description: quizForm.description,
+        durationMinutes: quizForm.durationMinutes,
+        passingScore: quizForm.passingScore,
+        sectionId:
+          quizForm.scope === "section" || quizForm.scope === "lesson"
+            ? quizForm.sectionId || null
+            : null,
+        lessonId: quizForm.scope === "lesson" ? quizForm.lessonId || null : null,
       });
 
       showToast("تم إنشاء الاختبار بنجاح", "success");
@@ -99,6 +128,9 @@ export default function QuizBuilderPage() {
       setQuizForm({
         title: "",
         description: "",
+        scope: "course",
+        sectionId: "",
+        lessonId: "",
         durationMinutes: 30,
         passingScore: 60,
       });
@@ -140,7 +172,7 @@ export default function QuizBuilderPage() {
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-brand-600 via-brand-500 to-cyan-500 p-6 text-white shadow-lg">
+      <div className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-brand-900 via-brand-900 to-brand-500 p-6 text-white shadow-lg">
         <div className="absolute -left-10 -top-10 h-40 w-40 rounded-full bg-white/10 blur-2xl" />
         <div className="absolute -bottom-16 right-10 h-44 w-44 rounded-full bg-white/10 blur-3xl" />
 
@@ -163,7 +195,7 @@ export default function QuizBuilderPage() {
 
           <Button
             onClick={() => setCreateModalOpen(true)}
-            className="bg-white text-brand-700 hover:bg-white/90"
+            className="bg-brand-500 text-brand-700 hover:bg-brand-900"
           >
             <Plus className="h-4 w-4" />
             اختبار جديد
@@ -229,7 +261,7 @@ export default function QuizBuilderPage() {
           />
         </div>
       ) : (
-        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+        <div className="grid gap-5 md:grid-cols-2 xl:grid-cols-3">
           {quizzes.map((quiz, index) => (
             <motion.div
               key={quiz.id}
@@ -264,6 +296,8 @@ export default function QuizBuilderPage() {
                   <p className="mt-1 min-h-[40px] line-clamp-2 text-sm leading-5 text-slate-400">
                     {quiz.description || "لا يوجد وصف لهذا الاختبار"}
                   </p>
+
+                  <QuizScopeBadge quiz={quiz} sections={sections} />
 
                   <div className="mt-5 grid grid-cols-2 gap-2">
                     <MiniInfo
@@ -351,6 +385,77 @@ export default function QuizBuilderPage() {
                 })
               }
             />
+          </div>
+
+          <div className="rounded-2xl border border-slate-100 bg-slate-50/80 p-4">
+            <div className="mb-3 flex items-center justify-between gap-3">
+              <div>
+                <p className="text-sm font-black text-slate-800">نطاق الاختبار</p>
+                <p className="mt-1 text-xs text-slate-500">
+                  حدّد أين يظهر الاختبار للطلاب
+                </p>
+              </div>
+
+              <select
+                value={quizForm.scope}
+                onChange={(e) =>
+                  setQuizForm({
+                    ...quizForm,
+                    scope: e.target.value as QuizScope,
+                    sectionId: "",
+                    lessonId: "",
+                  })
+                }
+                className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-bold text-slate-700 outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-500/10"
+              >
+                <option value="course">كل الكورس</option>
+                <option value="section">قسم محدد</option>
+                <option value="lesson">درس محدد</option>
+              </select>
+            </div>
+
+            {quizForm.scope !== "course" && (
+              <select
+                value={quizForm.sectionId}
+                onChange={(e) =>
+                  setQuizForm({
+                    ...quizForm,
+                    sectionId: e.target.value,
+                    lessonId: "",
+                  })
+                }
+                className="w-full rounded-xl border border-slate-200 bg-white px-3 py-3 text-sm text-slate-700 outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-500/10"
+              >
+                <option value="">اختر القسم</option>
+                {sections.map((section) => (
+                  <option key={section.id} value={section.id}>
+                    {section.title}
+                  </option>
+                ))}
+              </select>
+            )}
+
+            {quizForm.scope === "lesson" && quizForm.sectionId && (
+              <select
+                value={quizForm.lessonId}
+                onChange={(e) =>
+                  setQuizForm({
+                    ...quizForm,
+                    lessonId: e.target.value,
+                  })
+                }
+                className="mt-3 w-full rounded-xl border border-slate-200 bg-white px-3 py-3 text-sm text-slate-700 outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-500/10"
+              >
+                <option value="">اختر الدرس</option>
+                {sections
+                  .find((section) => section.id === quizForm.sectionId)
+                  ?.lessons?.map((lesson) => (
+                    <option key={lesson.id} value={lesson.id}>
+                      {lesson.title}
+                    </option>
+                  ))}
+              </select>
+            )}
           </div>
 
           <div className="rounded-2xl bg-brand-50 p-4 text-sm text-brand-700">
@@ -724,6 +829,30 @@ function StatCard({
       </div>
 
       <p className="mt-3 text-xs font-medium text-slate-400">{label}</p>
+    </div>
+  );
+}
+
+function QuizScopeBadge({
+  quiz,
+  sections,
+}: {
+  quiz: Quiz;
+  sections: CourseSection[];
+}) {
+  const section = sections.find((item) => item.id === quiz.section_id);
+  const lesson = section?.lessons?.find((item) => item.id === quiz.lesson_id);
+
+  const label = lesson
+    ? `درس: ${lesson.title}`
+    : section
+      ? `قسم: ${section.title}`
+      : "كل الكورس";
+
+  return (
+    <div className="mt-4 inline-flex max-w-full items-center gap-2 rounded-lg bg-brand-50 px-2.5 py-1.5 text-xs font-bold text-brand-700">
+      <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-brand-500" />
+      <span className="truncate">{label}</span>
     </div>
   );
 }

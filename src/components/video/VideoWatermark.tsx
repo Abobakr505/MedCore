@@ -2,11 +2,11 @@ import { useEffect, useState } from "react";
 
 interface VideoWatermarkProps {
   phone: string;
-  userId?: string;
+  name: string;
   containerRef: React.RefObject<HTMLDivElement>;
 }
 
-export function VideoWatermark({ phone, userId, containerRef }: VideoWatermarkProps) {
+export function VideoWatermark({ phone, name, containerRef }: VideoWatermarkProps) {
   const [position, setPosition] = useState({ top: 10, left: 10 });
   const [time, setTime] = useState(() =>
     new Date().toLocaleTimeString("ar-EG", { hour: "2-digit", minute: "2-digit" })
@@ -35,7 +35,7 @@ export function VideoWatermark({ phone, userId, containerRef }: VideoWatermarkPr
     return () => clearInterval(timeInterval);
   }, []);
 
-  const label = `${phone}${userId ? " · " + userId : ""} · ${time}`;
+  const label = `${phone} · ${name}`;
 
   return (
     <div

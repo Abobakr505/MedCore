@@ -1,1282 +1,1976 @@
-import { useEffect, useMemo, useRef, useState } from "react";
-import { useParams, Link } from "react-router-dom";
-import { motion, AnimatePresence } from "framer-motion";
 import {
-  Plus,
-  Trash2,
-  UploadCloud,
-  Eye,
-  EyeOff,
-  ClipboardList,
-  ChevronDown,
-  Video,
-  CheckCircle2,
-  Layers,
+  ChangeEvent,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
+
+import { Link, useParams } from "react-router-dom";
+
+import {
+  AlertCircle,
+  ArrowLeft,
   BookOpen,
-  Sparkles,
-  ArrowRight,
-  CircleAlert,
-  XCircle,
-  RotateCcw,
-  FileVideo2,
+  CheckCircle2,
+  ChevronDown,
+  ChevronUp,
+  ClipboardList,
+  Download,
+  Eye,
+  File,
+  FileArchive,
+  FileImage,
+  FilePlus2,
+  FileSpreadsheet,
+  FileText,
+  FileVideo,
+  FolderOpen,
+  Loader2,
+  MoreVertical,
+  Pencil,
+  PlayCircle,
+  Plus,
+  RefreshCw,
+  Trash2,
+  Upload,
+  Video,
+  X,
 } from "lucide-react";
 
-import { Button } from "@/components/ui/Button";
-import { Input } from "@/components/ui/Input";
-import { Modal } from "@/components/ui/Modal";
-import { Skeleton } from "@/components/ui/Skeleton";
-import { useToast } from "@/contexts/ToastContext";
-
-import {
-  fetchSections,
-  createSection,
-  deleteSection,
-  updateSectionTitle,
-  createLesson,
-  deleteLesson,
-  updateLessonTitle,
-  updateLessonDescription,
-  updateLessonVideoPath,
-  deleteLessonVideo,
-  setPreview,
-} from "@/services/teacherCourses";
 import { supabase } from "@/lib/supabase";
 
-import { fetchCourseBySlugOrId } from "@/services/coursesById";
-import type { Course, CourseSection, Lesson } from "@/types";
-import { formatDuration } from "@/utils/format";
+import {
+  fetchCourseBySlugOrId,
+  fetchSections,
+  createSection,
+  createLesson,
+  updateLesson,
+  deleteLesson,
+  deleteSection,
+  updateSection,
+  updateLessonVideoPath,
+  deleteLessonVideo,
+  getVideoStoragePath,
+} from "@/services/teacherCourses";
 
-// ---------------------------------------------------------------------------
-// Upload helper — talks to the Supabase Storage REST endpoint directly via
-// XMLHttpRequest (instead of supabase-js, which exposes no progress events)
-// so we get real progress, the ability to cancel mid-flight, and a hook for
-// auto-retry on network drops.
-// ---------------------------------------------------------------------------
+import type {
+  Course,
+  CourseSection,
+  Lesson,
+} from "@/types";
 
-const MAX_AUTO_RETRIES = 3;
-const RETRY_DELAY_MS = 2000;
+/* -------------------------------------------------------------------------- */
+/* Types                                                                      */
+/* -------------------------------------------------------------------------- */
 
-const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL as string;
-const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY as string;
-const VIDEO_BUCKET = "course-videos";
+interface LessonFile {
+  id: string;
+  lesson_id: string;
+  title: string;
+  file_path: string;
+  file_name: string;
+  file_size: number | null;
+  mime_type: string | null;
+  order_index: number;
+  created_at: string;
+}
 
-const ALLOWED_VIDEO_EXTENSIONS = ["mp4", "webm", "mov", "m4v"];
+interface LessonWithFiles extends Lesson {
+  files?: LessonFile[];
+}
 
-type UploadStatus = "idle" | "uploading" | "retrying" | "success" | "error" | "cancelled";
+interface SectionWithLessons extends CourseSection {
+  lessons?: LessonWithFiles[];
+}
 
 interface UploadState {
-  lessonId: string;
+  uploading: boolean;
   progress: number;
-  status: UploadStatus;
-  attempt: number;
-  error?: string;
+  error: string | null;
+  fileName: string | null;
 }
 
-function getVideoStoragePath(courseId: string, lessonId: string, file: File) {
-  const ext = file.name.split(".").pop()?.toLowerCase();
+/* -------------------------------------------------------------------------- */
+/* Helpers                                                                    */
+/* -------------------------------------------------------------------------- */
 
-  if (!ext || !ALLOWED_VIDEO_EXTENSIONS.includes(ext)) {
-    throw new Error("unsupported_format");
+const FILE_BUCKET = "course-files";
+
+function formatFileSize(bytes: number | null | undefined) {
+  if (!bytes) return "0 KB";
+
+  if (bytes < 1024) {
+    return `${bytes} B`;
   }
 
-  return `${courseId}/${lessonId}.${ext}`;
+  if (bytes < 1024 * 1024) {
+    return `${(bytes / 1024).toFixed(1)} KB`;
+  }
+
+  if (bytes < 1024 * 1024 * 1024) {
+    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  }
+
+  return `${(bytes / (1024 * 1024 * 1024)).toFixed(1)} GB`;
 }
 
-function uploadVideoXHR(
-  courseId: string,
-  lessonId: string,
-  file: File,
-  accessToken: string,
-  onProgress: (percent: number) => void,
-  xhrRef: { current: XMLHttpRequest | null }
-): Promise<void> {
-  return new Promise((resolve, reject) => {
-    let path: string;
+function getFileIcon(mimeType: string | null, fileName: string) {
+  const mime = mimeType?.toLowerCase() ?? "";
+  const extension = fileName.split(".").pop()?.toLowerCase() ?? "";
 
-    try {
-      path = getVideoStoragePath(courseId, lessonId, file);
-    } catch {
-      reject(new Error("unsupported_format"));
-      return;
-    }
+  if (
+    mime.includes("pdf") ||
+    extension === "pdf"
+  ) {
+    return FileText;
+  }
 
-    const xhr = new XMLHttpRequest();
-    xhrRef.current = xhr;
+  if (
+    mime.includes("image") ||
+    ["png", "jpg", "jpeg", "webp", "gif", "svg"].includes(extension)
+  ) {
+    return FileImage;
+  }
 
-    // Upserts directly to the Supabase Storage object endpoint.
-    xhr.open(
-      "PUT",
-      `${SUPABASE_URL}/storage/v1/object/${VIDEO_BUCKET}/${encodeURI(path)}`
-    );
+  if (
+    mime.includes("spreadsheet") ||
+    mime.includes("excel") ||
+    ["xls", "xlsx", "csv"].includes(extension)
+  ) {
+    return FileSpreadsheet;
+  }
 
-    xhr.setRequestHeader("Authorization", `Bearer ${accessToken}`);
-    xhr.setRequestHeader("apikey", SUPABASE_ANON_KEY);
-    xhr.setRequestHeader("x-upsert", "true");
-    xhr.setRequestHeader("Content-Type", file.type || "application/octet-stream");
-    xhr.setRequestHeader("cache-control", "3600");
+  if (
+    mime.includes("video") ||
+    ["mp4", "mov", "avi", "mkv", "webm"].includes(extension)
+  ) {
+    return FileVideo;
+  }
 
-    xhr.upload.onprogress = (e) => {
-      if (e.lengthComputable) {
-        onProgress(Math.round((e.loaded / e.total) * 100));
-      }
-    };
+  if (
+    mime.includes("zip") ||
+    mime.includes("rar") ||
+    ["zip", "rar", "7z"].includes(extension)
+  ) {
+    return FileArchive;
+  }
 
-    xhr.onload = async () => {
-      if (xhr.status >= 200 && xhr.status < 300) {
-        try {
-          // Link the uploaded file to the lesson row, same as the old flow.
-          await updateLessonVideoPath(lessonId, path);
-          resolve();
-        } catch (linkErr) {
-          reject(linkErr instanceof Error ? linkErr : new Error("link_failed"));
-        }
-      } else {
-        reject(new Error(`status_${xhr.status}`));
-      }
-    };
-
-    xhr.onerror = () => reject(new Error("network_error"));
-    xhr.onabort = () => reject(new Error("aborted"));
-    xhr.ontimeout = () => reject(new Error("timeout"));
-
-    xhr.timeout = 0; // no artificial timeout for large files
-    xhr.send(file);
-  });
+  return File;
 }
 
-export default function CourseBuilderPage() {
-  const { courseId } = useParams<{ courseId: string }>();
-  const { showToast } = useToast();
+function getFileTypeLabel(
+  mimeType: string | null,
+  fileName: string
+) {
+  const extension =
+    fileName.split(".").pop()?.toUpperCase() || "FILE";
 
-  const [course, setCourse] = useState<Course | null>(null);
-  const [sections, setSections] = useState<CourseSection[]>([]);
-  const [loading, setLoading] = useState(true);
+  if (mimeType?.includes("pdf")) return "PDF";
+  if (mimeType?.includes("word")) return "Word";
+  if (mimeType?.includes("excel")) return "Excel";
+  if (mimeType?.includes("powerpoint")) return "PowerPoint";
+  if (mimeType?.includes("image")) return "صورة";
+  if (mimeType?.includes("video")) return "فيديو";
 
-  const [newSectionTitle, setNewSectionTitle] = useState("");
-  const [lessonModalSection, setLessonModalSection] = useState<string | null>(null);
+  return extension;
+}
 
-  const [lessonForm, setLessonForm] = useState({
-    title: "",
-    description: "",
-    isPreview: false,
-  });
+/* -------------------------------------------------------------------------- */
+/* Lesson Files                                                               */
+/* -------------------------------------------------------------------------- */
 
-  const [uploadTarget, setUploadTarget] = useState<Lesson | null>(null);
-  const [uploadState, setUploadState] = useState<UploadState | null>(null);
-  const xhrRef = useRef<XMLHttpRequest | null>(null);
-  const cancelledRef = useRef(false);
+function LessonFilesManager({
+  lesson,
+  files,
+  onFilesChange,
+}: {
+  lesson: LessonWithFiles;
+  files: LessonFile[];
+  onFilesChange: (
+    lessonId: string,
+    files: LessonFile[]
+  ) => void;
+}) {
+  const inputRef = useRef<HTMLInputElement | null>(null);
 
-  const [deleteVideoTarget, setDeleteVideoTarget] = useState<Lesson | null>(null);
-  const [deletingVideo, setDeletingVideo] = useState(false);
+  const [open, setOpen] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState(0);
+  const [uploadingName, setUploadingName] = useState<string | null>(
+    null
+  );
+  const [error, setError] = useState<string | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
 
-  const load = async () => {
-    if (!courseId) return;
+  const uploadFile = async (file: globalThis.File) => {
+    if (!file) return;
 
-    setLoading(true);
+    setError(null);
+    setUploading(true);
+    setUploadProgress(0);
+    setUploadingName(file.name);
 
     try {
-      const [c, sec] = await Promise.all([
-        fetchCourseBySlugOrId(courseId),
-        fetchSections(courseId),
+      const fileId = crypto.randomUUID();
+
+      const safeName = file.name
+        .normalize("NFD")
+        .replace(/[\u0300-\u036f]/g, "")
+        .replace(/[^a-zA-Z0-9._-]/g, "-");
+
+      const path = `${lesson.id}/${fileId}-${safeName}`;
+
+      const { error: uploadError } = await supabase.storage
+        .from(FILE_BUCKET)
+        .upload(path, file, {
+          cacheControl: "3600",
+          upsert: false,
+          contentType: file.type || "application/octet-stream",
+        });
+
+      if (uploadError) {
+        throw uploadError;
+      }
+
+      setUploadProgress(70);
+
+      const { data, error: insertError } = await supabase
+        .from("lesson_files")
+        .insert({
+          id: fileId,
+          lesson_id: lesson.id,
+          title: file.name,
+          file_path: path,
+          file_name: file.name,
+          file_size: file.size,
+          mime_type: file.type || null,
+          order_index: files.length,
+        })
+        .select("*")
+        .single();
+
+      if (insertError) {
+        await supabase.storage
+          .from(FILE_BUCKET)
+          .remove([path]);
+
+        throw insertError;
+      }
+
+      setUploadProgress(100);
+
+      onFilesChange(lesson.id, [
+        ...files,
+        data as LessonFile,
       ]);
+    } catch (err) {
+      console.error("Lesson file upload error:", err);
 
-      setCourse(c);
-      setSections(sec);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  useEffect(() => {
-    load();
-
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [courseId]);
-
-  const handleAddSection = async () => {
-    if (!courseId || !newSectionTitle.trim()) {
-      showToast("اكتب اسم القسم أولًا", "error");
-      return;
-    }
-
-    try {
-      await createSection(courseId, newSectionTitle.trim(), sections.length);
-
-      setNewSectionTitle("");
-
-      showToast("تمت إضافة القسم بنجاح", "success");
-
-      load();
-    } catch {
-      showToast("تعذّر إضافة القسم", "error");
-    }
-  };
-
-  const handleAddLesson = async () => {
-    if (!lessonModalSection || !lessonForm.title.trim()) {
-      showToast("اكتب عنوان الدرس أولًا", "error");
-      return;
-    }
-
-    const section = sections.find((s) => s.id === lessonModalSection);
-
-    try {
-      await createLesson({
-        sectionId: lessonModalSection,
-        title: lessonForm.title.trim(),
-        description: lessonForm.description.trim(),
-        orderIndex: section?.lessons?.length ?? 0,
-        isPreview: lessonForm.isPreview,
-      });
-
-      setLessonForm({
-        title: "",
-        description: "",
-        isPreview: false,
-      });
-
-      setLessonModalSection(null);
-
-      showToast("تمت إضافة الدرس بنجاح", "success");
-
-      load();
-    } catch {
-      showToast("تعذّر إضافة الدرس", "error");
-    }
-  };
-
-  // -------------------------------------------------------------------------
-  // Upload flow: tracks progress, retries automatically on network drops
-  // (up to MAX_AUTO_RETRIES), and lets the teacher cancel or manually retry.
-  // -------------------------------------------------------------------------
-
-  const runUpload = async (file: File, attempt: number) => {
-    if (!uploadTarget || !course) return;
-
-    cancelledRef.current = false;
-
-    setUploadState({
-      lessonId: uploadTarget.id,
-      progress: 0,
-      status: attempt > 1 ? "retrying" : "uploading",
-      attempt,
-    });
-
-    try {
-      const {
-        data: { session },
-      } = await supabase.auth.getSession();
-
-      const accessToken = session?.access_token;
-
-      if (!accessToken) {
-        throw new Error("not_authenticated");
-      }
-
-      await uploadVideoXHR(
-        course.id,
-        uploadTarget.id,
-        file,
-        accessToken,
-        (percent) => {
-          setUploadState((prev) =>
-            prev ? { ...prev, progress: percent, status: "uploading" } : prev
-          );
-        },
-        xhrRef
+      setError(
+        err instanceof Error
+          ? err.message
+          : "حدث خطأ أثناء رفع الملف"
       );
-
-      setUploadState((prev) => (prev ? { ...prev, status: "success", progress: 100 } : prev));
-
-      showToast("تم رفع الفيديو بنجاح", "success");
-
+    } finally {
       setTimeout(() => {
-        setUploadTarget(null);
-        setUploadState(null);
-      }, 800);
-
-      load();
-    } catch (err) {
-      const reason = err instanceof Error ? err.message : "unknown";
-
-      if (cancelledRef.current || reason === "aborted") {
-        setUploadState((prev) => (prev ? { ...prev, status: "cancelled" } : prev));
-        return;
-      }
-
-      console.error("Upload lesson video failed:", err);
-
-      const isNetworkIssue = reason === "network_error" || reason === "timeout";
-
-      if (isNetworkIssue && attempt < MAX_AUTO_RETRIES) {
-        showToast(
-          `انقطع الاتصال، جاري إعادة المحاولة (${attempt}/${MAX_AUTO_RETRIES})...`,
-          "error"
-        );
-
-        setTimeout(() => {
-          if (!cancelledRef.current) runUpload(file, attempt + 1);
-        }, RETRY_DELAY_MS);
-
-        return;
-      }
-
-      let errorMessage = "تعذّر رفع الفيديو، تأكد من حجم الملف والصيغة";
-
-      if (isNetworkIssue) {
-        errorMessage = "تعذّر الاتصال بالسيرفر بعد عدة محاولات";
-      } else if (reason === "unsupported_format") {
-        errorMessage = "صيغة الفيديو غير مدعومة. استخدم MP4 أو WebM أو MOV";
-      } else if (reason === "not_authenticated") {
-        errorMessage = "انتهت الجلسة، أعد تسجيل الدخول وحاول مرة أخرى";
-      } else if (reason === "link_failed") {
-        errorMessage = "تم رفع الفيديو لكن تعذر ربطه بالدرس";
-      }
-
-      setUploadState((prev) =>
-        prev ? { ...prev, status: "error", error: errorMessage } : prev
-      );
-
-      showToast("تعذّر رفع الفيديو", "error");
+        setUploading(false);
+        setUploadingName(null);
+        setUploadProgress(0);
+      }, 500);
     }
   };
 
-  const startUpload = (file: File) => {
-    if (!file.type.startsWith("video/")) {
-      showToast("الملف المختار ليس فيديو صالح", "error");
-      return;
+  const handleFileChange = async (
+    event: ChangeEvent<HTMLInputElement>
+  ) => {
+    const selectedFiles = Array.from(
+      event.target.files ?? []
+    );
+
+    if (!selectedFiles.length) return;
+
+    for (const file of selectedFiles) {
+      await uploadFile(file);
     }
 
-    runUpload(file, 1);
+    event.target.value = "";
   };
 
-  const cancelUpload = () => {
-    cancelledRef.current = true;
-    xhrRef.current?.abort();
-    setUploadState(null);
-  };
+  const deleteFile = async (file: LessonFile) => {
+    const confirmed = window.confirm(
+      `هل أنت متأكد من حذف الملف "${file.file_name}"؟`
+    );
 
-  const closeUploadModal = () => {
-    if (uploadState?.status === "uploading" || uploadState?.status === "retrying") {
-      cancelUpload();
-    }
-    setUploadTarget(null);
-    setUploadState(null);
-  };
+    if (!confirmed) return;
 
-  const handleDeleteVideo = async () => {
-    if (!deleteVideoTarget?.video_path) return;
-
-    setDeletingVideo(true);
+    setDeletingId(file.id);
+    setError(null);
 
     try {
-      await deleteLessonVideo(deleteVideoTarget.id, deleteVideoTarget.video_path);
-      showToast("تم حذف الفيديو بنجاح", "success");
-      setDeleteVideoTarget(null);
-      load();
+      const { error: storageError } =
+        await supabase.storage
+          .from(FILE_BUCKET)
+          .remove([file.file_path]);
+
+      if (storageError) {
+        console.warn(
+          "Storage delete warning:",
+          storageError
+        );
+      }
+
+      const { error: dbError } = await supabase
+        .from("lesson_files")
+        .delete()
+        .eq("id", file.id);
+
+      if (dbError) {
+        throw dbError;
+      }
+
+      onFilesChange(
+        lesson.id,
+        files.filter((item) => item.id !== file.id)
+      );
     } catch (err) {
-      console.error("Delete lesson video failed:", err);
-      showToast(err instanceof Error ? err.message : "تعذّر حذف الفيديو", "error");
+      console.error("Delete lesson file error:", err);
+
+      setError(
+        err instanceof Error
+          ? err.message
+          : "حدث خطأ أثناء حذف الملف"
+      );
     } finally {
-      setDeletingVideo(false);
+      setDeletingId(null);
     }
   };
-
-  const stats = useMemo(() => {
-    const lessons = sections.flatMap((section) => section.lessons ?? []);
-
-    const totalLessons = lessons.length;
-
-    const videos = lessons.filter((lesson) => !!lesson.video_path).length;
-
-    const previews = lessons.filter((lesson) => lesson.is_preview).length;
-
-    const completion = totalLessons > 0 ? Math.round((videos / totalLessons) * 100) : 0;
-
-    return {
-      totalLessons,
-      videos,
-      previews,
-      completion,
-    };
-  }, [sections]);
-
-  if (loading) {
-    return (
-      <div className="space-y-5">
-        <Skeleton className="h-28 rounded-3xl" />
-
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          {Array.from({ length: 4 }).map((_, i) => (
-            <Skeleton key={i} className="h-28 rounded-2xl" />
-          ))}
-        </div>
-
-        <Skeleton className="h-40 rounded-3xl" />
-      </div>
-    );
-  }
-
-  if (!course) return null;
 
   return (
-    <div className="space-y-6 pb-10">
-      {/* Header */}
-      <div className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-brand-900 via-brand-800 to-slate-900 p-6 text-white shadow-lg">
-        <div className="absolute -left-16 -top-16 h-40 w-40 rounded-full bg-brand-400/20 blur-3xl" />
-        <div className="absolute -bottom-20 right-10 h-48 w-48 rounded-full bg-cyan-400/10 blur-3xl" />
-
-        <div className="relative flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
-          <div>
-            <Link
-              to="/app/teacher/courses"
-              className="mb-3 inline-flex items-center gap-1 text-xs text-white/60 hover:text-white"
-            >
-              <ArrowRight className="h-3.5 w-3.5" />
-              العودة إلى كورساتي
-            </Link>
-
-            <div className="flex items-center gap-3">
-              <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-white/10 backdrop-blur">
-                <BookOpen className="h-6 w-6 text-brand-300" />
-              </div>
-
-              <div>
-                <h1 className="text-2xl font-black">{course.title}</h1>
-
-                <p className="mt-1 text-sm text-white/60">إدارة محتوى الكورس</p>
-              </div>
-            </div>
+    <div className="mt-3 overflow-hidden rounded-2xl border border-slate-200 bg-slate-50">
+      <button
+        type="button"
+        onClick={() => setOpen((value) => !value)}
+        className="flex w-full items-center justify-between gap-3 px-4 py-3 text-right transition hover:bg-slate-100"
+      >
+        <div className="flex min-w-0 items-center gap-3">
+          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-amber-100 text-amber-700">
+            <FolderOpen className="h-4 w-4" />
           </div>
 
-          <Link to={`/app/teacher/courses/${course.id}/quiz-builder`}>
-            <Button variant="secondary">
-              <ClipboardList className="h-4 w-4" />
-              إدارة الاختبارات
-            </Button>
-          </Link>
+          <div className="min-w-0">
+            <p className="font-semibold text-slate-800">
+              ملفات الدرس
+            </p>
+
+            <p className="text-xs text-slate-500">
+              {files.length === 0
+                ? "لا توجد ملفات"
+                : `${files.length} ملف`}
+            </p>
+          </div>
         </div>
-      </div>
 
-      {/* Stats */}
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <StatCard
-          icon={<Layers />}
-          title="الأقسام"
-          value={sections.length}
-          description="قسم داخل الكورس"
-          iconClass="bg-brand-50 text-brand-500"
-        />
+        {open ? (
+          <ChevronUp className="h-5 w-5 text-slate-400" />
+        ) : (
+          <ChevronDown className="h-5 w-5 text-slate-400" />
+        )}
+      </button>
 
-        <StatCard
-          icon={<Video />}
-          title="الدروس"
-          value={stats.totalLessons}
-          description="إجمالي الدروس"
-          iconClass="bg-blue-50 text-blue-500"
-        />
-
-        <StatCard
-          icon={<CheckCircle2 />}
-          title="الفيديوهات"
-          value={stats.videos}
-          description={`${stats.completion}% من المحتوى جاهز`}
-          iconClass="bg-emerald-50 text-emerald-500"
-        />
-
-        <StatCard
-          icon={<Eye />}
-          title="المعاينات"
-          value={stats.previews}
-          description="دروس مجانية للزوار"
-          iconClass="bg-amber-50 text-amber-500"
-        />
-      </div>
-
-      {/* Progress */}
-      {stats.totalLessons > 0 && (
-        <div className="rounded-3xl border border-slate-100 bg-white p-5 shadow-sm">
-          <div className="flex items-center justify-between gap-3">
+      {open && (
+        <div className="border-t border-slate-200 p-4">
+          <div className="mb-4 flex flex-col gap-3 rounded-xl border border-dashed border-slate-300 bg-white p-4 sm:flex-row sm:items-center sm:justify-between">
             <div>
-              <div className="flex items-center gap-2">
-                <Sparkles className="h-4 w-4 text-brand-500" />
-                <h2 className="font-bold text-slate-800">جاهزية محتوى الكورس</h2>
-              </div>
+              <p className="font-medium text-slate-800">
+                أضف ملفات مساعدة للدرس
+              </p>
 
-              <p className="mt-1 text-xs text-slate-400">
-                أضف فيديوهات لجميع الدروس قبل نشر الكورس
+              <p className="mt-1 text-xs text-slate-500">
+                PDF، Word، PowerPoint، صور، ملفات مضغوطة وغيرها.
               </p>
             </div>
 
-            <span className="text-lg font-black text-brand-600">{stats.completion}%</span>
+            <button
+              type="button"
+              disabled={uploading}
+              onClick={() => inputRef.current?.click()}
+              className="inline-flex items-center justify-center gap-2 rounded-xl bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {uploading ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <FilePlus2 className="h-4 w-4" />
+              )}
+
+              {uploading ? "جاري الرفع..." : "إضافة ملفات"}
+            </button>
+
+            <input
+              ref={inputRef}
+              type="file"
+              multiple
+              className="hidden"
+              onChange={handleFileChange}
+            />
           </div>
 
-          <div className="mt-4 h-2.5 overflow-hidden rounded-full bg-slate-100">
-            <motion.div
-              initial={{ width: 0 }}
-              animate={{ width: `${stats.completion}%` }}
-              transition={{ duration: 0.8 }}
-              className="h-full rounded-full bg-gradient-to-r from-brand-500 to-emerald-500"
+          {uploading && (
+            <div className="mb-4 rounded-xl border border-blue-100 bg-blue-50 p-4">
+              <div className="mb-2 flex items-center justify-between gap-3 text-xs">
+                <span className="truncate text-blue-800">
+                  {uploadingName}
+                </span>
+
+                <span className="font-bold text-blue-700">
+                  {uploadProgress}%
+                </span>
+              </div>
+
+              <div className="h-2 overflow-hidden rounded-full bg-blue-100">
+                <div
+                  className="h-full rounded-full bg-blue-600 transition-all duration-300"
+                  style={{
+                    width: `${uploadProgress}%`,
+                  }}
+                />
+              </div>
+            </div>
+          )}
+
+          {error && (
+            <div className="mb-4 flex items-start gap-3 rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+              <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+
+              <span className="flex-1">
+                {error}
+              </span>
+
+              <button
+                type="button"
+                onClick={() => setError(null)}
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+          )}
+
+          {files.length === 0 ? (
+            <div className="rounded-xl border border-slate-200 bg-white px-4 py-8 text-center">
+              <FolderOpen className="mx-auto mb-2 h-8 w-8 text-slate-300" />
+
+              <p className="text-sm font-medium text-slate-600">
+                لا توجد ملفات لهذا الدرس
+              </p>
+
+              <p className="mt-1 text-xs text-slate-400">
+                أضف الملزمة أو الملفات المساعدة من الزر بالأعلى
+              </p>
+            </div>
+          ) : (
+            <div className="space-y-2">
+              {files.map((file) => {
+                const Icon = getFileIcon(
+                  file.mime_type,
+                  file.file_name
+                );
+
+                return (
+                  <div
+                    key={file.id}
+                    className="flex items-center gap-3 rounded-xl border border-slate-200 bg-white p-3"
+                  >
+                    <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-slate-100 text-slate-600">
+                      <Icon className="h-5 w-5" />
+                    </div>
+
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-sm font-semibold text-slate-800">
+                        {file.title}
+                      </p>
+
+                      <div className="mt-1 flex flex-wrap items-center gap-2 text-[11px] text-slate-400">
+                        <span>
+                          {getFileTypeLabel(
+                            file.mime_type,
+                            file.file_name
+                          )}
+                        </span>
+
+                        <span>•</span>
+
+                        <span>
+                          {formatFileSize(file.file_size)}
+                        </span>
+                      </div>
+                    </div>
+
+                    <button
+                      type="button"
+                      disabled={deletingId === file.id}
+                      onClick={() => deleteFile(file)}
+                      className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-red-500 transition hover:bg-red-50 disabled:opacity-50"
+                      title="حذف الملف"
+                    >
+                      {deletingId === file.id ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      ) : (
+                        <Trash2 className="h-4 w-4" />
+                      )}
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* -------------------------------------------------------------------------- */
+/* Lesson Card                                                                */
+/* -------------------------------------------------------------------------- */
+
+function LessonCard({
+  lesson,
+  index,
+  files,
+  onFilesChange,
+  onRename,
+  onDelete,
+  onTogglePreview,
+  onUploadVideo,
+  onDeleteVideo,
+  videoUploadState,
+}: {
+  lesson: LessonWithFiles;
+  index: number;
+  files: LessonFile[];
+  onFilesChange: (
+    lessonId: string,
+    files: LessonFile[]
+  ) => void;
+  onRename: (lesson: LessonWithFiles) => void;
+  onDelete: (lesson: LessonWithFiles) => void;
+  onTogglePreview: (lesson: LessonWithFiles) => void;
+  onUploadVideo: (lesson: LessonWithFiles) => void;
+  onDeleteVideo: (lesson: LessonWithFiles) => void;
+  videoUploadState?: UploadState;
+}) {
+  const hasVideo = Boolean(
+    (lesson as Lesson & { video_path?: string | null }).video_path
+  );
+
+  const isUploading = videoUploadState?.uploading ?? false;
+
+  return (
+    <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-start">
+        <div className="flex min-w-0 flex-1 gap-3">
+          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-brand-50 text-brand-600">
+            <span className="text-sm font-bold">
+              {index + 1}
+            </span>
+          </div>
+
+          <div className="min-w-0 flex-1">
+            <div className="flex flex-wrap items-center gap-2">
+              <h4 className="truncate font-bold text-slate-900">
+                {lesson.title}
+              </h4>
+
+              {lesson.is_preview && (
+                <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2 py-1 text-[10px] font-bold text-emerald-700">
+                  <Eye className="h-3 w-3" />
+                  معاينة مجانية
+                </span>
+              )}
+            </div>
+
+            {lesson.description && (
+              <p className="mt-1 line-clamp-2 text-sm leading-6 text-slate-500">
+                {lesson.description}
+              </p>
+            )}
+
+            <div className="mt-3 flex flex-wrap gap-2">
+              <span
+                className={`inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-medium ${
+                  hasVideo
+                    ? "bg-emerald-50 text-emerald-700"
+                    : "bg-slate-100 text-slate-500"
+                }`}
+              >
+                {hasVideo ? (
+                  <CheckCircle2 className="h-3.5 w-3.5" />
+                ) : (
+                  <Video className="h-3.5 w-3.5" />
+                )}
+
+                {hasVideo
+                  ? "الفيديو مرفوع"
+                  : "لا يوجد فيديو"}
+              </span>
+
+              <span className="inline-flex items-center gap-1.5 rounded-lg bg-amber-50 px-2.5 py-1.5 text-xs font-medium text-amber-700">
+                <FolderOpen className="h-3.5 w-3.5" />
+
+                {files.length} ملفات
+              </span>
+            </div>
+          </div>
+        </div>
+
+        <div className="flex flex-wrap gap-2 lg:justify-end">
+          <button
+            type="button"
+            onClick={() => onRename(lesson)}
+            className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 transition hover:bg-slate-50"
+          >
+            <Pencil className="h-3.5 w-3.5" />
+            تعديل
+          </button>
+
+          <button
+            type="button"
+            onClick={() => onTogglePreview(lesson)}
+            className={`inline-flex items-center gap-2 rounded-xl px-3 py-2 text-xs font-semibold transition ${
+              lesson.is_preview
+                ? "bg-emerald-50 text-emerald-700 hover:bg-emerald-100"
+                : "bg-slate-100 text-slate-700 hover:bg-slate-200"
+            }`}
+          >
+            <Eye className="h-3.5 w-3.5" />
+
+            {lesson.is_preview
+              ? "إلغاء المعاينة"
+              : "تفعيل المعاينة"}
+          </button>
+
+          <button
+            type="button"
+            disabled={isUploading}
+            onClick={() => onUploadVideo(lesson)}
+            className="inline-flex items-center gap-2 rounded-xl bg-brand-600 px-3 py-2 text-xs font-semibold text-white transition hover:bg-brand-700 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {isUploading ? (
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            ) : (
+              <Upload className="h-3.5 w-3.5" />
+            )}
+
+            {hasVideo ? "استبدال الفيديو" : "رفع الفيديو"}
+          </button>
+
+          {hasVideo && (
+            <button
+              type="button"
+              disabled={isUploading}
+              onClick={() => onDeleteVideo(lesson)}
+              className="inline-flex items-center gap-2 rounded-xl border border-red-200 px-3 py-2 text-xs font-semibold text-red-600 transition hover:bg-red-50 disabled:opacity-50"
+            >
+              <Trash2 className="h-3.5 w-3.5" />
+              حذف الفيديو
+            </button>
+          )}
+
+          <button
+            type="button"
+            onClick={() => onDelete(lesson)}
+            className="inline-flex items-center gap-2 rounded-xl border border-red-200 px-3 py-2 text-xs font-semibold text-red-600 transition hover:bg-red-50"
+          >
+            <Trash2 className="h-3.5 w-3.5" />
+            حذف
+          </button>
+        </div>
+      </div>
+
+      {isUploading && (
+        <div className="mt-4 rounded-xl border border-blue-100 bg-blue-50 p-4">
+          <div className="mb-2 flex items-center justify-between text-xs">
+            <span className="truncate text-blue-800">
+              {videoUploadState?.fileName}
+            </span>
+
+            <span className="font-bold text-blue-700">
+              {videoUploadState?.progress ?? 0}%
+            </span>
+          </div>
+
+          <div className="h-2 overflow-hidden rounded-full bg-blue-100">
+            <div
+              className="h-full rounded-full bg-blue-600 transition-all"
+              style={{
+                width: `${videoUploadState?.progress ?? 0}%`,
+              }}
             />
           </div>
         </div>
       )}
 
-      {/* Add Section */}
-      <div className="rounded-3xl border border-dashed border-brand-200 bg-brand-50/40 p-4">
-        <div className="mb-3 flex items-center gap-2">
-          <Plus className="h-4 w-4 text-brand-500" />
-          <h2 className="font-bold text-brand-900">إضافة قسم جديد</h2>
+      {videoUploadState?.error && (
+        <div className="mt-3 flex items-center gap-2 rounded-xl bg-red-50 p-3 text-xs text-red-700">
+          <AlertCircle className="h-4 w-4" />
+
+          {videoUploadState.error}
         </div>
+      )}
 
-        <div className="flex flex-col gap-2 sm:flex-row">
-          <Input
-            placeholder="مثال: الوحدة الأولى - Anatomy"
-            value={newSectionTitle}
-            onChange={(e) => setNewSectionTitle(e.target.value)}
-          />
-
-          <Button onClick={handleAddSection} className="sm:min-w-[130px]">
-            <Plus className="h-4 w-4" />
-            إضافة القسم
-          </Button>
-        </div>
-      </div>
-
-      {/* Sections */}
-      <div className="space-y-4">
-        {sections.length === 0 ? (
-          <div className="rounded-3xl border border-slate-100 bg-white p-12 text-center shadow-sm">
-            <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-2xl bg-brand-50 text-brand-500">
-              <Layers className="h-7 w-7" />
-            </div>
-
-            <h3 className="mt-4 font-bold text-slate-800">لا توجد أقسام حتى الآن</h3>
-
-            <p className="mt-1 text-sm text-slate-400">ابدأ بإضافة أول قسم للكورس</p>
-          </div>
-        ) : (
-          sections.map((section, index) => (
-            <motion.div
-              key={section.id}
-              initial={{ opacity: 0, y: 12 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: index * 0.05 }}
-            >
-              <SectionBlock
-                section={section}
-                onAddLesson={() => setLessonModalSection(section.id)}
-                onDeleteSection={async () => {
-                  await deleteSection(section.id);
-                  showToast("تم حذف القسم", "success");
-                  load();
-                }}
-                onRenameSection={async (newTitle) => {
-                  await updateSectionTitle(section.id, newTitle);
-                  showToast("تم تعديل اسم القسم", "success");
-                  load();
-                }}
-                onDeleteLesson={async (lessonId) => {
-                  await deleteLesson(lessonId);
-                  showToast("تم حذف الدرس", "success");
-                  load();
-                }}
-                onRenameLesson={async (lessonId, newTitle) => {
-                  await updateLessonTitle(lessonId, newTitle);
-                  showToast("تم تعديل اسم الدرس", "success");
-                  load();
-                }}
-                onRenameLessonDescription={async (lessonId, newDescription) => {
-                  await updateLessonDescription(lessonId, newDescription);
-                  showToast("تم تعديل وصف الدرس", "success");
-                  load();
-                }}
-                onTogglePreview={async (lesson) => {
-                  await setPreview(lesson.id, !lesson.is_preview);
-
-                  showToast(
-                    lesson.is_preview ? "تم إلغاء المعاينة المجانية" : "تم تفعيل المعاينة المجانية",
-                    "success"
-                  );
-
-                  load();
-                }}
-                onUploadClick={setUploadTarget}
-                onDeleteVideoClick={setDeleteVideoTarget}
-              />
-            </motion.div>
-          ))
-        )}
-      </div>
-
-      {/* Lesson Modal */}
-      <Modal
-        open={!!lessonModalSection}
-        onClose={() => setLessonModalSection(null)}
-        title="إضافة درس جديد"
-      >
-        <div className="space-y-4">
-          <Input
-            label="عنوان الدرس"
-            placeholder="مثال: Introduction to Anatomy"
-            value={lessonForm.title}
-            onChange={(e) => setLessonForm({ ...lessonForm, title: e.target.value })}
-          />
-
-          <div>
-            <label className="mb-1.5 block text-sm font-medium text-slate-700">وصف مختصر</label>
-
-            <textarea
-              rows={3}
-              placeholder="اكتب وصفًا مختصرًا للدرس..."
-              className="w-full rounded-xl border border-slate-300 px-4 py-2.5 text-sm outline-none transition focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20"
-              value={lessonForm.description}
-              onChange={(e) => setLessonForm({ ...lessonForm, description: e.target.value })}
-            />
-          </div>
-
-          <label className="flex cursor-pointer items-center gap-3 rounded-2xl border border-slate-100 bg-slate-50 p-4">
-            <input
-              type="checkbox"
-              checked={lessonForm.isPreview}
-              onChange={(e) => setLessonForm({ ...lessonForm, isPreview: e.target.checked })}
-              className="h-4 w-4 accent-brand-500"
-            />
-
-            <div>
-              <p className="text-sm font-bold text-slate-700">معاينة مجانية</p>
-
-              <p className="text-xs text-slate-400">
-                السماح للزائر بمشاهدة هذا الدرس قبل الاشتراك
-              </p>
-            </div>
-          </label>
-
-          <Button className="w-full" onClick={handleAddLesson}>
-            <Plus className="h-4 w-4" />
-            إضافة الدرس
-          </Button>
-        </div>
-      </Modal>
-
-      {/* Upload Modal */}
-      <Modal
-        open={!!uploadTarget}
-        onClose={closeUploadModal}
-        title={`رفع فيديو: ${uploadTarget?.title ?? ""}`}
-      >
-        <UploadPanel state={uploadState} onSelectFile={startUpload} onCancel={cancelUpload} />
-      </Modal>
-
-      {/* Delete Video Confirmation */}
-      <Modal
-        open={!!deleteVideoTarget}
-        onClose={() => !deletingVideo && setDeleteVideoTarget(null)}
-        title="حذف الفيديو"
-      >
-        <div className="space-y-4">
-          <div className="rounded-2xl border border-red-100 bg-red-50/60 p-4 text-center">
-            <div className="mx-auto mb-2 flex h-12 w-12 items-center justify-center rounded-2xl bg-white shadow-sm">
-              <Trash2 className="h-6 w-6 text-red-500" />
-            </div>
-
-            <p className="text-sm font-bold text-red-600">
-              هل أنت متأكد من حذف فيديو الدرس "{deleteVideoTarget?.title}"؟
-            </p>
-
-            <p className="mt-1 text-xs text-red-400">
-              سيتم حذف الفيديو نهائيًا، ويمكنك رفع فيديو جديد بعد ذلك في أي وقت.
-            </p>
-          </div>
-
-          <div className="flex gap-2">
-            <Button
-              variant="outline"
-              className="flex-1"
-              onClick={() => setDeleteVideoTarget(null)}
-              disabled={deletingVideo}
-            >
-              إلغاء
-            </Button>
-
-            <Button
-              className="flex-1 bg-red-500 hover:bg-red-600"
-              onClick={handleDeleteVideo}
-              isLoading={deletingVideo}
-            >
-              <Trash2 className="h-4 w-4" />
-              حذف الفيديو
-            </Button>
-          </div>
-        </div>
-      </Modal>
+      <LessonFilesManager
+        lesson={lesson}
+        files={files}
+        onFilesChange={onFilesChange}
+      />
     </div>
   );
 }
 
-// ---------------------------------------------------------------------------
-// Upload panel: drag & drop + file picker + progress bar + cancel/retry UI
-// ---------------------------------------------------------------------------
-
-function UploadPanel({
-  state,
-  onSelectFile,
-  onCancel,
-}: {
-  state: UploadState | null;
-  onSelectFile: (file: File) => void;
-  onCancel: () => void;
-}) {
-  const [dragOver, setDragOver] = useState(false);
-  const [pendingFile, setPendingFile] = useState<File | null>(null);
-
-  const isBusy = state?.status === "uploading" || state?.status === "retrying";
-
-  const handleFile = (file: File) => {
-    setPendingFile(file);
-    onSelectFile(file);
-  };
-
-  if (isBusy && state) {
-    return (
-      <div className="space-y-4">
-        <div className="rounded-3xl border border-brand-100 bg-brand-50/50 p-6 text-center">
-          <div className="mx-auto mb-3 flex h-14 w-14 items-center justify-center rounded-2xl bg-white shadow-sm">
-            <span className="h-6 w-6 animate-spin rounded-full border-2 border-brand-200 border-t-brand-500" />
-          </div>
-
-          <p className="font-bold text-brand-700">
-            {state.status === "retrying"
-              ? `إعادة المحاولة (${state.attempt}/${MAX_AUTO_RETRIES})...`
-              : "جاري رفع الفيديو..."}
-          </p>
-
-          <p className="mt-1 text-xs text-brand-400">لا تغلق الصفحة حتى يكتمل الرفع</p>
-
-          <div className="mt-4 h-2.5 overflow-hidden rounded-full bg-white">
-            <motion.div
-              initial={{ width: 0 }}
-              animate={{ width: `${state.progress}%` }}
-              transition={{ duration: 0.2 }}
-              className="h-full rounded-full bg-gradient-to-r from-brand-500 to-cyan-500"
-            />
-          </div>
-
-          <p className="mt-2 text-sm font-black text-brand-600">{state.progress}%</p>
-        </div>
-
-        <Button variant="outline" className="w-full" onClick={onCancel}>
-          <XCircle className="h-4 w-4 text-red-500" />
-          إلغاء الرفع
-        </Button>
-      </div>
-    );
-  }
-
-  if (state?.status === "error") {
-    return (
-      <div className="space-y-4">
-        <div className="rounded-3xl border border-red-100 bg-red-50/60 p-6 text-center">
-          <div className="mx-auto mb-3 flex h-14 w-14 items-center justify-center rounded-2xl bg-white shadow-sm">
-            <CircleAlert className="h-7 w-7 text-red-500" />
-          </div>
-
-          <p className="font-bold text-red-600">فشل رفع الفيديو</p>
-          <p className="mt-1 text-xs text-red-400">{state.error}</p>
-        </div>
-
-        <Button
-          className="w-full"
-          onClick={() => pendingFile && handleFile(pendingFile)}
-          disabled={!pendingFile}
-        >
-          <RotateCcw className="h-4 w-4" />
-          إعادة المحاولة
-        </Button>
-      </div>
-    );
-  }
-
-  if (state?.status === "success") {
-    return (
-      <div className="rounded-3xl border border-emerald-100 bg-emerald-50/60 p-6 text-center">
-        <div className="mx-auto mb-3 flex h-14 w-14 items-center justify-center rounded-2xl bg-white shadow-sm">
-          <CheckCircle2 className="h-7 w-7 text-emerald-500" />
-        </div>
-
-        <p className="font-bold text-emerald-600">تم رفع الفيديو بنجاح</p>
-      </div>
-    );
-  }
-
-  // idle / cancelled — show the picker
-  return (
-    <label
-      onDragOver={(e) => {
-        e.preventDefault();
-        setDragOver(true);
-      }}
-      onDragLeave={() => setDragOver(false)}
-      onDrop={(e) => {
-        e.preventDefault();
-        setDragOver(false);
-        const file = e.dataTransfer.files?.[0];
-        if (file) handleFile(file);
-      }}
-      className={`group flex cursor-pointer flex-col items-center justify-center gap-3 rounded-3xl border-2 border-dashed p-10 text-center transition ${
-        dragOver
-          ? "border-brand-400 bg-brand-50"
-          : "border-slate-200 bg-slate-50/50 hover:border-brand-300 hover:bg-brand-50/40"
-      }`}
-    >
-      <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-brand-50 text-brand-500 transition group-hover:scale-110">
-        <UploadCloud className="h-7 w-7" />
-      </div>
-
-      <div>
-        <p className="font-bold text-slate-700">اسحب الفيديو هنا أو اضغط للاختيار</p>
-
-        <p className="mt-1 text-xs text-slate-400">MP4 / WebM / MOV</p>
-
-        {state?.status === "cancelled" && (
-          <p className="mt-1 text-xs font-semibold text-amber-500">تم إلغاء الرفع السابق</p>
-        )}
-      </div>
-
-      <input
-        type="file"
-        accept="video/*"
-        className="hidden"
-        onChange={(e) => {
-          const file = e.target.files?.[0];
-          if (file) handleFile(file);
-        }}
-      />
-    </label>
-  );
-}
-
-function StatCard({
-  icon,
-  title,
-  value,
-  description,
-  iconClass,
-}: {
-  icon: React.ReactNode;
-  title: string;
-  value: number;
-  description: string;
-  iconClass: string;
-}) {
-  return (
-    <motion.div whileHover={{ y: -3 }} className="rounded-2xl border border-slate-100 bg-white p-5 shadow-sm">
-      <div className="flex items-start justify-between">
-        <div>
-          <p className="text-xs font-medium text-slate-400">{title}</p>
-
-          <p className="mt-2 text-2xl font-black text-slate-800">{value}</p>
-
-          <p className="mt-1 text-[11px] text-slate-400">{description}</p>
-        </div>
-
-        <div className={`flex h-11 w-11 items-center justify-center rounded-2xl ${iconClass}`}>
-          {icon}
-        </div>
-      </div>
-    </motion.div>
-  );
-}
+/* -------------------------------------------------------------------------- */
+/* Section Block                                                              */
+/* -------------------------------------------------------------------------- */
 
 function SectionBlock({
   section,
-  onAddLesson,
-  onDeleteSection,
-  onRenameSection,
-  onDeleteLesson,
-  onRenameLesson,
-  onRenameLessonDescription,
-  onTogglePreview,
-  onUploadClick,
-  onDeleteVideoClick,
+  index,
+  onRefresh,
 }: {
-  section: CourseSection;
-  onAddLesson: () => void;
-  onDeleteSection: () => void;
-  onRenameSection: (newTitle: string) => Promise<void>;
-  onDeleteLesson: (lessonId: string) => void;
-  onRenameLesson: (lessonId: string, newTitle: string) => Promise<void>;
-  onRenameLessonDescription: (lessonId: string, newDescription: string) => Promise<void>;
-  onTogglePreview: (lesson: Lesson) => void;
-  onUploadClick: (lesson: Lesson) => void;
-  onDeleteVideoClick: (lesson: Lesson) => void;
+  section: SectionWithLessons;
+  index: number;
+  onRefresh: () => Promise<void>;
 }) {
-  const [open, setOpen] = useState(true);
+  const [expanded, setExpanded] = useState(true);
+  const [addingLesson, setAddingLesson] = useState(false);
+
+  const [newLessonTitle, setNewLessonTitle] = useState("");
+  const [newLessonDescription, setNewLessonDescription] =
+    useState("");
+
   const [editingSection, setEditingSection] = useState(false);
-  const [sectionTitleDraft, setSectionTitleDraft] = useState(section.title);
-  const [editingLessonId, setEditingLessonId] = useState<string | null>(null);
-  const [lessonTitleDraft, setLessonTitleDraft] = useState("");
-  const [editingDescId, setEditingDescId] = useState<string | null>(null);
-  const [lessonDescDraft, setLessonDescDraft] = useState("");
+  const [sectionTitle, setSectionTitle] = useState(
+    section.title
+  );
+
+  const [saving, setSaving] = useState(false);
+
+  const [localFiles, setLocalFiles] = useState<
+    Record<string, LessonFile[]>
+  >({});
+
+  const [videoUploadStates, setVideoUploadStates] =
+    useState<Record<string, UploadState>>({});
 
   const lessons = section.lessons ?? [];
-  const lessonCount = lessons.length;
 
-  const withVideo = lessons.filter((lesson) => !!lesson.video_path).length;
+  useEffect(() => {
+    const loadFiles = async () => {
+      if (!lessons.length) return;
 
-  const previews = lessons.filter((lesson) => lesson.is_preview).length;
+      const lessonIds = lessons.map((lesson) => lesson.id);
 
-  const completion = lessonCount > 0 ? Math.round((withVideo / lessonCount) * 100) : 0;
+      const { data, error } = await supabase
+        .from("lesson_files")
+        .select("*")
+        .in("lesson_id", lessonIds)
+        .order("order_index", {
+          ascending: true,
+        });
+
+      if (error) {
+        console.error(
+          "Fetch lesson files error:",
+          error
+        );
+        return;
+      }
+
+      const grouped: Record<string, LessonFile[]> = {};
+
+      for (const file of (data ?? []) as LessonFile[]) {
+        if (!grouped[file.lesson_id]) {
+          grouped[file.lesson_id] = [];
+        }
+
+        grouped[file.lesson_id].push(file);
+      }
+
+      setLocalFiles(grouped);
+    };
+
+    loadFiles();
+  }, [lessons]);
+
+  const handleFilesChange = (
+    lessonId: string,
+    files: LessonFile[]
+  ) => {
+    setLocalFiles((current) => ({
+      ...current,
+      [lessonId]: files,
+    }));
+  };
+
+  const addLesson = async () => {
+    const title = newLessonTitle.trim();
+
+    if (!title) return;
+
+    setSaving(true);
+
+    try {
+      await createLesson({
+        sectionId: section.id,
+        title,
+        description:
+          newLessonDescription.trim() || "",
+        orderIndex: lessons.length,
+        isPreview: false,
+      });
+
+      setNewLessonTitle("");
+      setNewLessonDescription("");
+      setAddingLesson(false);
+
+      await onRefresh();
+    } catch (error) {
+      console.error("Create lesson error:", error);
+
+      alert(
+        error instanceof Error
+          ? error.message
+          : "حدث خطأ أثناء إنشاء الدرس"
+      );
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const renameLesson = async (
+    lesson: LessonWithFiles
+  ) => {
+    const title = window.prompt(
+      "اسم الدرس الجديد:",
+      lesson.title
+    );
+
+    if (!title?.trim()) return;
+
+    try {
+      await updateLesson(lesson.id, {
+        title: title.trim(),
+      });
+
+      await onRefresh();
+    } catch (error) {
+      console.error("Rename lesson error:", error);
+
+      alert(
+        error instanceof Error
+          ? error.message
+          : "تعذر تعديل اسم الدرس"
+      );
+    }
+  };
+
+  const deleteLessonHandler = async (
+    lesson: LessonWithFiles
+  ) => {
+    const confirmed = window.confirm(
+      `هل أنت متأكد من حذف "${lesson.title}"؟\nسيتم حذف الدرس وملفاته.`
+    );
+
+    if (!confirmed) return;
+
+    try {
+      const lessonFiles =
+        localFiles[lesson.id] ?? [];
+
+      if (lessonFiles.length) {
+        await supabase.storage
+          .from(FILE_BUCKET)
+          .remove(
+            lessonFiles.map(
+              (file) => file.file_path
+            )
+          );
+
+        await supabase
+          .from("lesson_files")
+          .delete()
+          .eq("lesson_id", lesson.id);
+      }
+
+      await deleteLesson(lesson.id);
+
+      await onRefresh();
+    } catch (error) {
+      console.error("Delete lesson error:", error);
+
+      alert(
+        error instanceof Error
+          ? error.message
+          : "تعذر حذف الدرس"
+      );
+    }
+  };
+
+  const togglePreview = async (
+    lesson: LessonWithFiles
+  ) => {
+    try {
+      await updateLesson(lesson.id, {
+        isPreview: !lesson.is_preview,
+      });
+
+      await onRefresh();
+    } catch (error) {
+      console.error(
+        "Toggle lesson preview error:",
+        error
+      );
+
+      alert(
+        error instanceof Error
+          ? error.message
+          : "تعذر تحديث المعاينة"
+      );
+    }
+  };
+
+  const uploadVideo = async (
+    lesson: LessonWithFiles
+  ) => {
+    const input = document.createElement("input");
+
+    input.type = "file";
+    input.accept = "video/*";
+
+    input.onchange = async () => {
+      const file = input.files?.[0];
+
+      if (!file) return;
+
+      setVideoUploadStates((current) => ({
+        ...current,
+        [lesson.id]: {
+          uploading: true,
+          progress: 0,
+          error: null,
+          fileName: file.name,
+        },
+      }));
+
+      try {
+        const oldVideoPath = (
+          lesson as Lesson & {
+            video_path?: string | null;
+          }
+        ).video_path;
+
+        const storagePath =
+          getVideoStoragePath(
+            lesson.id,
+            file.name
+          );
+
+        const { error: uploadError } =
+          await supabase.storage
+            .from("course-videos")
+            .upload(
+              storagePath,
+              file,
+              {
+                cacheControl: "3600",
+                upsert: true,
+                contentType:
+                  file.type || "video/mp4",
+              }
+            );
+
+        if (uploadError) {
+          throw uploadError;
+        }
+
+        setVideoUploadStates((current) => ({
+          ...current,
+          [lesson.id]: {
+            ...current[lesson.id],
+            progress: 80,
+          },
+        }));
+
+        await updateLessonVideoPath(
+          lesson.id,
+          storagePath
+        );
+
+        if (
+          oldVideoPath &&
+          oldVideoPath !== storagePath
+        ) {
+          await supabase.storage
+            .from("course-videos")
+            .remove([oldVideoPath]);
+        }
+
+        setVideoUploadStates((current) => ({
+          ...current,
+          [lesson.id]: {
+            uploading: false,
+            progress: 100,
+            error: null,
+            fileName: file.name,
+          },
+        }));
+
+        await onRefresh();
+
+        setTimeout(() => {
+          setVideoUploadStates((current) => {
+            const next = { ...current };
+            delete next[lesson.id];
+            return next;
+          });
+        }, 1000);
+      } catch (error) {
+        console.error(
+          "Video upload error:",
+          error
+        );
+
+        setVideoUploadStates((current) => ({
+          ...current,
+          [lesson.id]: {
+            uploading: false,
+            progress: 0,
+            error:
+              error instanceof Error
+                ? error.message
+                : "حدث خطأ أثناء رفع الفيديو",
+            fileName: file.name,
+          },
+        }));
+      }
+    };
+
+    input.click();
+  };
+
+  const deleteVideo = async (
+    lesson: LessonWithFiles
+  ) => {
+    const confirmed = window.confirm(
+      "هل أنت متأكد من حذف فيديو هذا الدرس؟"
+    );
+
+    if (!confirmed) return;
+
+    try {
+      const videoPath = (
+        lesson as Lesson & {
+          video_path?: string | null;
+        }
+      ).video_path;
+
+      if (!videoPath) return;
+
+      await deleteLessonVideo(
+        lesson.id,
+        videoPath
+      );
+
+      await onRefresh();
+    } catch (error) {
+      console.error(
+        "Delete lesson video error:",
+        error
+      );
+
+      alert(
+        error instanceof Error
+          ? error.message
+          : "تعذر حذف الفيديو"
+      );
+    }
+  };
 
   const saveSectionTitle = async () => {
-    const trimmed = sectionTitleDraft.trim();
+    const title = sectionTitle.trim();
 
-    if (!trimmed || trimmed === section.title) {
-      setSectionTitleDraft(section.title);
+    if (!title) return;
+
+    setSaving(true);
+
+    try {
+      await updateSection(section.id, {
+        title,
+      });
+
       setEditingSection(false);
-      return;
+
+      await onRefresh();
+    } catch (error) {
+      console.error(
+        "Update section error:",
+        error
+      );
+
+      alert(
+        error instanceof Error
+          ? error.message
+          : "تعذر تعديل القسم"
+      );
+    } finally {
+      setSaving(false);
     }
-
-    await onRenameSection(trimmed);
-    setEditingSection(false);
   };
 
-  const startEditingLesson = (lesson: Lesson) => {
-    setEditingLessonId(lesson.id);
-    setLessonTitleDraft(lesson.title);
-  };
+  const removeSection = async () => {
+    const confirmed = window.confirm(
+      `هل أنت متأكد من حذف القسم "${section.title}"؟\nسيتم حذف الدروس الموجودة بداخله أيضًا.`
+    );
 
-  const saveLessonTitle = async (lesson: Lesson) => {
-    const trimmed = lessonTitleDraft.trim();
+    if (!confirmed) return;
 
-    if (!trimmed || trimmed === lesson.title) {
-      setEditingLessonId(null);
-      return;
+    try {
+      await deleteSection(section.id);
+
+      await onRefresh();
+    } catch (error) {
+      console.error(
+        "Delete section error:",
+        error
+      );
+
+      alert(
+        error instanceof Error
+          ? error.message
+          : "تعذر حذف القسم"
+      );
     }
-
-    await onRenameLesson(lesson.id, trimmed);
-    setEditingLessonId(null);
-  };
-
-  const startEditingDesc = (lesson: Lesson) => {
-    setEditingDescId(lesson.id);
-    setLessonDescDraft(lesson.description ?? "");
-  };
-
-  const saveLessonDesc = async (lesson: Lesson) => {
-    const trimmed = lessonDescDraft.trim();
-
-    if (trimmed === (lesson.description ?? "").trim()) {
-      setEditingDescId(null);
-      return;
-    }
-
-    await onRenameLessonDescription(lesson.id, trimmed);
-    setEditingDescId(null);
   };
 
   return (
-    <div className="overflow-hidden rounded-3xl border border-slate-100 bg-white shadow-sm">
-      {/* Section header */}
-      <div className="p-5">
+    <div className="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm">
+      {/* Section Header */}
+      <div className="border-b border-slate-200 bg-slate-50 p-4 sm:p-5">
         <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
           <div className="flex min-w-0 items-center gap-3">
             <button
-              className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-brand-50 text-brand-500"
-              onClick={() => setOpen(!open)}
+              type="button"
+              onClick={() =>
+                setExpanded((value) => !value)
+              }
+              className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-white text-slate-600 shadow-sm transition hover:bg-slate-100"
             >
-              <ChevronDown className={`h-4 w-4 transition-transform ${open ? "rotate-180" : ""}`} />
+              {expanded ? (
+                <ChevronUp className="h-5 w-5" />
+              ) : (
+                <ChevronDown className="h-5 w-5" />
+              )}
             </button>
+
+            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-brand-100 text-brand-700">
+              <BookOpen className="h-5 w-5" />
+            </div>
 
             <div className="min-w-0 flex-1">
               {editingSection ? (
-                <div className="flex items-center gap-2">
+                <div className="flex gap-2">
                   <input
+                    value={sectionTitle}
+                    onChange={(event) =>
+                      setSectionTitle(
+                        event.target.value
+                      )
+                    }
+                    className="min-w-0 rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm font-bold outline-none focus:border-brand-500 focus:ring-4 focus:ring-brand-500/10"
                     autoFocus
-                    value={sectionTitleDraft}
-                    onChange={(e) => setSectionTitleDraft(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter") saveSectionTitle();
-                      if (e.key === "Escape") {
-                        setSectionTitleDraft(section.title);
-                        setEditingSection(false);
-                      }
-                    }}
-                    className="w-full rounded-lg border border-brand-300 px-2.5 py-1.5 text-sm font-bold text-slate-800 outline-none focus:ring-2 focus:ring-brand-500/20"
                   />
 
                   <button
+                    type="button"
+                    disabled={saving}
                     onClick={saveSectionTitle}
-                    className="shrink-0 rounded-lg bg-brand-500 px-2.5 py-1.5 text-xs font-bold text-white hover:bg-brand-600"
+                    className="rounded-xl bg-brand-600 px-3 py-2 text-xs font-bold text-white"
                   >
                     حفظ
                   </button>
 
                   <button
+                    type="button"
                     onClick={() => {
-                      setSectionTitleDraft(section.title);
                       setEditingSection(false);
+                      setSectionTitle(
+                        section.title
+                      );
                     }}
-                    className="shrink-0 rounded-lg px-2 py-1.5 text-xs text-slate-400 hover:text-slate-600"
+                    className="rounded-xl bg-slate-200 px-3 py-2 text-xs font-bold text-slate-700"
                   >
                     إلغاء
                   </button>
                 </div>
               ) : (
-                <div className="flex flex-wrap items-center gap-2">
-                  <h2
-                    className="cursor-pointer truncate font-bold text-slate-800 hover:text-brand-600"
-                    onClick={() => setEditingSection(true)}
-                    title="اضغط للتعديل"
-                  >
-                    {section.title}
-                  </h2>
+                <>
+                  <div className="flex items-center gap-2">
+                    <h3 className="truncate text-base font-black text-slate-900">
+                      {index + 1}. {section.title}
+                    </h3>
 
-                  <button
-                    onClick={() => setEditingSection(true)}
-                    className="shrink-0 text-xs text-slate-300 hover:text-brand-500"
-                    title="تعديل اسم القسم"
-                  >
-                    ✎
-                  </button>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setEditingSection(true)
+                      }
+                      className="rounded-lg p-1.5 text-slate-400 transition hover:bg-white hover:text-slate-700"
+                    >
+                      <Pencil className="h-3.5 w-3.5" />
+                    </button>
+                  </div>
 
-                  <span className="rounded-full bg-slate-100 px-2.5 py-1 text-[10px] font-bold text-slate-500">
-                    {lessonCount} درس
-                  </span>
-
-                  {previews > 0 && (
-                    <span className="rounded-full bg-amber-50 px-2.5 py-1 text-[10px] font-bold text-amber-600">
-                      {previews} معاينة
-                    </span>
-                  )}
-                </div>
-              )}
-
-              {!editingSection && (
-                <p className="mt-1 text-xs text-slate-400">
-                  {withVideo} من {lessonCount} فيديو جاهز
-                </p>
+                  <p className="mt-1 text-xs text-slate-500">
+                    {lessons.length} درس
+                  </p>
+                </>
               )}
             </div>
           </div>
 
-          <div className="flex items-center gap-2">
-            <Button size="sm" variant="secondary" onClick={onAddLesson}>
-              <Plus className="h-3.5 w-3.5" />
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={() =>
+                setAddingLesson(true)
+              }
+              className="inline-flex items-center gap-2 rounded-xl bg-brand-600 px-4 py-2.5 text-sm font-bold text-white transition hover:bg-brand-700"
+            >
+              <Plus className="h-4 w-4" />
               إضافة درس
-            </Button>
+            </button>
 
-            <Button size="sm" variant="outline" onClick={onDeleteSection}>
-              <Trash2 className="h-3.5 w-3.5 text-red-500" />
-            </Button>
+            <button
+              type="button"
+              onClick={removeSection}
+              className="inline-flex items-center gap-2 rounded-xl border border-red-200 bg-white px-3 py-2.5 text-sm font-bold text-red-600 transition hover:bg-red-50"
+            >
+              <Trash2 className="h-4 w-4" />
+              حذف القسم
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {expanded && (
+        <div className="p-4 sm:p-5">
+          {/* Add lesson */}
+          {addingLesson && (
+            <div className="mb-5 rounded-2xl border border-brand-100 bg-brand-50/40 p-4">
+              <div className="mb-4 flex items-center justify-between">
+                <div>
+                  <h4 className="font-bold text-slate-900">
+                    إضافة درس جديد
+                  </h4>
+
+                  <p className="mt-1 text-xs text-slate-500">
+                    أضف عنوان ووصف الدرس ثم ارفع الفيديو والملفات.
+                  </p>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() =>
+                    setAddingLesson(false)
+                  }
+                  className="rounded-lg p-2 text-slate-400 hover:bg-white hover:text-slate-700"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+
+              <div className="grid gap-4">
+                <div>
+                  <label className="mb-2 block text-sm font-semibold text-slate-700">
+                    اسم الدرس
+                  </label>
+
+                  <input
+                    value={newLessonTitle}
+                    onChange={(event) =>
+                      setNewLessonTitle(
+                        event.target.value
+                      )
+                    }
+                    placeholder="مثال: مقدمة في التشريح"
+                    className="w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm outline-none transition focus:border-brand-500 focus:ring-4 focus:ring-brand-500/10"
+                  />
+                </div>
+
+                <div>
+                  <label className="mb-2 block text-sm font-semibold text-slate-700">
+                    وصف الدرس
+                  </label>
+
+                  <textarea
+                    rows={3}
+                    value={newLessonDescription}
+                    onChange={(event) =>
+                      setNewLessonDescription(
+                        event.target.value
+                      )
+                    }
+                    placeholder="اكتب وصفًا مختصرًا للدرس..."
+                    className="w-full resize-none rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm outline-none transition focus:border-brand-500 focus:ring-4 focus:ring-brand-500/10"
+                  />
+                </div>
+
+                <div className="flex justify-end gap-2">
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setAddingLesson(false)
+                    }
+                    className="rounded-xl bg-white px-4 py-2.5 text-sm font-bold text-slate-700 ring-1 ring-slate-200"
+                  >
+                    إلغاء
+                  </button>
+
+                  <button
+                    type="button"
+                    disabled={
+                      saving ||
+                      !newLessonTitle.trim()
+                    }
+                    onClick={addLesson}
+                    className="inline-flex items-center gap-2 rounded-xl bg-brand-600 px-5 py-2.5 text-sm font-bold text-white disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    {saving && (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    )}
+
+                    إنشاء الدرس
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Lessons */}
+          {lessons.length === 0 ? (
+            <div className="rounded-2xl border border-dashed border-slate-300 px-4 py-12 text-center">
+              <PlayCircle className="mx-auto mb-3 h-10 w-10 text-slate-300" />
+
+              <h4 className="font-bold text-slate-700">
+                لا توجد دروس في هذا القسم
+              </h4>
+
+              <p className="mt-1 text-sm text-slate-400">
+                ابدأ بإضافة أول درس للقسم.
+              </p>
+
+              <button
+                type="button"
+                onClick={() =>
+                  setAddingLesson(true)
+                }
+                className="mt-4 inline-flex items-center gap-2 rounded-xl bg-brand-600 px-4 py-2.5 text-sm font-bold text-white"
+              >
+                <Plus className="h-4 w-4" />
+                إضافة أول درس
+              </button>
+            </div>
+          ) : (
+            <div className="space-y-4">
+              {/* Lessons title */}
+              <div className="flex items-center gap-2">
+                <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-blue-50 text-blue-600">
+                  <PlayCircle className="h-4 w-4" />
+                </div>
+
+                <div>
+                  <h4 className="font-black text-slate-900">
+                    الدروس
+                  </h4>
+
+                  <p className="text-xs text-slate-400">
+                    فيديوهات ومحتوى الدروس
+                  </p>
+                </div>
+              </div>
+
+              {lessons.map((lesson, lessonIndex) => (
+                <LessonCard
+                  key={lesson.id}
+                  lesson={lesson}
+                  index={lessonIndex}
+                  files={
+                    localFiles[lesson.id] ?? []
+                  }
+                  onFilesChange={
+                    handleFilesChange
+                  }
+                  onRename={renameLesson}
+                  onDelete={
+                    deleteLessonHandler
+                  }
+                  onTogglePreview={
+                    togglePreview
+                  }
+                  onUploadVideo={uploadVideo}
+                  onDeleteVideo={deleteVideo}
+                  videoUploadState={
+                    videoUploadStates[
+                      lesson.id
+                    ]
+                  }
+                />
+              ))}
+
+              {/* Assignments */}
+              <div className="mt-8 rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                  <div className="flex items-center gap-3">
+                    <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-violet-100 text-violet-700">
+                      <ClipboardList className="h-5 w-5" />
+                    </div>
+
+                    <div>
+                      <h4 className="font-black text-slate-900">
+                        الواجبات
+                      </h4>
+
+                      <p className="mt-1 text-xs text-slate-500">
+                        إدارة واجبات واختبارات هذا الكورس
+                      </p>
+                    </div>
+                  </div>
+
+                  <Link
+                    to={`/app/teacher/courses/${section.course_id}/quiz-builder`}
+                    className="inline-flex items-center justify-center gap-2 rounded-xl bg-violet-600 px-4 py-2.5 text-sm font-bold text-white transition hover:bg-violet-700"
+                  >
+                    <ClipboardList className="h-4 w-4" />
+                    إدارة الواجبات والاختبارات
+                    <ArrowLeft className="h-4 w-4" />
+                  </Link>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* -------------------------------------------------------------------------- */
+/* Main Page                                                                  */
+/* -------------------------------------------------------------------------- */
+
+export default function CourseBuilderPage() {
+  const { courseId } = useParams<{
+    courseId: string;
+  }>();
+
+  const [course, setCourse] =
+    useState<Course | null>(null);
+
+  const [sections, setSections] = useState<
+    SectionWithLessons[]
+  >([]);
+
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+
+  const [error, setError] = useState<string | null>(
+    null
+  );
+
+  const [addingSection, setAddingSection] =
+    useState(false);
+
+  const [sectionTitle, setSectionTitle] =
+    useState("");
+
+  const [creatingSection, setCreatingSection] =
+    useState(false);
+
+  const loadData = async (
+    showFullLoader = false
+  ) => {
+    if (!courseId) return;
+
+    if (showFullLoader) {
+      setLoading(true);
+    } else {
+      setRefreshing(true);
+    }
+
+    setError(null);
+
+    try {
+      const loadedCourse =
+        await fetchCourseBySlugOrId(courseId);
+
+      if (!loadedCourse) {
+        throw new Error(
+          "لم يتم العثور على الكورس"
+        );
+      }
+
+      setCourse(loadedCourse);
+
+      const loadedSections =
+        await fetchSections(loadedCourse.id);
+
+      setSections(
+        (loadedSections ?? []) as SectionWithLessons[]
+      );
+    } catch (err) {
+      console.error(
+        "Course builder loading error:",
+        err
+      );
+
+      setError(
+        err instanceof Error
+          ? err.message
+          : "حدث خطأ أثناء تحميل الكورس"
+      );
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
+  };
+
+  useEffect(() => {
+    loadData(true);
+  }, [courseId]);
+
+  const createNewSection = async () => {
+    const title = sectionTitle.trim();
+
+    if (!title || !course) return;
+
+    setCreatingSection(true);
+
+    try {
+      await createSection(
+        course.id,
+        title,
+        sections.length
+      );
+
+      setSectionTitle("");
+      setAddingSection(false);
+
+      await loadData();
+    } catch (err) {
+      console.error(
+        "Create section error:",
+        err
+      );
+
+      alert(
+        err instanceof Error
+          ? err.message
+          : "حدث خطأ أثناء إنشاء القسم"
+      );
+    } finally {
+      setCreatingSection(false);
+    }
+  };
+
+  const stats = useMemo(() => {
+    const lessons = sections.flatMap(
+      (section) => section.lessons ?? []
+    );
+
+    const videos = lessons.filter(
+      (lesson) =>
+        Boolean(
+          (
+            lesson as Lesson & {
+              video_path?: string | null;
+            }
+          ).video_path
+        )
+    ).length;
+
+    const previews = lessons.filter(
+      (lesson) => lesson.is_preview
+    ).length;
+
+    return {
+      sections: sections.length,
+      lessons: lessons.length,
+      videos,
+      previews,
+    };
+  }, [sections]);
+
+  if (loading) {
+    return (
+      <div
+        dir="rtl"
+        className="min-h-screen bg-slate-50 p-4 sm:p-6"
+      >
+        <div className="mx-auto max-w-7xl animate-pulse space-y-5">
+          <div className="h-32 rounded-3xl bg-slate-200" />
+
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+            {Array.from({ length: 4 }).map(
+              (_, index) => (
+                <div
+                  key={index}
+                  className="h-24 rounded-2xl bg-slate-200"
+                />
+              )
+            )}
+          </div>
+
+          <div className="h-96 rounded-3xl bg-slate-200" />
+        </div>
+      </div>
+    );
+  }
+
+  if (error || !course) {
+    return (
+      <div
+        dir="rtl"
+        className="flex min-h-screen items-center justify-center bg-slate-50 p-5"
+      >
+        <div className="w-full max-w-md rounded-3xl border border-red-200 bg-white p-8 text-center shadow-sm">
+          <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-red-50 text-red-600">
+            <AlertCircle className="h-7 w-7" />
+          </div>
+
+          <h1 className="mt-5 text-xl font-black text-slate-900">
+            تعذر تحميل الكورس
+          </h1>
+
+          <p className="mt-2 text-sm leading-6 text-slate-500">
+            {error ?? "حدث خطأ غير معروف"}
+          </p>
+
+          <button
+            type="button"
+            onClick={() => loadData(true)}
+            className="mt-6 inline-flex items-center gap-2 rounded-xl bg-slate-900 px-5 py-3 text-sm font-bold text-white"
+          >
+            <RefreshCw className="h-4 w-4" />
+            المحاولة مرة أخرى
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div
+      dir="rtl"
+      className="min-h-screen bg-slate-50"
+    >
+      <div className="mx-auto max-w-7xl px-4 py-5 sm:px-6 lg:px-8">
+        {/* Header */}
+        <div className="overflow-hidden rounded-3xl bg-slate-950 text-white shadow-xl">
+          <div className="relative p-5 sm:p-7 lg:p-8">
+            <div className="absolute -left-20 -top-20 h-64 w-64 rounded-full bg-brand-500/10 blur-3xl" />
+
+            <div className="relative">
+              <div className="mb-5 flex flex-wrap items-center gap-2">
+                <Link
+                  to="/app/teacher/courses"
+                  className="inline-flex items-center gap-2 rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-xs font-semibold text-slate-300 transition hover:bg-white/10 hover:text-white"
+                >
+                  <ArrowLeft className="h-4 w-4" />
+                  العودة للكورسات
+                </Link>
+
+                <button
+                  type="button"
+                  onClick={() => loadData()}
+                  disabled={refreshing}
+                  className="inline-flex items-center gap-2 rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-xs font-semibold text-slate-300 transition hover:bg-white/10 hover:text-white disabled:opacity-50"
+                >
+                  <RefreshCw
+                    className={`h-4 w-4 ${
+                      refreshing
+                        ? "animate-spin"
+                        : ""
+                    }`}
+                  />
+
+                  تحديث
+                </button>
+              </div>
+
+              <div className="flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
+                <div className="min-w-0">
+
+
+                  <h1 className="truncate text-2xl font-black sm:text-3xl lg:text-4xl">
+                    {course.title}
+                  </h1>
+
+                  {course.description && (
+                    <p className="mt-3 max-w-3xl text-sm leading-7 text-slate-400">
+                      {course.description}
+                    </p>
+                  )}
+                </div>
+
+                <Link
+                  to={`/app/teacher/courses/${course.id}/quiz-builder`}
+                  className="inline-flex shrink-0 items-center justify-center gap-2 rounded-xl bg-white px-4 py-3 text-sm font-black text-slate-900 transition hover:bg-slate-100"
+                >
+                  <ClipboardList className="h-4 w-4" />
+                  الواجبات والاختبارات
+                </Link>
+              </div>
+            </div>
           </div>
         </div>
 
-        {lessonCount > 0 && (
-          <div className="mt-4 h-1.5 overflow-hidden rounded-full bg-slate-100">
-            <div
-              className="h-full rounded-full bg-gradient-to-r from-brand-500 to-cyan-500 transition-all"
-              style={{ width: `${completion}%` }}
-            />
-          </div>
-        )}
-      </div>
+        {/* Stats */}
+        <div className="mt-5 grid grid-cols-2 gap-3 lg:grid-cols-4">
+          <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+            <div className="flex items-center gap-3">
+              <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-blue-50 text-blue-600">
+                <BookOpen className="h-5 w-5" />
+              </div>
 
-      <AnimatePresence initial={false}>
-        {open && (
-          <motion.div
-            initial={{ height: 0, opacity: 0 }}
-            animate={{ height: "auto", opacity: 1 }}
-            exit={{ height: 0, opacity: 0 }}
-            className="overflow-hidden border-t border-slate-100"
-          >
-            {lessonCount === 0 ? (
-              <div className="flex flex-col items-center justify-center px-5 py-10 text-center">
-                <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-slate-50">
-                  <Video className="h-5 w-5 text-slate-300" />
+              <div>
+                <p className="text-xs text-slate-400">
+                  الأقسام
+                </p>
+
+                <p className="text-xl font-black text-slate-900">
+                  {stats.sections}
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+            <div className="flex items-center gap-3">
+              <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-violet-50 text-violet-600">
+                <PlayCircle className="h-5 w-5" />
+              </div>
+
+              <div>
+                <p className="text-xs text-slate-400">
+                  الدروس
+                </p>
+
+                <p className="text-xl font-black text-slate-900">
+                  {stats.lessons}
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+            <div className="flex items-center gap-3">
+              <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-emerald-50 text-emerald-600">
+                <Video className="h-5 w-5" />
+              </div>
+
+              <div>
+                <p className="text-xs text-slate-400">
+                  الفيديوهات
+                </p>
+
+                <p className="text-xl font-black text-slate-900">
+                  {stats.videos}
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+            <div className="flex items-center gap-3">
+              <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-amber-50 text-amber-600">
+                <Eye className="h-5 w-5" />
+              </div>
+
+              <div>
+                <p className="text-xs text-slate-400">
+                  معاينات مجانية
+                </p>
+
+                <p className="text-xl font-black text-slate-900">
+                  {stats.previews}
+                </p>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Main */}
+        <div className="mt-5">
+          <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <h2 className="text-xl font-black text-slate-900">
+                محتوى الكورس
+              </h2>
+
+              <p className="mt-1 text-sm text-slate-500">
+                نظم الكورس إلى أقسام ودروس، وأضف الملفات لكل درس مباشرة.
+              </p>
+            </div>
+
+            <button
+              type="button"
+              onClick={() =>
+                setAddingSection(true)
+              }
+              className="inline-flex items-center justify-center gap-2 rounded-xl bg-brand-600 px-4 py-3 text-sm font-bold text-white shadow-sm transition hover:bg-brand-700"
+            >
+              <Plus className="h-4 w-4" />
+              إضافة قسم
+            </button>
+          </div>
+
+          {/* Add Section */}
+          {addingSection && (
+            <div className="mb-5 rounded-2xl border border-brand-100 bg-white p-5 shadow-sm">
+              <div className="mb-4 flex items-center justify-between">
+                <div>
+                  <h3 className="font-black text-slate-900">
+                    إضافة قسم جديد
+                  </h3>
+
+                  <p className="mt-1 text-xs text-slate-500">
+                    مثال: الوحدة الأولى — أساسيات التشريح
+                  </p>
                 </div>
 
-                <p className="mt-3 text-sm font-semibold text-slate-500">لا توجد دروس في هذا القسم</p>
-
-                <button onClick={onAddLesson} className="mt-2 text-xs font-bold text-brand-500 hover:underline">
-                  + أضف أول درس
+                <button
+                  type="button"
+                  onClick={() =>
+                    setAddingSection(false)
+                  }
+                  className="rounded-lg p-2 text-slate-400 hover:bg-slate-100"
+                >
+                  <X className="h-5 w-5" />
                 </button>
               </div>
-            ) : (
-              lessons.map((lesson, index) => (
-                <div
-                  key={lesson.id}
-                  className="group flex flex-col gap-3 border-b border-slate-50 px-5 py-4 last:border-0 hover:bg-slate-50/70 sm:flex-row sm:items-start sm:justify-between"
+
+              <div className="flex flex-col gap-3 sm:flex-row">
+                <input
+                  value={sectionTitle}
+                  onChange={(event) =>
+                    setSectionTitle(
+                      event.target.value
+                    )
+                  }
+                  placeholder="اسم القسم"
+                  className="min-w-0 flex-1 rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm outline-none focus:border-brand-500 focus:ring-4 focus:ring-brand-500/10"
+                  autoFocus
+                />
+
+                <button
+                  type="button"
+                  disabled={
+                    creatingSection ||
+                    !sectionTitle.trim()
+                  }
+                  onClick={createNewSection}
+                  className="inline-flex items-center justify-center gap-2 rounded-xl bg-brand-600 px-5 py-3 text-sm font-bold text-white disabled:cursor-not-allowed disabled:opacity-50"
                 >
-                  <div className="flex min-w-0 flex-1 items-start gap-3">
-                    <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-slate-100 text-xs font-black text-slate-400">
-                      {index + 1}
-                    </div>
+                  {creatingSection && (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  )}
 
-                    <div className="min-w-0 flex-1">
-                      {editingLessonId === lesson.id ? (
-                        <div className="flex items-center gap-2">
-                          <input
-                            autoFocus
-                            value={lessonTitleDraft}
-                            onChange={(e) => setLessonTitleDraft(e.target.value)}
-                            onKeyDown={(e) => {
-                              if (e.key === "Enter") saveLessonTitle(lesson);
-                              if (e.key === "Escape") setEditingLessonId(null);
-                            }}
-                            className="w-full rounded-lg border border-brand-300 px-2.5 py-1 text-sm font-semibold text-slate-700 outline-none focus:ring-2 focus:ring-brand-500/20"
-                          />
+                  إنشاء القسم
+                </button>
+              </div>
+            </div>
+          )}
 
-                          <button
-                            onClick={() => saveLessonTitle(lesson)}
-                            className="shrink-0 rounded-lg bg-brand-500 px-2 py-1 text-xs font-bold text-white hover:bg-brand-600"
-                          >
-                            حفظ
-                          </button>
+          {/* Sections */}
+          {sections.length === 0 ? (
+            <div className="rounded-3xl border border-dashed border-slate-300 bg-white px-5 py-16 text-center">
+              <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-2xl bg-brand-50 text-brand-600">
+                <BookOpen className="h-8 w-8" />
+              </div>
 
-                          <button
-                            onClick={() => setEditingLessonId(null)}
-                            className="shrink-0 rounded-lg px-2 py-1 text-xs text-slate-400 hover:text-slate-600"
-                          >
-                            إلغاء
-                          </button>
-                        </div>
-                      ) : (
-                        <div className="flex flex-wrap items-center gap-2">
-                          <span
-                            className="cursor-pointer font-semibold text-slate-700 hover:text-brand-600"
-                            onClick={() => startEditingLesson(lesson)}
-                            title="اضغط للتعديل"
-                          >
-                            {lesson.title}
-                          </span>
+              <h3 className="mt-5 text-lg font-black text-slate-900">
+                الكورس لا يحتوي على أقسام
+              </h3>
 
-                          <button
-                            onClick={() => startEditingLesson(lesson)}
-                            className="text-xs text-slate-300 hover:text-brand-500"
-                            title="تعديل اسم الدرس"
-                          >
-                            ✎
-                          </button>
+              <p className="mx-auto mt-2 max-w-md text-sm leading-6 text-slate-500">
+                ابدأ بإضافة قسم، وبعدها يمكنك إضافة الدروس والفيديوهات والملفات والواجبات.
+              </p>
 
-                          {lesson.is_preview && (
-                            <span className="rounded-full bg-brand-50 px-2 py-0.5 text-[10px] font-bold text-brand-600">
-                              معاينة مجانية
-                            </span>
-                          )}
+              <button
+                type="button"
+                onClick={() =>
+                  setAddingSection(true)
+                }
+                className="mt-5 inline-flex items-center gap-2 rounded-xl bg-brand-600 px-5 py-3 text-sm font-bold text-white"
+              >
+                <Plus className="h-4 w-4" />
+                إضافة أول قسم
+              </button>
+            </div>
+          ) : (
+            <div className="space-y-5">
+              {sections.map(
+                (section, index) => (
+                  <SectionBlock
+                    key={section.id}
+                    section={section}
+                    index={index}
+                    onRefresh={() =>
+                      loadData()
+                    }
+                  />
+                )
+              )}
+            </div>
+          )}
+        </div>
 
-                          {lesson.duration_seconds > 0 && (
-                            <span className="text-[11px] text-slate-400">
-                              {formatDuration(lesson.duration_seconds)}
-                            </span>
-                          )}
-                        </div>
-                      )}
+        {/* Structure hint */}
+        <div className="mt-6 rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
+          <div className="flex flex-col gap-4 sm:flex-row sm:items-start">
+            <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-slate-100 text-slate-700">
+              <FolderOpen className="h-5 w-5" />
+            </div>
 
-                      {editingLessonId !== lesson.id && (
-                        <div className="mt-1 flex items-center gap-1.5">
-                          {lesson.video_path ? (
-                            <>
-                              <CheckCircle2 className="h-3 w-3 text-emerald-500" />
-                              <span className="text-[11px] font-medium text-emerald-600">الفيديو جاهز</span>
-                            </>
-                          ) : (
-                            <>
-                              <CircleAlert className="h-3 w-3 text-amber-500" />
-                              <span className="text-[11px] font-medium text-amber-600">يحتاج فيديو</span>
-                            </>
-                          )}
-                        </div>
-                      )}
+            <div>
+              <h3 className="font-black text-slate-900">
+                تنظيم المحتوى الجديد
+              </h3>
 
-                      {/* Description */}
-                      {editingDescId === lesson.id ? (
-                        <div className="mt-2 flex flex-col gap-2">
-                          <textarea
-                            autoFocus
-                            rows={2}
-                            value={lessonDescDraft}
-                            onChange={(e) => setLessonDescDraft(e.target.value)}
-                            onKeyDown={(e) => {
-                              if (e.key === "Escape") setEditingDescId(null);
-                            }}
-                            placeholder="وصف مختصر للدرس..."
-                            className="w-full rounded-lg border border-brand-300 px-2.5 py-1.5 text-xs text-slate-600 outline-none focus:ring-2 focus:ring-brand-500/20"
-                          />
+              <p className="mt-1 text-sm leading-7 text-slate-500">
+                كل درس أصبح له مساحة مستقلة لملفات الدرس، بحيث يستطيع الطالب الوصول إلى الملزمة والملفات المساعدة مباشرة بعد مشاهدة الدرس، بدل وضع كل الملفات في مكان واحد داخل الكورس.
+              </p>
 
-                          <div className="flex items-center gap-2">
-                            <button
-                              onClick={() => saveLessonDesc(lesson)}
-                              className="rounded-lg bg-brand-500 px-2.5 py-1 text-[11px] font-bold text-white hover:bg-brand-600"
-                            >
-                              حفظ
-                            </button>
+              <div className="mt-3 flex flex-wrap gap-2 text-xs font-semibold">
+                <span className="rounded-lg bg-blue-50 px-3 py-2 text-blue-700">
+                  🎥 الدروس
+                </span>
 
-                            <button
-                              onClick={() => setEditingDescId(null)}
-                              className="rounded-lg px-2 py-1 text-[11px] text-slate-400 hover:text-slate-600"
-                            >
-                              إلغاء
-                            </button>
-                          </div>
-                        </div>
-                      ) : (
-                        <p
-                          className="mt-1.5 max-w-md cursor-pointer truncate text-[11px] text-slate-400 hover:text-brand-500"
-                          onClick={() => startEditingDesc(lesson)}
-                          title="اضغط لتعديل الوصف"
-                        >
-                          {lesson.description?.trim() ? lesson.description : "+ أضف وصفًا للدرس"}
-                        </p>
-                      )}
-                    </div>
-                  </div>
+                <span className="rounded-lg bg-amber-50 px-3 py-2 text-amber-700">
+                  📁 ملفات كل درس
+                </span>
 
-                  <div className="flex items-center gap-1.5 self-end sm:self-auto">
-                    <button
-                      onClick={() => onTogglePreview(lesson)}
-                      className="rounded-xl p-2 text-slate-400 transition hover:bg-white hover:text-brand-500 hover:shadow-sm"
-                      title="المعاينة المجانية"
-                    >
-                      {lesson.is_preview ? (
-                        <Eye className="h-4 w-4 text-brand-500" />
-                      ) : (
-                        <EyeOff className="h-4 w-4" />
-                      )}
-                    </button>
+                <span className="rounded-lg bg-violet-50 px-3 py-2 text-violet-700">
+                  📝 الواجبات
+                </span>
 
-                    <button
-                      onClick={() => onUploadClick(lesson)}
-                      className="rounded-xl p-2 text-slate-400 transition hover:bg-white hover:text-brand-500 hover:shadow-sm"
-                      title={lesson.video_path ? "استبدال الفيديو" : "رفع فيديو"}
-                    >
-                      <UploadCloud className="h-4 w-4" />
-                    </button>
-
-                    {lesson.video_path && (
-                      <button
-                        onClick={() => onDeleteVideoClick(lesson)}
-                        className="rounded-xl p-2 text-slate-400 transition hover:bg-red-50 hover:text-red-500 hover:shadow-sm"
-                        title="حذف الفيديو"
-                      >
-                        <FileVideo2 className="h-4 w-4" />
-                      </button>
-                    )}
-
-                    <button
-                      onClick={() => onDeleteLesson(lesson.id)}
-                      className="rounded-xl p-2 text-red-400 transition hover:bg-red-50 hover:text-red-500"
-                      title="حذف الدرس"
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </button>
-                  </div>
-                </div>
-              ))
-            )}
-          </motion.div>
-        )}
-      </AnimatePresence>
+                <span className="rounded-lg bg-emerald-50 px-3 py-2 text-emerald-700">
+                  🧪 الاختبارات
+                </span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }

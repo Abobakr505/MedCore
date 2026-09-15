@@ -238,3 +238,144 @@ export async function updateLessonDescription(lessonId: string, description: str
     .eq("id", lessonId);
   if (error) throw error;
 }
+
+export async function fetchCourseBySlugOrId(
+  value: string
+) {
+  const cleanValue = value?.trim();
+
+  if (!cleanValue) {
+    throw new Error("Course slug or ID is required");
+  }
+
+  const uuidRegex =
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+  let query = supabase
+    .from("courses")
+    .select("*");
+
+  if (uuidRegex.test(cleanValue)) {
+    query = query.eq("id", cleanValue);
+  } else {
+    query = query.eq("slug", cleanValue);
+  }
+
+  const {
+    data,
+    error,
+  } = await query.single();
+
+  if (error) {
+    console.error(
+      "fetchCourseBySlugOrId error:",
+      error
+    );
+
+    throw error;
+  }
+
+  return data;
+}
+export function getVideoStoragePath(
+  lessonId: string,
+  fileName: string
+) {
+  const extension =
+    fileName.split(".").pop()?.toLowerCase() || "mp4";
+
+  const uniqueName =
+    `${crypto.randomUUID()}.${extension}`;
+
+  return `${lessonId}/${uniqueName}`;
+}
+export async function updateLesson(
+  lessonId: string,
+  updates: {
+    title?: string;
+    description?: string | null;
+    orderIndex?: number;
+    isPreview?: boolean;
+    videoPath?: string | null;
+  }
+) {
+  if (!lessonId) {
+    throw new Error("Lesson ID is required");
+  }
+
+  const payload: Record<string, unknown> = {};
+
+  if (updates.title !== undefined) {
+    payload.title = updates.title;
+  }
+
+  if (updates.description !== undefined) {
+    payload.description = updates.description;
+  }
+
+  if (updates.orderIndex !== undefined) {
+    payload.order_index = updates.orderIndex;
+  }
+
+  if (updates.isPreview !== undefined) {
+    payload.is_preview = updates.isPreview;
+  }
+
+  if (updates.videoPath !== undefined) {
+    payload.video_path = updates.videoPath;
+  }
+
+  const { data, error } = await supabase
+    .from("lessons")
+    .update(payload)
+    .eq("id", lessonId)
+    .select()
+    .single();
+
+  if (error) {
+    console.error("updateLesson error:", error);
+    throw error;
+  }
+
+  return data;
+}
+export async function updateSection(
+  sectionId: string,
+  updates: {
+    title?: string;
+    description?: string | null;
+    orderIndex?: number;
+  }
+) {
+  if (!sectionId) {
+    throw new Error("Section ID is required");
+  }
+
+  const payload: Record<string, unknown> = {};
+
+  if (updates.title !== undefined) {
+    payload.title = updates.title;
+  }
+
+  if (updates.description !== undefined) {
+    payload.description = updates.description;
+  }
+
+  if (updates.orderIndex !== undefined) {
+    payload.order_index = updates.orderIndex;
+  }
+
+  const { data, error } = await supabase
+    .from("course_sections")
+    .update(payload)
+    .eq("id", sectionId)
+    .select()
+    .single();
+
+  if (error) {
+    console.error("updateSection error:", error);
+    throw error;
+  }
+
+  return data;
+}

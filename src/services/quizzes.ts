@@ -73,11 +73,21 @@ export async function fetchStudentAttempts(studentId: string) {
 
 // ===== إدارة الاختبارات (المعلم) =====
 
-export async function createQuiz(params: { courseId: string; title: string; description: string; durationMinutes: number; passingScore: number }) {
+export async function createQuiz(params: {
+  courseId: string;
+  sectionId?: string | null;
+  lessonId?: string | null;
+  title: string;
+  description: string;
+  durationMinutes: number;
+  passingScore: number;
+}) {
   const { data, error } = await supabase
     .from("quizzes")
     .insert({
       course_id: params.courseId,
+      section_id: params.sectionId ?? null,
+      lesson_id: params.lessonId ?? null,
       title: params.title,
       description: params.description,
       duration_minutes: params.durationMinutes,

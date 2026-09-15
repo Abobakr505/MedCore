@@ -51,18 +51,38 @@ export interface CourseSection {
   order_index: number;
   lessons?: Lesson[];
 }
+export interface LessonFile {
+  id: string;
+  lesson_id: string;
 
+  title: string;
+
+  file_path: string;
+  file_name: string;
+
+  file_size: number | null;
+  mime_type: string | null;
+
+  order_index: number;
+
+  created_at: string;
+}
 export interface Lesson {
   id: string;
   section_id: string;
+
   title: string;
-  description: string;
+  description: string | null;
+
   duration_seconds: number;
-  order_index: number;
+
+  video_path: string | null;
+
   is_preview: boolean;
-  // موجود فقط في استعلامات المعلم/الأدمن الخاصة بإدارة المحتوى — لا يُطلب أبدًا
-  // من واجهات الطالب (انظر ملاحظة الأمان في services/courses.ts)
-  video_path?: string | null;
+
+  files?: LessonFile[];
+
+  created_at?: string;
 }
 
 export interface Enrollment {
@@ -102,6 +122,8 @@ export interface Payment {
 export interface Quiz {
   id: string;
   course_id: string;
+  section_id: string | null;
+  lesson_id: string | null;
   title: string;
   description: string;
   duration_minutes: number;
