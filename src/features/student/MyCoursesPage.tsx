@@ -17,25 +17,73 @@ import { EmptyState } from "@/components/ui/EmptyState";
 import { Button } from "@/components/ui/Button";
 
 import { useAuth } from "@/contexts/AuthContext";
-import { fetchStudentEnrollments } from "@/services/enrollments";
+import {
+  computeCourseProgress,
+  fetchLessonProgress,
+  fetchStudentEnrollments,
+} from "@/services/enrollments";
+import { fetchCourseSections } from "@/services/courses";
 
 import type { Enrollment } from "@/types";
 import { getPublicUrl } from "@/lib/supabase";
+
+type CourseProgress = {
+  completedLessons: number;
+  totalLessons: number;
+  percentage: number;
+};
 
 export default function MyCoursesPage() {
   const { session } = useAuth();
 
   const [enrollments, setEnrollments] = useState<Enrollment[]>([]);
   const [loading, setLoading] = useState(true);
+  const [courseProgress, setCourseProgress] = useState<
+    Record<string, CourseProgress>
+  >({});
 
   useEffect(() => {
     if (!session?.user) return;
 
+    let active = true;
+
     setLoading(true);
 
-    fetchStudentEnrollments(session.user.id)
-      .then(setEnrollments)
-      .finally(() => setLoading(false));
+    (async () => {
+      try {
+        const data = await fetchStudentEnrollments(session.user.id);
+        const progressMap: Record<string, CourseProgress> = {};
+
+        for (const enrollment of data) {
+          const sections = await fetchCourseSections(enrollment.course_id);
+          const lessons = sections.flatMap((section) => section.lessons ?? []);
+          const progress = await fetchLessonProgress(
+            session.user.id,
+            lessons.map((lesson) => lesson.id)
+          );
+          const completedLessons = progress.filter((item) => item.completed).length;
+
+          progressMap[enrollment.course_id] = {
+            completedLessons,
+            totalLessons: lessons.length,
+            percentage: computeCourseProgress(lessons.length, completedLessons),
+          };
+        }
+
+        if (active) {
+          setEnrollments(data);
+          setCourseProgress(progressMap);
+        }
+      } catch (error) {
+        console.error("[MyCoursesPage] load progress error:", error);
+      } finally {
+        if (active) setLoading(false);
+      }
+    })();
+
+    return () => {
+      active = false;
+    };
   }, [session?.user?.id]);
 
   return (
@@ -122,6 +170,11 @@ export default function MyCoursesPage() {
       ) : (
         <div className="grid gap-5 sm:grid-cols-2 xl:grid-cols-3">
           {enrollments.map((enrollment, index) => {
+            const progress = courseProgress[enrollment.course_id] ?? {
+              completedLessons: 0,
+              totalLessons: 0,
+              percentage: 0,
+            };
             const thumb = getPublicUrl(
               "course-thumbnails",
               enrollment.course?.thumbnail_path ?? null
@@ -187,13 +240,20 @@ export default function MyCoursesPage() {
                         </span>
 
                         <span className="font-black text-brand-600">
-                          ابدأ المتابعة
+                          {progress.percentage}%
                         </span>
                       </div>
 
                       <div className="mt-2 h-2 overflow-hidden rounded-full bg-slate-100">
-                        <div className="h-full w-0 rounded-full bg-brand-500" />
+                        <div
+                          className="h-full rounded-full bg-brand-500 transition-all duration-500"
+                          style={{ width: `${progress.percentage}%` }}
+                        />
                       </div>
+
+                      <p className="mt-2 text-[11px] text-slate-400">
+                        {progress.completedLessons} / {progress.totalLessons} درس مكتمل
+                      </p>
                     </div>
 
                     <Link

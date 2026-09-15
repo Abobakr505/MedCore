@@ -32,6 +32,9 @@ import {
   HardDriveDownload,
   Loader2,
   ShieldAlert,
+  BookOpen,
+  PanelRightClose,
+  PanelRightOpen,
 } from "lucide-react";
 
 import { Button } from "@/components/ui/Button";
@@ -66,13 +69,8 @@ import {
   removeLessonOffline,
 } from "@/services/offlineVideo";
 
-import {
-  useAuth,
-} from "@/contexts/AuthContext";
-
-import {
-  useToast,
-} from "@/contexts/ToastContext";
+import { useAuth } from "@/contexts/AuthContext";
+import { useToast } from "@/contexts/ToastContext";
 
 import { VideoWatermark } from "@/components/video/VideoWatermark";
 import { useScreenRecordingGuard } from "@/hooks/useScreenRecordingGuard";
@@ -85,9 +83,7 @@ import type {
   Quiz,
 } from "@/types";
 
-import {
-  formatDuration,
-} from "@/utils/format";
+import { formatDuration } from "@/utils/format";
 
 export default function LearningPage() {
   const {
@@ -114,7 +110,12 @@ export default function LearningPage() {
     setSections,
   ] = useState<CourseSection[]>([]);
 
-const [progressMap, setProgressMap] = useState<Record<string, LessonProgress>>({});
+  const [
+    progressMap,
+    setProgressMap,
+  ] = useState<
+    Record<string, LessonProgress>
+  >({});
 
   const [
     quizzes,
@@ -147,6 +148,11 @@ const [progressMap, setProgressMap] = useState<Record<string, LessonProgress>>({
   ] = useState(false);
 
   const [
+    desktopSidebarOpen,
+    setDesktopSidebarOpen,
+  ] = useState(true);
+
+  const [
     isOnline,
     setIsOnline,
   ] = useState(
@@ -175,10 +181,6 @@ const [progressMap, setProgressMap] = useState<Record<string, LessonProgress>>({
     setRemovingOffline,
   ] = useState(false);
 
-  /*
-   * حماية المحتوى: كشف تسجيل الشاشة
-   */
-
   const [
     recordingBlocked,
     setRecordingBlocked,
@@ -190,6 +192,10 @@ const [progressMap, setProgressMap] = useState<Record<string, LessonProgress>>({
   const videoElementRef =
     useRef<HTMLVideoElement>(null);
 
+  /*
+   * جميع الدروس
+   */
+
   const allLessons = useMemo(
     () =>
       sections.flatMap(
@@ -200,7 +206,7 @@ const [progressMap, setProgressMap] = useState<Record<string, LessonProgress>>({
   );
 
   /*
-   * Online / Offline detection
+   * Online / Offline
    */
 
   useEffect(() => {
@@ -236,7 +242,23 @@ const [progressMap, setProgressMap] = useState<Record<string, LessonProgress>>({
   }, []);
 
   /*
-   * Load course
+   * منع Scroll الصفحة خلف Drawer
+   */
+
+  useEffect(() => {
+    if (sidebarOpen) {
+      document.body.style.overflow = "hidden";
+    } else {
+      document.body.style.overflow = "";
+    }
+
+    return () => {
+      document.body.style.overflow = "";
+    };
+  }, [sidebarOpen]);
+
+  /*
+   * تحميل الكورس
    */
 
   useEffect(() => {
@@ -303,7 +325,10 @@ const [progressMap, setProgressMap] = useState<Record<string, LessonProgress>>({
           quizList
         );
 
-const map: Record<string, LessonProgress> = {};
+        const map: Record<
+          string,
+          LessonProgress
+        > = {};
 
         progress.forEach(
           (item) => {
@@ -340,26 +365,17 @@ const map: Record<string, LessonProgress> = {};
   ]);
 
   /*
-   * Load video.
-   *
-   * Priority:
-   *
-   * 1. Offline cached video
-   * 2. Online signed URL
+   * تحميل الفيديو
    */
 
   const loadVideo = useCallback(
     async (lesson: Lesson) => {
       setVideoUrl(null);
       setVideoError(null);
-
       setOfflineAvailable(false);
       setRecordingBlocked(false);
 
       try {
-        /*
-         * Check local Offline copy first.
-         */
         const offlineUrl =
           await getOfflineVideoSource(
             lesson.id
@@ -367,20 +383,10 @@ const map: Record<string, LessonProgress> = {};
 
         if (offlineUrl) {
           setOfflineAvailable(true);
-
-          setVideoUrl(
-            offlineUrl
-          );
-
+          setVideoUrl(offlineUrl);
           return;
         }
 
-        /*
-         * No Offline copy.
-         *
-         * If user is offline, there is nothing
-         * else we can do.
-         */
         if (!navigator.onLine) {
           setVideoError(
             "هذا الفيديو غير محفوظ للمشاهدة بدون إنترنت."
@@ -389,17 +395,12 @@ const map: Record<string, LessonProgress> = {};
           return;
         }
 
-        /*
-         * Get fresh signed URL.
-         */
         const signedUrl =
           await getSignedLessonVideoUrl(
             lesson.id
           );
 
-        setVideoUrl(
-          signedUrl
-        );
+        setVideoUrl(signedUrl);
       } catch {
         setVideoError(
           "لم يتم رفع فيديو لهذا الدرس بعد، أو لا تملك صلاحية الوصول إليه."
@@ -414,17 +415,14 @@ const map: Record<string, LessonProgress> = {};
       return;
     }
 
-    loadVideo(
-      activeLesson
-    );
+    loadVideo(activeLesson);
   }, [
     activeLesson?.id,
     loadVideo,
   ]);
 
   /*
-   * Check Offline availability
-   * when lesson changes.
+   * Offline availability
    */
 
   useEffect(() => {
@@ -446,9 +444,7 @@ const map: Record<string, LessonProgress> = {};
       })
       .catch(() => {
         if (mounted) {
-          setOfflineAvailable(
-            false
-          );
+          setOfflineAvailable(false);
         }
       });
 
@@ -460,45 +456,43 @@ const map: Record<string, LessonProgress> = {};
   ]);
 
   /*
-   * حماية المحتوى: عند اكتشاف نشاط تسجيل مشبوه
-   * (طلب getDisplayMedia أو مغادرة التبويب أثناء التشغيل)
-   * نوقف الفيديو فورًا.
-   *
-   * ملاحظة: هذا إجراء ردع إضافي، وليس ضمانًا مطلقًا،
-   * حيث لا يمكن لأي تطبيق ويب منع تصوير الشاشة بجهاز آخر
-   * أو أدوات تسجيل تعمل على مستوى نظام التشغيل.
+   * حماية المحتوى
    */
 
-  const handleSuspiciousActivity = useCallback(() => {
-    const video = videoElementRef.current;
+  const handleSuspiciousActivity =
+    useCallback(() => {
+      const video =
+        videoElementRef.current;
 
-    if (video) {
-      video.pause();
-    }
+      if (video) {
+        video.pause();
+      }
 
-    setRecordingBlocked(true);
-    setVideoUrl(null);
+      setRecordingBlocked(true);
+      setVideoUrl(null);
 
-    showToast(
-      "تم إيقاف الفيديو لحماية المحتوى من التسجيل غير المصرح به",
-      "error"
-    );
-  }, [showToast]);
+      showToast(
+        "تم إيقاف الفيديو لحماية المحتوى من التسجيل غير المصرح به",
+        "error"
+      );
+    }, [showToast]);
 
   useScreenRecordingGuard({
-    onSuspiciousActivity: handleSuspiciousActivity,
+    onSuspiciousActivity:
+      handleSuspiciousActivity,
   });
 
-  const handleRetryAfterBlock = () => {
-    setRecordingBlocked(false);
+  const handleRetryAfterBlock =
+    () => {
+      setRecordingBlocked(false);
 
-    if (activeLesson) {
-      loadVideo(activeLesson);
-    }
-  };
+      if (activeLesson) {
+        loadVideo(activeLesson);
+      }
+    };
 
   /*
-   * Download video for Offline use
+   * تحميل Offline
    */
 
   const handleDownloadOffline =
@@ -515,9 +509,6 @@ const map: Record<string, LessonProgress> = {};
         setDownloading(true);
         setDownloadProgress(0);
 
-        /*
-         * Generate a fresh signed URL.
-         */
         const signedUrl =
           await getSignedLessonVideoUrl(
             activeLesson.id
@@ -533,23 +524,15 @@ const map: Record<string, LessonProgress> = {};
           }
         );
 
-        setOfflineAvailable(
-          true
-        );
+        setOfflineAvailable(true);
 
-        /*
-         * Switch immediately to the
-         * local Offline URL.
-         */
         const localUrl =
           await getOfflineVideoSource(
             activeLesson.id
           );
 
         if (localUrl) {
-          setVideoUrl(
-            localUrl
-          );
+          setVideoUrl(localUrl);
         }
 
         showToast(
@@ -572,7 +555,7 @@ const map: Record<string, LessonProgress> = {};
     };
 
   /*
-   * Remove Offline video
+   * حذف Offline
    */
 
   const handleRemoveOffline =
@@ -591,23 +574,15 @@ const map: Record<string, LessonProgress> = {};
           activeLesson.id
         );
 
-        setOfflineAvailable(
-          false
-        );
+        setOfflineAvailable(false);
 
-        /*
-         * Reload online signed URL
-         * if Internet exists.
-         */
         if (navigator.onLine) {
           const signedUrl =
             await getSignedLessonVideoUrl(
               activeLesson.id
             );
 
-          setVideoUrl(
-            signedUrl
-          );
+          setVideoUrl(signedUrl);
         } else {
           setVideoUrl(null);
 
@@ -631,7 +606,57 @@ const map: Record<string, LessonProgress> = {};
     };
 
   /*
-   * Mark lesson complete
+   * Navigation
+   */
+
+  const currentIndex =
+    allLessons.findIndex(
+      (lesson) =>
+        lesson.id ===
+        activeLesson?.id
+    );
+
+  const goToNext = () => {
+    const next =
+      allLessons[
+        currentIndex + 1
+      ];
+
+    if (next) {
+      setActiveLesson(next);
+
+      /*
+       * إغلاق Sidebar على الهاتف
+       */
+      setSidebarOpen(false);
+
+      window.scrollTo({
+        top: 0,
+        behavior: "smooth",
+      });
+    }
+  };
+
+  const goToPrev = () => {
+    const previous =
+      allLessons[
+        currentIndex - 1
+      ];
+
+    if (previous) {
+      setActiveLesson(previous);
+
+      setSidebarOpen(false);
+
+      window.scrollTo({
+        top: 0,
+        behavior: "smooth",
+      });
+    }
+  };
+
+  /*
+   * إكمال الدرس
    */
 
   const markComplete =
@@ -689,43 +714,6 @@ const map: Record<string, LessonProgress> = {};
     };
 
   /*
-   * Navigation
-   */
-
-  const currentIndex =
-    allLessons.findIndex(
-      (lesson) =>
-        lesson.id ===
-        activeLesson?.id
-    );
-
-  const goToNext = () => {
-    const next =
-      allLessons[
-        currentIndex + 1
-      ];
-
-    if (next) {
-      setActiveLesson(
-        next
-      );
-    }
-  };
-
-  const goToPrev = () => {
-    const previous =
-      allLessons[
-        currentIndex - 1
-      ];
-
-    if (previous) {
-      setActiveLesson(
-        previous
-      );
-    }
-  };
-
-  /*
    * Progress
    */
 
@@ -751,9 +739,7 @@ const map: Record<string, LessonProgress> = {};
     );
 
   /*
-   * رقم الهاتف المستخدم في العلامة المائية.
-   * يفترض وجود العمود phone في بيانات المستخدم؛
-   * عدّل المسار حسب مكان تخزينه فعليًا في مشروعك.
+   * Watermark
    */
 
   const watermarkPhone =
@@ -763,13 +749,181 @@ const map: Record<string, LessonProgress> = {};
     "";
 
   /*
+   * Sidebar content
+   */
+
+  const SidebarContent = () => (
+    <>
+      <div className="border-b border-slate-100 bg-white p-4">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2.5">
+            <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-brand-50 text-brand-600">
+              <ListVideo className="h-4 w-4" />
+            </div>
+
+            <div>
+              <p className="text-sm font-bold text-slate-800">
+                محتوى الكورس
+              </p>
+
+              <p className="text-[11px] text-slate-400">
+                {completedCount} من{" "}
+                {allLessons.length} درس
+              </p>
+            </div>
+          </div>
+
+          <span className="text-sm font-bold text-brand-500">
+            {courseProgress}%
+          </span>
+        </div>
+
+        <div className="mt-4 h-2 overflow-hidden rounded-full bg-slate-100">
+          <motion.div
+            className="h-full rounded-full bg-gradient-to-l from-brand-500 to-brand-900"
+            initial={{
+              width: 0,
+            }}
+            animate={{
+              width: `${courseProgress}%`,
+            }}
+            transition={{
+              duration: 0.6,
+            }}
+          />
+        </div>
+      </div>
+
+      <div className="p-3">
+        {sections.map(
+          (section) => (
+            <div
+              key={section.id}
+              className="mb-5 last:mb-0"
+            >
+              <div className="mb-2 flex items-center gap-2 px-2">
+                <div className="h-1 w-1 rounded-full bg-brand-500" />
+
+                <p className="text-[11px] font-bold uppercase tracking-wide text-slate-400">
+                  {section.title}
+                </p>
+              </div>
+
+              <div className="space-y-1">
+                {section.lessons?.map(
+                  (lesson) => {
+                    const done =
+                      progressMap[
+                        lesson.id
+                      ]?.completed;
+
+                    const isActive =
+                      lesson.id ===
+                      activeLesson?.id;
+
+                    return (
+                      <button
+                        key={lesson.id}
+                        onClick={() => {
+                          setActiveLesson(
+                            lesson
+                          );
+
+                          setSidebarOpen(
+                            false
+                          );
+                        }}
+                        className={`
+                          group
+                          flex
+                          w-full
+                          items-center
+                          gap-2.5
+                          rounded-xl
+                          px-3
+                          py-3
+                          text-sm
+                          text-right
+                          transition-all
+                          duration-200
+                          ${
+                            isActive
+                              ? "bg-brand-50 text-brand-900 shadow-sm ring-1 ring-brand-100"
+                              : "text-slate-600 hover:bg-slate-50"
+                          }
+                        `}
+                      >
+                        <div
+                          className={`
+                            flex
+                            h-7
+                            w-7
+                            shrink-0
+                            items-center
+                            justify-center
+                            rounded-lg
+                            ${
+                              done
+                                ? "bg-emerald-50"
+                                : isActive
+                                  ? "bg-white"
+                                  : "bg-slate-50"
+                            }
+                          `}
+                        >
+                          {done ? (
+                            <CheckCircle2 className="h-4 w-4 text-emerald-500" />
+                          ) : (
+                            <Circle
+                              className={`
+                                h-4 w-4
+                                ${
+                                  isActive
+                                    ? "text-brand-500"
+                                    : "text-slate-300"
+                                }
+                              `}
+                            />
+                          )}
+                        </div>
+
+                        <span className="min-w-0 flex-1 truncate font-medium">
+                          {lesson.title}
+                        </span>
+
+                        <div className="flex shrink-0 items-center gap-1.5">
+                          {lesson.id ===
+                            activeLesson?.id &&
+                            offlineAvailable && (
+                              <HardDriveDownload className="h-3.5 w-3.5 text-emerald-500" />
+                            )}
+
+                          <span className="text-[10px] text-slate-400">
+                            {formatDuration(
+                              lesson.duration_seconds
+                            )}
+                          </span>
+                        </div>
+                      </button>
+                    );
+                  }
+                )}
+              </div>
+            </div>
+          )
+        )}
+      </div>
+    </>
+  );
+
+  /*
    * Loading
    */
 
   if (loading) {
     return (
-      <div className="mx-auto max-w-6xl px-6 py-10 space-y-4">
-        <Skeleton className="h-96 w-full rounded-2xl" />
+      <div className="mx-auto max-w-6xl space-y-4 px-4 py-6 sm:px-6 sm:py-10">
+        <Skeleton className="aspect-video w-full rounded-2xl" />
       </div>
     );
   }
@@ -779,76 +933,104 @@ const map: Record<string, LessonProgress> = {};
   }
 
   return (
-    <div className="flex h-screen flex-col bg-slate-50">
-      {/* ------------------------------------------------------------------ */}
-      {/* Header                                                             */}
-      {/* ------------------------------------------------------------------ */}
+    <div
+      dir="rtl"
+      className="flex h-[100dvh] flex-col overflow-hidden bg-slate-50"
+    >
+      {/* ================================================================ */}
+      {/* HEADER                                                           */}
+      {/* ================================================================ */}
 
-      <header className="flex h-14 shrink-0 items-center justify-between border-b border-slate-100 bg-white px-4 shadow-sm">
-        <div className="flex items-center gap-3 min-w-0">
+      <header className="z-40 flex h-14 shrink-0 items-center justify-between border-b border-slate-100 bg-white/95 px-3 shadow-sm backdrop-blur sm:px-4">
+        <div className="flex min-w-0 items-center gap-2.5">
           <Link
             to="/app/student/courses"
-            className="text-slate-400 hover:text-brand-500 transition-colors"
+            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl text-slate-400 transition hover:bg-slate-50 hover:text-brand-500"
           >
-            <ChevronRight className="w-5 h-5" />
+            <ChevronRight className="h-5 w-5" />
           </Link>
 
           <div className="min-w-0">
-            <p className="truncate font-bold text-slate-800 leading-tight">
+            <p className="truncate text-sm font-bold leading-tight text-slate-800 sm:text-base">
               {course.title}
             </p>
 
-            <p className="text-[11px] text-slate-400">
+            <p className="mt-0.5 text-[10px] text-slate-400 sm:text-[11px]">
               {completedCount} /{" "}
-              {allLessons.length}{" "}
-              درس مكتمل
+              {allLessons.length} درس مكتمل
             </p>
           </div>
         </div>
 
-        <div className="hidden items-center gap-2 sm:flex">
-          <div className="h-1.5 w-28 overflow-hidden rounded-full bg-slate-100">
-            <div
-              className="h-full rounded-full bg-brand-500 transition-all"
-              style={{
-                width: `${courseProgress}%`,
-              }}
-            />
+        <div className="flex items-center gap-2">
+          <div className="hidden items-center gap-2 sm:flex">
+            <div className="h-1.5 w-28 overflow-hidden rounded-full bg-slate-100">
+              <div
+                className="h-full rounded-full bg-brand-500 transition-all"
+                style={{
+                  width: `${courseProgress}%`,
+                }}
+              />
+            </div>
+
+            <span className="text-xs font-bold text-brand-500">
+              {courseProgress}%
+            </span>
           </div>
 
-          <span className="text-xs font-bold text-brand-500">
-            {courseProgress}%
-          </span>
-        </div>
+          <button
+            type="button"
+            aria-label={
+              desktopSidebarOpen
+                ? "إغلاق الشريط الجانبي"
+                : "فتح الشريط الجانبي"
+            }
+            title={
+              desktopSidebarOpen
+                ? "إغلاق الشريط الجانبي"
+                : "فتح الشريط الجانبي"
+            }
+            onClick={() =>
+              setDesktopSidebarOpen((open) => !open)
+            }
+            className="hidden h-9 w-9 items-center justify-center rounded-xl bg-slate-50 text-slate-600 transition hover:bg-brand-50 hover:text-brand-600 lg:flex"
+          >
+            {desktopSidebarOpen ? (
+              <PanelRightClose className="h-4 w-4" />
+            ) : (
+              <PanelRightOpen className="h-4 w-4" />
+            )}
+          </button>
 
-        <button
-          className="lg:hidden text-slate-500"
-          onClick={() =>
-            setSidebarOpen(
-              (value) => !value
-            )
-          }
-        >
-          {sidebarOpen ? (
-            <X className="w-5 h-5" />
-          ) : (
-            <Menu className="w-5 h-5" />
-          )}
-        </button>
+          <button
+            type="button"
+            aria-label="فتح محتوى الكورس"
+            onClick={() =>
+              setSidebarOpen(true)
+            }
+            className="flex h-9 w-9 items-center justify-center rounded-xl bg-slate-50 text-slate-600 transition hover:bg-brand-50 hover:text-brand-600 lg:hidden"
+          >
+            <Menu className="h-5 w-5" />
+          </button>
+        </div>
       </header>
 
-      {/* ------------------------------------------------------------------ */}
-      {/* Main                                                               */}
-      {/* ------------------------------------------------------------------ */}
+      {/* ================================================================ */}
+      {/* MAIN                                                             */}
+      {/* ================================================================ */}
 
-      <div className="flex flex-1 overflow-hidden">
-        <main className="flex-1 overflow-y-auto">
-          {/* Video */}
+      <div className="relative flex min-h-0 flex-1">
+        {/* ============================================================ */}
+        {/* CONTENT                                                       */}
+        {/* ============================================================ */}
+
+        <main className="min-w-0 flex-1 overflow-y-auto">
+          {/* VIDEO */}
 
           <div className="bg-black">
             <div
               ref={videoContainerRef}
-              className="mx-auto aspect-video max-w-5xl relative overflow-hidden"
+              className="relative mx-auto aspect-video w-full max-w-5xl overflow-hidden"
             >
               {recordingBlocked ? (
                 <div className="flex h-full flex-col items-center justify-center gap-3 p-6 text-center text-white/80">
@@ -858,15 +1040,16 @@ const map: Record<string, LessonProgress> = {};
                     تم إيقاف تشغيل الفيديو لحماية حقوق المحتوى
                   </p>
 
-                  <p className="max-w-xs text-xs text-white/50">
+                  <p className="max-w-xs text-xs leading-5 text-white/50">
                     تم رصد نشاط قد يشير إلى محاولة تسجيل الشاشة.
-                    إذا كنت تعتقد أن هذا خطأ، يمكنك إعادة المحاولة.
                   </p>
 
                   <Button
                     size="sm"
                     variant="outline"
-                    onClick={handleRetryAfterBlock}
+                    onClick={
+                      handleRetryAfterBlock
+                    }
                   >
                     إعادة المحاولة
                   </Button>
@@ -882,39 +1065,37 @@ const map: Record<string, LessonProgress> = {};
                     disablePictureInPicture
                     playsInline
                     preload="metadata"
-                    className="h-full w-full"
+                    className="h-full w-full object-contain"
                     onContextMenu={(event) =>
                       event.preventDefault()
                     }
                   />
 
-                  {/* العلامة المائية */}
-
                   {watermarkPhone && (
                     <VideoWatermark
                       phone={watermarkPhone}
-                      containerRef={videoContainerRef}
+                      containerRef={
+                        videoContainerRef
+                      }
                     />
                   )}
 
-                  {/* Offline badge */}
-
                   {offlineAvailable && (
-                    <div className="absolute right-4 top-4 z-10 flex items-center gap-2 rounded-full bg-emerald-500/90 px-3 py-1.5 text-xs font-bold text-white shadow-lg backdrop-blur">
-                      <HardDriveDownload className="h-3.5 w-3.5" />
-                      متاح بدون إنترنت
+                    <div className="absolute right-3 top-3 z-10 flex items-center gap-1.5 rounded-full bg-emerald-500/90 px-2.5 py-1.5 text-[10px] font-bold text-white shadow-lg backdrop-blur sm:right-4 sm:top-4 sm:px-3 sm:text-xs">
+                      <HardDriveDownload className="h-3 w-3 sm:h-3.5 sm:w-3.5" />
+                      بدون إنترنت
                     </div>
                   )}
                 </>
               ) : (
                 <div className="flex h-full flex-col items-center justify-center gap-3 p-6 text-center text-white/70">
                   {!isOnline ? (
-                    <WifiOff className="h-10 w-10 text-white/40" />
+                    <WifiOff className="h-9 w-9 text-white/30" />
                   ) : (
-                    <Wifi className="h-10 w-10 text-white/40" />
+                    <Wifi className="h-9 w-9 text-white/30" />
                   )}
 
-                  <p className="text-sm">
+                  <p className="max-w-sm text-xs leading-5 sm:text-sm">
                     {videoError ??
                       "جاري تحميل الفيديو..."}
                   </p>
@@ -923,79 +1104,101 @@ const map: Record<string, LessonProgress> = {};
             </div>
           </div>
 
-          {/* Lesson information */}
+          {/* LESSON */}
 
-          <div className="mx-auto max-w-5xl p-6">
-            <div className="flex items-start justify-between gap-4">
-              <div>
-                <h2 className="text-xl font-bold text-slate-800">
-                  {activeLesson?.title}
-                </h2>
+          <div className="mx-auto max-w-5xl p-4 sm:p-6 lg:p-8">
+            <div className="rounded-2xl border border-slate-100 bg-white p-4 shadow-sm sm:p-6">
+              <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+                <div className="min-w-0">
+                  <div className="mb-2 flex items-center gap-2">
+                    <BookOpen className="h-4 w-4 text-brand-500" />
 
-                <p className="mt-2 text-sm text-slate-500 leading-relaxed">
-                  {activeLesson?.description}
-                </p>
+                    <span className="text-xs font-semibold text-brand-600">
+                      الدرس الحالي
+                    </span>
+                  </div>
+
+                  <h2 className="text-lg font-bold leading-8 text-slate-800 sm:text-xl">
+                    {activeLesson?.title}
+                  </h2>
+
+                  {activeLesson?.description && (
+                    <p className="mt-2 text-sm leading-6 text-slate-500">
+                      {activeLesson.description}
+                    </p>
+                  )}
+                </div>
+
+                {isActiveDone && (
+                  <span className="flex w-fit shrink-0 items-center gap-1.5 rounded-full bg-emerald-50 px-3 py-1.5 text-xs font-bold text-emerald-600">
+                    <CheckCircle2 className="h-3.5 w-3.5" />
+                    مكتمل
+                  </span>
+                )}
               </div>
 
-              {isActiveDone && (
-                <span className="flex shrink-0 items-center gap-1.5 rounded-full bg-emerald-50 px-3 py-1.5 text-xs font-bold text-emerald-600">
-                  <CheckCircle2 className="w-3.5 h-3.5" />
-                  مكتمل
-                </span>
-              )}
+              {/* NAVIGATION */}
+
+              <div className="mt-5 grid grid-cols-2 gap-2 sm:flex sm:flex-wrap">
+                <Button
+                  variant="outline"
+                  onClick={goToPrev}
+                  disabled={
+                    currentIndex <= 0
+                  }
+                  className="w-full sm:w-auto"
+                >
+                  <ChevronRight className="h-4 w-4" />
+                  السابق
+                </Button>
+
+                <Button
+                  variant="outline"
+                  onClick={goToNext}
+                  disabled={
+                    currentIndex >=
+                    allLessons.length - 1
+                  }
+                  className="w-full sm:w-auto"
+                >
+                  التالي
+                  <ChevronLeft className="h-4 w-4" />
+                </Button>
+
+                <Button
+                  onClick={markComplete}
+                  disabled={isActiveDone}
+                  className="col-span-2 w-full sm:w-auto"
+                >
+                  <CheckCircle2 className="h-4 w-4" />
+
+                  {isActiveDone
+                    ? "تم الإكمال"
+                    : "تحديد كمكتمل"}
+                </Button>
+              </div>
             </div>
 
-            {/* Navigation */}
+            {/* OFFLINE */}
 
-            <div className="mt-6 flex flex-wrap gap-3">
-              <Button
-                variant="outline"
-                onClick={goToPrev}
-                disabled={
-                  currentIndex <= 0
-                }
-              >
-                <ChevronRight className="w-4 h-4" />
-                الدرس السابق
-              </Button>
-
-              <Button
-                variant="outline"
-                onClick={goToNext}
-                disabled={
-                  currentIndex >=
-                  allLessons.length - 1
-                }
-              >
-                الدرس التالي
-                <ChevronLeft className="w-4 h-4" />
-              </Button>
-
-              <Button
-                onClick={markComplete}
-                disabled={isActiveDone}
-              >
-                <CheckCircle2 className="w-4 h-4" />
-
-                {isActiveDone
-                  ? "تم الإكمال"
-                  : "تحديد كمكتمل"}
-              </Button>
-            </div>
-
-            {/* ------------------------------------------------------------ */}
-            {/* Offline controls                                              */}
-            {/* ------------------------------------------------------------ */}
-
-            <div className="mt-6 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+            <div className="mt-4 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:mt-6 sm:p-5">
               <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-                <div className="flex items-start gap-3">
+                <div className="flex min-w-0 items-start gap-3">
                   <div
-                    className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl ${
-                      offlineAvailable
-                        ? "bg-emerald-50 text-emerald-600"
-                        : "bg-brand-50 text-brand-600"
-                    }`}
+                    className={`
+                      flex
+                      h-10
+                      w-10
+                      shrink-0
+                      items-center
+                      justify-center
+                      rounded-xl
+                      ${
+                        offlineAvailable
+                          ? "bg-emerald-50 text-emerald-600"
+                          : "bg-brand-50 text-brand-600"
+                      }
+                    `}
                   >
                     {offlineAvailable ? (
                       <HardDriveDownload className="h-5 w-5" />
@@ -1004,15 +1207,15 @@ const map: Record<string, LessonProgress> = {};
                     )}
                   </div>
 
-                  <div>
-                    <p className="font-bold text-slate-800">
+                  <div className="min-w-0">
+                    <p className="text-sm font-bold text-slate-800">
                       المشاهدة بدون إنترنت
                     </p>
 
                     <p className="mt-1 text-xs leading-5 text-slate-500">
                       {offlineAvailable
-                        ? "هذا الفيديو محفوظ على جهازك ويمكن تشغيله بدون إنترنت."
-                        : "احفظ الفيديو داخل التطبيق لمشاهدته لاحقًا بدون إنترنت."}
+                        ? "الفيديو محفوظ على جهازك ويمكن تشغيله بدون إنترنت."
+                        : "احفظ الفيديو لمشاهدته لاحقًا بدون إنترنت."}
                     </p>
                   </div>
                 </div>
@@ -1026,7 +1229,7 @@ const map: Record<string, LessonProgress> = {};
                     disabled={
                       removingOffline
                     }
-                    className="border-red-200 text-red-600 hover:bg-red-50"
+                    className="w-full border-red-200 text-red-600 hover:bg-red-50 sm:w-auto"
                   >
                     {removingOffline ? (
                       <Loader2 className="h-4 w-4 animate-spin" />
@@ -1047,7 +1250,7 @@ const map: Record<string, LessonProgress> = {};
                       !isOnline ||
                       downloading
                     }
-                    className="min-w-[180px]"
+                    className="w-full sm:min-w-[180px] sm:w-auto"
                   >
                     {downloading ? (
                       <>
@@ -1064,8 +1267,6 @@ const map: Record<string, LessonProgress> = {};
                   </Button>
                 )}
               </div>
-
-              {/* Progress */}
 
               {downloading && (
                 <div className="mt-4">
@@ -1094,22 +1295,24 @@ const map: Record<string, LessonProgress> = {};
               )}
 
               {!isOnline && (
-                <div className="mt-4 flex items-center gap-2 rounded-xl bg-amber-50 px-3 py-2.5 text-xs font-medium text-amber-700">
-                  <WifiOff className="h-4 w-4 shrink-0" />
+                <div className="mt-4 flex items-start gap-2 rounded-xl bg-amber-50 px-3 py-2.5 text-xs font-medium leading-5 text-amber-700">
+                  <WifiOff className="mt-0.5 h-4 w-4 shrink-0" />
 
-                  {offlineAvailable
-                    ? "أنت غير متصل بالإنترنت، ويمكنك تشغيل هذا الفيديو لأنه محفوظ Offline."
-                    : "أنت غير متصل بالإنترنت، احفظ الفيديو أولًا أثناء الاتصال بالإنترنت."}
+                  <span>
+                    {offlineAvailable
+                      ? "أنت غير متصل بالإنترنت، ويمكنك تشغيل هذا الفيديو لأنه محفوظ Offline."
+                      : "أنت غير متصل بالإنترنت، احفظ الفيديو أولًا أثناء الاتصال بالإنترنت."}
+                  </span>
                 </div>
               )}
             </div>
 
-            {/* Quizzes */}
+            {/* QUIZZES */}
 
             {quizzes.length > 0 && (
-              <div className="mt-8 rounded-2xl border border-brand-100 bg-gradient-to-br from-brand-50/80 to-white p-5">
+              <div className="mt-4 rounded-2xl border border-brand-100 bg-gradient-to-br from-brand-50/80 to-white p-4 sm:mt-6 sm:p-5">
                 <h3 className="flex items-center gap-2 font-bold text-brand-900">
-                  <ClipboardList className="w-5 h-5" />
+                  <ClipboardList className="h-5 w-5" />
 
                   اختبارات هذا الكورس
                 </h3>
@@ -1120,13 +1323,13 @@ const map: Record<string, LessonProgress> = {};
                       <Link
                         key={quiz.id}
                         to={`/app/student/quizzes/${quiz.id}`}
-                        className="flex items-center justify-between rounded-xl bg-white px-4 py-3 text-sm shadow-sm hover:shadow-md transition-shadow"
+                        className="flex items-center justify-between gap-3 rounded-xl bg-white px-4 py-3 text-sm shadow-sm transition hover:shadow-md"
                       >
-                        <span className="font-semibold text-slate-700">
+                        <span className="min-w-0 truncate font-semibold text-slate-700">
                           {quiz.title}
                         </span>
 
-                        <span className="text-xs text-slate-400">
+                        <span className="shrink-0 text-xs text-slate-400">
                           {quiz.duration_minutes}{" "}
                           دقيقة
                         </span>
@@ -1136,128 +1339,155 @@ const map: Record<string, LessonProgress> = {};
                 </div>
               </div>
             )}
+
+            <div className="h-6 sm:h-10" />
           </div>
         </main>
 
-        {/* ---------------------------------------------------------------- */}
-        {/* Sidebar                                                           */}
-        {/* ---------------------------------------------------------------- */}
+        {/* ============================================================ */}
+        {/* DESKTOP SIDEBAR                                             */}
+        {/* ============================================================ */}
 
-        <AnimatePresence>
-          {(sidebarOpen || true) && (
-            <aside
-              className={`w-80 shrink-0 border-r border-slate-100 bg-white overflow-y-auto lg:block ${
-                sidebarOpen
-                  ? "block absolute inset-y-14 left-0 z-30 shadow-xl"
-                  : "hidden"
-              }`}
+        <aside
+          className={`hidden shrink-0 overflow-y-auto border-l border-slate-100 bg-white shadow-[-6px_0_18px_rgba(15,23,42,0.03)] transition-[width] duration-300 lg:block ${
+            desktopSidebarOpen
+              ? "w-80"
+              : "w-0 border-l-0 shadow-none"
+          }`}
+        >
+          <div
+            className={`h-full w-80 transition-opacity duration-200 ${
+              desktopSidebarOpen
+                ? "opacity-100"
+                : "pointer-events-none opacity-0"
+            }`}
+          >
+            <SidebarContent />
+          </div>
+        </aside>
+      </div>
+
+      {/* ================================================================ */}
+      {/* MOBILE DRAWER                                                    */}
+      {/* ================================================================ */}
+
+      <AnimatePresence>
+        {sidebarOpen && (
+          <>
+            {/* Overlay */}
+
+            <motion.button
+              type="button"
+              aria-label="إغلاق القائمة"
+              className="fixed inset-0 z-50 bg-slate-950/50 backdrop-blur-[2px] lg:hidden"
+              initial={{
+                opacity: 0,
+              }}
+              animate={{
+                opacity: 1,
+              }}
+              exit={{
+                opacity: 0,
+              }}
+              transition={{
+                duration: 0.2,
+              }}
+              onClick={() =>
+                setSidebarOpen(false)
+              }
+            />
+
+            {/* Drawer */}
+
+            <motion.aside
+              initial={{
+                x: "100%",
+              }}
+              animate={{
+                x: 0,
+              }}
+              exit={{
+                x: "100%",
+              }}
+              transition={{
+                type: "spring",
+                stiffness: 380,
+                damping: 38,
+              }}
+              className="fixed inset-y-0 right-0 z-[60] flex w-[88%] max-w-[380px] flex-col overflow-hidden bg-white shadow-2xl lg:hidden"
             >
-              <div className="sticky top-0 z-10 bg-white p-4 border-b border-slate-100">
-                <div className="flex items-center gap-2 text-sm font-semibold text-slate-700">
-                  <ListVideo className="w-4 h-4 text-brand-500" />
+              {/* Drawer Header */}
 
-                  محتوى الكورس
+              <div className="flex h-16 shrink-0 items-center justify-between border-b border-slate-100 bg-white px-4">
+                <div className="flex items-center gap-3">
+                  <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-brand-50 text-brand-600">
+                    <ListVideo className="h-4 w-4" />
+                  </div>
+
+                  <div>
+                    <p className="text-sm font-bold text-slate-800">
+                      محتوى الكورس
+                    </p>
+
+                    <p className="text-[10px] text-slate-400">
+                      {completedCount} /{" "}
+                      {allLessons.length} مكتمل
+                    </p>
+                  </div>
                 </div>
 
-                <div className="mt-3 flex items-center justify-between text-sm">
+                <button
+                  type="button"
+                  aria-label="إغلاق القائمة"
+                  onClick={() =>
+                    setSidebarOpen(false)
+                  }
+                  className="flex h-9 w-9 items-center justify-center rounded-xl bg-slate-50 text-slate-500 transition hover:bg-red-50 hover:text-red-500"
+                >
+                  <X className="h-5 w-5" />
+                </button>
+              </div>
+
+              {/* Mobile progress */}
+
+              <div className="shrink-0 border-b border-slate-100 bg-slate-50/70 px-4 py-3">
+                <div className="mb-2 flex items-center justify-between text-xs">
                   <span className="text-slate-500">
-                    تقدّمك في الكورس
+                    تقدمك في الكورس
                   </span>
 
-                  <span className="font-bold text-brand-500">
+                  <span className="font-bold text-brand-600">
                     {courseProgress}%
                   </span>
                 </div>
 
-                <div className="mt-2 h-2 w-full rounded-full bg-slate-100">
+                <div className="h-2 overflow-hidden rounded-full bg-slate-200">
                   <motion.div
-                    className="h-2 rounded-full bg-gradient-to-l from-brand-500 to-brand-900"
+                    className="h-full rounded-full bg-gradient-to-l from-brand-500 to-brand-900"
                     initial={{
                       width: 0,
                     }}
                     animate={{
                       width: `${courseProgress}%`,
                     }}
-                    transition={{
-                      duration: 0.6,
-                    }}
                   />
                 </div>
               </div>
 
-              {sections.map(
-                (section) => (
-                  <div
-                    key={section.id}
-                    className="border-b border-slate-50 p-3"
-                  >
-                    <p className="px-2 py-1 text-xs font-bold text-slate-400">
-                      {section.title}
-                    </p>
+              {/* Lessons */}
 
-                    {section.lessons?.map(
-                      (lesson) => {
-                        const done =
-                          progressMap[
-                            lesson.id
-                          ]?.completed;
+              <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-1 pb-6">
+                <SidebarContent />
+              </div>
 
-                        const isActive =
-                          lesson.id ===
-                          activeLesson?.id;
+              {/* Bottom safe area */}
 
-                        return (
-                          <button
-                            key={lesson.id}
-                            onClick={() => {
-                              setActiveLesson(
-                                lesson
-                              );
-
-                              setSidebarOpen(
-                                false
-                              );
-                            }}
-                            className={`flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm transition-colors ${
-                              isActive
-                                ? "bg-brand-50 text-brand-900 font-semibold ring-1 ring-brand-100"
-                                : "text-slate-600 hover:bg-slate-50"
-                            }`}
-                          >
-                            {done ? (
-                              <CheckCircle2 className="w-4 h-4 shrink-0 text-emerald-500" />
-                            ) : (
-                              <Circle className="w-4 h-4 shrink-0 text-slate-300" />
-                            )}
-
-                            <span className="flex-1 truncate text-right">
-                              {lesson.title}
-                            </span>
-
-                            <div className="flex shrink-0 items-center gap-1.5">
-                              {lesson.id ===
-                                activeLesson?.id &&
-                                offlineAvailable && (
-                                  <HardDriveDownload className="h-3.5 w-3.5 text-emerald-500" />
-                                )}
-
-                              <span className="text-xs text-slate-400">
-                                {formatDuration(
-                                  lesson.duration_seconds
-                                )}
-                              </span>
-                            </div>
-                          </button>
-                        );
-                      }
-                    )}
-                  </div>
-                )
-              )}
-            </aside>
-          )}
-        </AnimatePresence>
-      </div>
+              <div className="h-[env(safe-area-inset-bottom)] shrink-0 bg-white" />
+            </motion.aside>
+          </>
+        )}
+      </AnimatePresence>
     </div>
   );
 }
+
