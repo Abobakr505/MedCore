@@ -52,6 +52,7 @@ const TEACHER_NAV: NavItem[] = [
   { to: "/app/teacher/courses", label: "كورساتي", icon: BookOpen },
   { to: "/app/teacher/students", label: "طلابي", icon: GraduationCap },
   { to: "/app/teacher/payments", label: "مراجعة المدفوعات", icon: Receipt },
+    { to: "/app/student/support", label: "الدعم الفني", icon: LifeBuoy },
   { to: "/app/teacher/profile", label: "الملف الشخصي", icon: UserCircle },
 ];
 

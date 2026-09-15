@@ -299,11 +299,10 @@ export default function SupportPage() {
                     ] || Clock3;
 
                   return (
-                    <Link
-                      key={ticket.id}
-                      to={`/app/support/tickets/${ticket.id}`}
-                      className="group block"
-                    >
+<div
+  key={ticket.id}
+  className="group block w-full rounded-2xl border border-transparent transition hover:border-brand-100 hover:bg-brand-50/50"
+>
                       <div className="flex min-h-[76px] items-center gap-3 rounded-xl border border-transparent px-3 py-3 transition-all duration-200 hover:border-brand-100 hover:bg-brand-50/50 sm:px-4">
                         {/* Icon */}
                         <div
@@ -362,10 +361,9 @@ export default function SupportPage() {
                             }
                           </Badge>
 
-                          <ChevronLeft className="hidden h-4 w-4 text-slate-300 transition-transform group-hover:-translate-x-0.5 sm:block" />
                         </div>
                       </div>
-                    </Link>
+                    </div>
                   );
                 })}
               </div>

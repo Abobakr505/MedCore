@@ -666,7 +666,7 @@ export default function TeacherCoursesPage() {
             <textarea
               rows={4}
               placeholder="اكتب وصفًا واضحًا يساعد الطالب على معرفة محتوى الكورس..."
-              className="w-full resize-none rounded-xl bg-white border border-slate-300 px-4 py-3 text-sm outline-none transition focus:border-brand-500 focus:ring-4 focus:ring-brand-500/10"
+              className="w-full resize-none rounded-xl bg-white border border-slate-300 px-4 py-3 text-sm outline-none transition focus:border-brand-500 focus:ring-4 "
               {...register("description")}
             />
 
@@ -748,7 +748,7 @@ export default function TeacherCoursesPage() {
 
             <textarea
               rows={4}
-              className="w-full resize-none rounded-xl border border-slate-300 px-4 py-3 text-sm outline-none transition focus:border-brand-500 focus:ring-4 focus:ring-brand-500/10"
+              className="w-full resize-none rounded-xl bg-white border border-slate-300 px-4 py-3 text-sm outline-none transition focus:border-brand-500 focus:ring-4 focus:ring-brand-500/10"
               {...registerEdit("description")}
             />
 
@@ -776,7 +776,7 @@ export default function TeacherCoursesPage() {
             </Select>
 
             <Input
-              label="السعر (ر.س)"
+              label="السعر (ج.م)"
               type="number"
               min="0"
               step="0.01"

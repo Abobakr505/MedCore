@@ -29,8 +29,10 @@ import {
   fetchSections,
   createSection,
   deleteSection,
+  updateSectionTitle,
   createLesson,
   deleteLesson,
+  updateLessonTitle,
   setPreview,
   uploadLessonVideo,
 } from "@/services/teacherCourses";
@@ -142,13 +144,13 @@ export default function CourseBuilderPage() {
   };
 
   const handleUploadVideo = async (file: File) => {
-    if (!uploadTarget || !courseId) return;
+    if (!uploadTarget || !course) return;
 
     setUploading(true);
 
     try {
       await uploadLessonVideo(
-        courseId,
+        course.id,
         uploadTarget.id,
         file
       );
@@ -158,7 +160,9 @@ export default function CourseBuilderPage() {
       setUploadTarget(null);
 
       load();
-    } catch {
+    } catch (err) {
+      console.error("Upload lesson video failed:", err);
+
       showToast(
         "تعذّر رفع الفيديو، تأكد من حجم الملف والصيغة",
         "error"
@@ -395,9 +399,19 @@ export default function CourseBuilderPage() {
                   showToast("تم حذف القسم", "success");
                   load();
                 }}
+                onRenameSection={async (newTitle) => {
+                  await updateSectionTitle(section.id, newTitle);
+                  showToast("تم تعديل اسم القسم", "success");
+                  load();
+                }}
                 onDeleteLesson={async (lessonId) => {
                   await deleteLesson(lessonId);
                   showToast("تم حذف الدرس", "success");
+                  load();
+                }}
+                onRenameLesson={async (lessonId, newTitle) => {
+                  await updateLessonTitle(lessonId, newTitle);
+                  showToast("تم تعديل اسم الدرس", "success");
                   load();
                 }}
                 onTogglePreview={async (lesson) => {
@@ -595,18 +609,26 @@ function SectionBlock({
   section,
   onAddLesson,
   onDeleteSection,
+  onRenameSection,
   onDeleteLesson,
+  onRenameLesson,
   onTogglePreview,
   onUploadClick,
 }: {
   section: CourseSection;
   onAddLesson: () => void;
   onDeleteSection: () => void;
+  onRenameSection: (newTitle: string) => Promise<void>;
   onDeleteLesson: (lessonId: string) => void;
+  onRenameLesson: (lessonId: string, newTitle: string) => Promise<void>;
   onTogglePreview: (lesson: Lesson) => void;
   onUploadClick: (lesson: Lesson) => void;
 }) {
   const [open, setOpen] = useState(true);
+  const [editingSection, setEditingSection] = useState(false);
+  const [sectionTitleDraft, setSectionTitleDraft] = useState(section.title);
+  const [editingLessonId, setEditingLessonId] = useState<string | null>(null);
+  const [lessonTitleDraft, setLessonTitleDraft] = useState("");
 
   const lessons = section.lessons ?? [];
   const lessonCount = lessons.length;
@@ -624,6 +646,36 @@ function SectionBlock({
       ? Math.round((withVideo / lessonCount) * 100)
       : 0;
 
+  const saveSectionTitle = async () => {
+    const trimmed = sectionTitleDraft.trim();
+
+    if (!trimmed || trimmed === section.title) {
+      setSectionTitleDraft(section.title);
+      setEditingSection(false);
+      return;
+    }
+
+    await onRenameSection(trimmed);
+    setEditingSection(false);
+  };
+
+  const startEditingLesson = (lesson: Lesson) => {
+    setEditingLessonId(lesson.id);
+    setLessonTitleDraft(lesson.title);
+  };
+
+  const saveLessonTitle = async (lesson: Lesson) => {
+    const trimmed = lessonTitleDraft.trim();
+
+    if (!trimmed || trimmed === lesson.title) {
+      setEditingLessonId(null);
+      return;
+    }
+
+    await onRenameLesson(lesson.id, trimmed);
+    setEditingLessonId(null);
+  };
+
   return (
     <div className="overflow-hidden rounded-3xl border border-slate-100 bg-white shadow-sm">
 
@@ -631,40 +683,91 @@ function SectionBlock({
       <div className="p-5">
         <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
 
-          <button
-            className="flex min-w-0 items-center gap-3 text-right"
-            onClick={() => setOpen(!open)}
-          >
-            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-brand-50 text-brand-500">
+          <div className="flex min-w-0 items-center gap-3">
+            <button
+              className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-brand-50 text-brand-500"
+              onClick={() => setOpen(!open)}
+            >
               <ChevronDown
                 className={`h-4 w-4 transition-transform ${
                   open ? "rotate-180" : ""
                 }`}
               />
-            </div>
+            </button>
 
-            <div className="min-w-0">
-              <div className="flex flex-wrap items-center gap-2">
-                <h2 className="truncate font-bold text-slate-800">
-                  {section.title}
-                </h2>
+            <div className="min-w-0 flex-1">
+              {editingSection ? (
+                <div className="flex items-center gap-2">
+                  <input
+                    autoFocus
+                    value={sectionTitleDraft}
+                    onChange={(e) =>
+                      setSectionTitleDraft(e.target.value)
+                    }
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") saveSectionTitle();
+                      if (e.key === "Escape") {
+                        setSectionTitleDraft(section.title);
+                        setEditingSection(false);
+                      }
+                    }}
+                    className="w-full rounded-lg border border-brand-300 px-2.5 py-1.5 text-sm font-bold text-slate-800 outline-none focus:ring-2 focus:ring-brand-500/20"
+                  />
 
-                <span className="rounded-full bg-slate-100 px-2.5 py-1 text-[10px] font-bold text-slate-500">
-                  {lessonCount} درس
-                </span>
+                  <button
+                    onClick={saveSectionTitle}
+                    className="shrink-0 rounded-lg bg-brand-500 px-2.5 py-1.5 text-xs font-bold text-white hover:bg-brand-600"
+                  >
+                    حفظ
+                  </button>
 
-                {previews > 0 && (
-                  <span className="rounded-full bg-amber-50 px-2.5 py-1 text-[10px] font-bold text-amber-600">
-                    {previews} معاينة
+                  <button
+                    onClick={() => {
+                      setSectionTitleDraft(section.title);
+                      setEditingSection(false);
+                    }}
+                    className="shrink-0 rounded-lg px-2 py-1.5 text-xs text-slate-400 hover:text-slate-600"
+                  >
+                    إلغاء
+                  </button>
+                </div>
+              ) : (
+                <div className="flex flex-wrap items-center gap-2">
+                  <h2
+                    className="cursor-pointer truncate font-bold text-slate-800 hover:text-brand-600"
+                    onClick={() => setEditingSection(true)}
+                    title="اضغط للتعديل"
+                  >
+                    {section.title}
+                  </h2>
+
+                  <button
+                    onClick={() => setEditingSection(true)}
+                    className="shrink-0 text-xs text-slate-300 hover:text-brand-500"
+                    title="تعديل اسم القسم"
+                  >
+                    ✎
+                  </button>
+
+                  <span className="rounded-full bg-slate-100 px-2.5 py-1 text-[10px] font-bold text-slate-500">
+                    {lessonCount} درس
                   </span>
-                )}
-              </div>
 
-              <p className="mt-1 text-xs text-slate-400">
-                {withVideo} من {lessonCount} فيديو جاهز
-              </p>
+                  {previews > 0 && (
+                    <span className="rounded-full bg-amber-50 px-2.5 py-1 text-[10px] font-bold text-amber-600">
+                      {previews} معاينة
+                    </span>
+                  )}
+                </div>
+              )}
+
+              {!editingSection && (
+                <p className="mt-1 text-xs text-slate-400">
+                  {withVideo} من {lessonCount} فيديو جاهز
+                </p>
+              )}
             </div>
-          </button>
+          </div>
 
           <div className="flex items-center gap-2">
             <Button
@@ -689,7 +792,7 @@ function SectionBlock({
         {lessonCount > 0 && (
           <div className="mt-4 h-1.5 overflow-hidden rounded-full bg-slate-100">
             <div
-              className="h-full rounded-full bg-gradient-to-r from-brand-500 to-emerald-500 transition-all"
+              className="h-full rounded-full bg-gradient-to-r from-brand-500 to-cyan-500 transition-all"
               style={{ width: `${completion}%` }}
             />
           </div>
@@ -727,50 +830,97 @@ function SectionBlock({
                   key={lesson.id}
                   className="group flex flex-col gap-3 border-b border-slate-50 px-5 py-4 last:border-0 hover:bg-slate-50/70 sm:flex-row sm:items-center sm:justify-between"
                 >
-                  <div className="flex min-w-0 items-center gap-3">
+                  <div className="flex min-w-0 flex-1 items-center gap-3">
 
                     <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-slate-100 text-xs font-black text-slate-400">
                       {index + 1}
                     </div>
 
-                    <div className="min-w-0">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <span className="font-semibold text-slate-700">
-                          {lesson.title}
-                        </span>
+                    <div className="min-w-0 flex-1">
+                      {editingLessonId === lesson.id ? (
+                        <div className="flex items-center gap-2">
+                          <input
+                            autoFocus
+                            value={lessonTitleDraft}
+                            onChange={(e) =>
+                              setLessonTitleDraft(e.target.value)
+                            }
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter")
+                                saveLessonTitle(lesson);
+                              if (e.key === "Escape")
+                                setEditingLessonId(null);
+                            }}
+                            className="w-full rounded-lg border border-brand-300 px-2.5 py-1 text-sm font-semibold text-slate-700 outline-none focus:ring-2 focus:ring-brand-500/20"
+                          />
 
-                        {lesson.is_preview && (
-                          <span className="rounded-full bg-brand-50 px-2 py-0.5 text-[10px] font-bold text-brand-600">
-                            معاينة مجانية
+                          <button
+                            onClick={() => saveLessonTitle(lesson)}
+                            className="shrink-0 rounded-lg bg-brand-500 px-2 py-1 text-xs font-bold text-white hover:bg-brand-600"
+                          >
+                            حفظ
+                          </button>
+
+                          <button
+                            onClick={() => setEditingLessonId(null)}
+                            className="shrink-0 rounded-lg px-2 py-1 text-xs text-slate-400 hover:text-slate-600"
+                          >
+                            إلغاء
+                          </button>
+                        </div>
+                      ) : (
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span
+                            className="cursor-pointer font-semibold text-slate-700 hover:text-brand-600"
+                            onClick={() => startEditingLesson(lesson)}
+                            title="اضغط للتعديل"
+                          >
+                            {lesson.title}
                           </span>
-                        )}
 
-                        {lesson.duration_seconds > 0 && (
-                          <span className="text-[11px] text-slate-400">
-                            {formatDuration(
-                              lesson.duration_seconds
-                            )}
-                          </span>
-                        )}
-                      </div>
+                          <button
+                            onClick={() => startEditingLesson(lesson)}
+                            className="text-xs text-slate-300 hover:text-brand-500"
+                            title="تعديل اسم الدرس"
+                          >
+                            ✎
+                          </button>
 
-                      <div className="mt-1 flex items-center gap-1.5">
-                        {lesson.video_path ? (
-                          <>
-                            <CheckCircle2 className="h-3 w-3 text-emerald-500" />
-                            <span className="text-[11px] font-medium text-emerald-600">
-                              الفيديو جاهز
+                          {lesson.is_preview && (
+                            <span className="rounded-full bg-brand-50 px-2 py-0.5 text-[10px] font-bold text-brand-600">
+                              معاينة مجانية
                             </span>
-                          </>
-                        ) : (
-                          <>
-                            <CircleAlert className="h-3 w-3 text-amber-500" />
-                            <span className="text-[11px] font-medium text-amber-600">
-                              يحتاج فيديو
+                          )}
+
+                          {lesson.duration_seconds > 0 && (
+                            <span className="text-[11px] text-slate-400">
+                              {formatDuration(
+                                lesson.duration_seconds
+                              )}
                             </span>
-                          </>
-                        )}
-                      </div>
+                          )}
+                        </div>
+                      )}
+
+                      {editingLessonId !== lesson.id && (
+                        <div className="mt-1 flex items-center gap-1.5">
+                          {lesson.video_path ? (
+                            <>
+                              <CheckCircle2 className="h-3 w-3 text-emerald-500" />
+                              <span className="text-[11px] font-medium text-emerald-600">
+                                الفيديو جاهز
+                              </span>
+                            </>
+                          ) : (
+                            <>
+                              <CircleAlert className="h-3 w-3 text-amber-500" />
+                              <span className="text-[11px] font-medium text-amber-600">
+                                يحتاج فيديو
+                              </span>
+                            </>
+                          )}
+                        </div>
+                      )}
                     </div>
                   </div>
 

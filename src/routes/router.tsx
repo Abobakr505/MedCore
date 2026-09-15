@@ -49,7 +49,6 @@ import SettingsAdminPage from "@/features/admin/SettingsAdminPage";
 import ReportsAdminPage from "@/features/admin/ReportsAdminPage";
 
 import SupportPage from "@/features/support/SupportPage";
-import TicketDetailPage from "@/features/support/TicketDetailPage";
 
 import NotFoundPage from "@/features/NotFoundPage";
 import ContactMessagesAdminPage from "@/features/admin/ContactMessagesAdminPage";
@@ -126,7 +125,6 @@ export const router = createBrowserRouter([
       { path: "admin/reports", element: <ReportsAdminPage /> },
 
       // ===== مشترك =====
-      { path: "support/tickets/:ticketId", element: <TicketDetailPage /> },
     ],
   },
 
