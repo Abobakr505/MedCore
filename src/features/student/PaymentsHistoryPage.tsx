@@ -5,22 +5,32 @@ import {
   CheckCircle2,
   XCircle,
   AlertCircle,
+  AlertTriangle,
+  Wallet2,
   Receipt,
   CreditCard,
   TrendingUp,
   CalendarDays,
-  ArrowUpLeft,
+  UploadCloud,
 } from "lucide-react";
 import { motion } from "framer-motion";
 import { Card } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
 import { Skeleton } from "@/components/ui/Skeleton";
 import { EmptyState } from "@/components/ui/EmptyState";
+import { Button } from "@/components/ui/Button";
+import { Modal } from "@/components/ui/Modal";
 import { useAuth } from "@/contexts/AuthContext";
-import { fetchStudentPayments } from "@/services/payments";
-import type { Payment } from "@/types";
+import { useToast } from "@/contexts/ToastContext";
+import {
+  fetchStudentPayments,
+  fetchStudentInstallments,
+  uploadInstallmentReceipt,
+} from "@/services/payments";
+import type { Payment, StudentInstallment } from "@/types";
 import { PAYMENT_STATUS_LABELS } from "@/types";
 import { formatCurrency, formatDateTime } from "@/utils/format";
+
 const STATUS_COLORS: Record<string, "amber" | "green" | "red"> = {
   pending: "amber",
   approved: "green",
@@ -36,17 +46,60 @@ const STATUS_ICON_STYLES: Record<string, string> = {
   approved: "bg-emerald-50 text-emerald-500 border-emerald-100",
   rejected: "bg-red-50 text-red-500 border-red-100",
 };
+
+type BannerTone = "ok" | "warning" | "overdue";
+
+const BANNER_STYLES: Record<BannerTone, string> = {
+  ok: "border-emerald-200 bg-emerald-50 text-emerald-700",
+  warning: "border-amber-200 bg-amber-50 text-amber-700",
+  overdue: "border-red-200 bg-red-50 text-red-700",
+};
+
+const BANNER_ICON_BG: Record<BannerTone, string> = {
+  ok: "bg-emerald-100 text-emerald-600",
+  warning: "bg-amber-100 text-amber-600",
+  overdue: "bg-red-100 text-red-600",
+};
+
 export default function PaymentsHistoryPage() {
   const { session } = useAuth();
+  const { showToast } = useToast();
+
   const [payments, setPayments] = useState<Payment[]>([]);
   const [loading, setLoading] = useState(true);
+
+  const [installments, setInstallments] = useState<StudentInstallment[]>([]);
+  const [installmentsLoading, setInstallmentsLoading] = useState(true);
+
+  const [payTarget, setPayTarget] = useState<StudentInstallment | null>(null);
+  const [payFile, setPayFile] = useState<File | null>(null);
+  const [paying, setPaying] = useState(false);
+
   useEffect(() => {
     if (!session?.user) return;
+
     setLoading(true);
     fetchStudentPayments(session.user.id)
       .then(setPayments)
       .finally(() => setLoading(false));
+
+    setInstallmentsLoading(true);
+    fetchStudentInstallments(session.user.id)
+      .then(setInstallments)
+      .catch(() => setInstallments([]))
+      .finally(() => setInstallmentsLoading(false));
   }, [session?.user?.id]);
+
+  const reloadInstallments = async () => {
+    if (!session?.user) return;
+    try {
+      const data = await fetchStudentInstallments(session.user.id);
+      setInstallments(data);
+    } catch {
+      // تجاهل صامت، هيتم عرض آخر نسخة محملة
+    }
+  };
+
   const stats = useMemo(() => {
     const approved = payments.filter((p) => p.status === "approved");
     const pending = payments.filter((p) => p.status === "pending");
@@ -64,6 +117,79 @@ export default function PaymentsHistoryPage() {
       totalTransactions,
     };
   }, [payments]);
+
+  /* أقرب قسط يحتاج دفع أو إعادة رفع (مش pending لأنه بالفعل مُرسل) */
+  const nextDueInstallment = useMemo(() => {
+    const due = installments.filter(
+      (i) => i.status === "scheduled" || i.status === "rejected",
+    );
+    return (
+      due.sort(
+        (a, b) =>
+          new Date(a.due_date).getTime() - new Date(b.due_date).getTime(),
+      )[0] ?? null
+    );
+  }, [installments]);
+
+  const daysUntilDue = useMemo(() => {
+    if (!nextDueInstallment) return null;
+    const due = new Date(nextDueInstallment.due_date).getTime();
+    const now = new Date().setHours(0, 0, 0, 0);
+    return Math.ceil((due - now) / (1000 * 60 * 60 * 24));
+  }, [nextDueInstallment]);
+
+  const bannerTone: BannerTone | null = useMemo(() => {
+    if (daysUntilDue === null) return null;
+    if (daysUntilDue < 0) return "overdue";
+    if (daysUntilDue <= 3) return "warning";
+    return "ok";
+  }, [daysUntilDue]);
+
+  const bannerMessage = useMemo(() => {
+    if (!nextDueInstallment || daysUntilDue === null) return null;
+
+    if (nextDueInstallment.status === "rejected") {
+      return `تم رفض إيصال قسط الشهر ${nextDueInstallment.month_number}، برجاء إعادة الرفع`;
+    }
+
+    if (daysUntilDue < 0) {
+      return `فات معاد قسط الشهر ${nextDueInstallment.month_number} منذ ${Math.abs(daysUntilDue)} يوم`;
+    }
+
+    if (daysUntilDue === 0) {
+      return `قسط الشهر ${nextDueInstallment.month_number} مستحق اليوم`;
+    }
+
+    return `قسط الشهر ${nextDueInstallment.month_number} مستحق خلال ${daysUntilDue} يوم`;
+  }, [nextDueInstallment, daysUntilDue]);
+
+  const handlePayInstallment = async () => {
+    if (!payTarget || !payFile || !session?.user) return;
+
+    setPaying(true);
+
+    try {
+      await uploadInstallmentReceipt({
+        installmentId: payTarget.id,
+        studentId: session.user.id,
+        courseId: payTarget.course_id,
+        amount: payTarget.amount,
+        file: payFile,
+      });
+
+      showToast("تم إرسال إيصال القسط، بانتظار المراجعة", "success");
+
+      setPayTarget(null);
+      setPayFile(null);
+
+      await reloadInstallments();
+    } catch {
+      showToast("تعذّر رفع إيصال القسط، حاول مرة أخرى", "error");
+    } finally {
+      setPaying(false);
+    }
+  };
+
   return (
     <div className="mx-auto max-w-5xl pb-10">
       {" "}
@@ -99,6 +225,45 @@ export default function PaymentsHistoryPage() {
           )}{" "}
         </div>{" "}
       </motion.div>{" "}
+      {/* Installment due banner */}{" "}
+      {!installmentsLoading && nextDueInstallment && bannerTone && (
+        <motion.div
+          initial={{ opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          className={`mt-5 flex flex-col gap-3 rounded-2xl border p-4 sm:flex-row sm:items-center sm:justify-between ${BANNER_STYLES[bannerTone]}`}
+        >
+          {" "}
+          <div className="flex items-start gap-3">
+            {" "}
+            <div
+              className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl ${BANNER_ICON_BG[bannerTone]}`}
+            >
+              {" "}
+              {bannerTone === "overdue" ? (
+                <AlertTriangle className="h-5 w-5" />
+              ) : (
+                <Wallet2 className="h-5 w-5" />
+              )}{" "}
+            </div>{" "}
+            <div>
+              {" "}
+              <p className="font-bold">{bannerMessage}</p>{" "}
+              <p className="mt-1 text-xs opacity-80">
+                {" "}
+                {nextDueInstallment.course?.title ?? "كورس"} —{" "}
+                {formatCurrency(nextDueInstallment.amount)}{" "}
+              </p>{" "}
+            </div>{" "}
+          </div>{" "}
+          <Button
+            onClick={() => setPayTarget(nextDueInstallment)}
+            className="shrink-0"
+          >
+            {" "}
+            ادفع القسط الآن{" "}
+          </Button>{" "}
+        </motion.div>
+      )}{" "}
       {/* Statistics */}{" "}
       {loading ? (
         <div className="mt-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
@@ -207,9 +372,102 @@ export default function PaymentsHistoryPage() {
           </motion.div>{" "}
         </div>
       ) : null}{" "}
+      {/* Installments table (only if the student has any installment courses) */}{" "}
+      {!installmentsLoading && installments.length > 0 && (
+        <div className="mt-8">
+          {" "}
+          <h2 className="mb-3 text-lg font-black text-slate-800">
+            {" "}
+            خطة الأقساط{" "}
+          </h2>{" "}
+          <div className="space-y-2">
+            {" "}
+            {installments
+              .slice()
+              .sort((a, b) => {
+                if (a.course_id !== b.course_id) {
+                  return (a.course?.title ?? "").localeCompare(
+                    b.course?.title ?? "",
+                  );
+                }
+                return a.month_number - b.month_number;
+              })
+              .map((installment) => {
+                const color: "amber" | "green" | "red" =
+                  installment.status === "approved"
+                    ? "green"
+                    : installment.status === "pending"
+                      ? "amber"
+                      : installment.status === "rejected"
+                        ? "red"
+                        : "amber";
+
+                const isPayable =
+                  installment.status === "scheduled" ||
+                  installment.status === "rejected";
+
+                return (
+                  <div
+                    key={installment.id}
+                    className="flex flex-col gap-3 rounded-2xl border border-slate-200 bg-white p-4 sm:flex-row sm:items-center sm:justify-between"
+                  >
+                    {" "}
+                    <div className="min-w-0">
+                      {" "}
+                      <p className="truncate text-sm font-bold text-slate-800">
+                        {" "}
+                        {installment.course?.title ?? "كورس"} — الشهر{" "}
+                        {installment.month_number}{" "}
+                      </p>{" "}
+                      <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-slate-400">
+                        {" "}
+                        <span className="flex items-center gap-1">
+                          {" "}
+                          <CalendarDays className="h-3.5 w-3.5" />{" "}
+                          {new Date(installment.due_date).toLocaleDateString(
+                            "ar-EG",
+                          )}{" "}
+                        </span>{" "}
+                        <span className="hidden h-1 w-1 rounded-full bg-slate-300 sm:block" />{" "}
+                        <span>{formatCurrency(installment.amount)}</span>{" "}
+                      </div>{" "}
+                    </div>{" "}
+                    <div className="flex items-center gap-3">
+                      {" "}
+                      <Badge color={color}>
+                        {" "}
+                        {installment.status === "scheduled"
+                          ? "لم يحن موعده"
+                          : installment.status === "pending"
+                            ? "قيد المراجعة"
+                            : installment.status === "approved"
+                              ? "مدفوع"
+                              : "مرفوض"}{" "}
+                      </Badge>{" "}
+                      {isPayable && (
+                        <Button
+                          size="sm"
+                          variant="secondary"
+                          onClick={() => setPayTarget(installment)}
+                        >
+                          {" "}
+                          <UploadCloud className="h-4 w-4" /> ادفع{" "}
+                        </Button>
+                      )}{" "}
+                    </div>{" "}
+                  </div>
+                );
+              })}{" "}
+          </div>{" "}
+        </div>
+      )}{" "}
       {/* Payments */}{" "}
       <div className="mt-7">
         {" "}
+        <h2 className="mb-3 text-lg font-black text-slate-800">
+          {" "}
+          سجل عمليات الدفع{" "}
+        </h2>{" "}
         {loading ? (
           <div className="space-y-3">
             {" "}
@@ -256,10 +514,16 @@ export default function PaymentsHistoryPage() {
                             {" "}
                             <div className="min-w-0">
                               {" "}
-                              <p className="truncate font-bold text-slate-800">
+                              <div className="flex flex-wrap items-center gap-2">
                                 {" "}
-                                {payment.course?.title ?? "اشتراك في كورس"}{" "}
-                              </p>{" "}
+                                <p className="truncate font-bold text-slate-800">
+                                  {" "}
+                                  {payment.course?.title ?? "اشتراك في كورس"}{" "}
+                                </p>{" "}
+                                {payment.installment_id && (
+                                  <Badge color="amber">قسط</Badge>
+                                )}{" "}
+                              </div>{" "}
                               <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-slate-400">
                                 {" "}
                                 <span className="flex items-center gap-1">
@@ -345,6 +609,76 @@ export default function PaymentsHistoryPage() {
           </div>
         )}{" "}
       </div>{" "}
+      {/* Pay installment modal */}{" "}
+      <Modal
+        open={!!payTarget}
+        onClose={() => {
+          if (!paying) {
+            setPayTarget(null);
+            setPayFile(null);
+          }
+        }}
+        title={`دفع قسط الشهر ${payTarget?.month_number ?? ""}`}
+      >
+        <div dir="rtl">
+          <div className="rounded-2xl bg-slate-50 p-4">
+            <p className="text-xs text-slate-400">الكورس</p>
+
+            <p className="mt-1 font-black text-slate-800">
+              {payTarget?.course?.title}
+            </p>
+
+            <p className="mt-1 text-sm font-bold text-brand-600">
+              {formatCurrency(payTarget?.amount ?? 0)}
+            </p>
+          </div>
+
+          {payTarget?.status === "rejected" && payTarget.rejection_reason && (
+            <div className="mt-4 flex items-start gap-2 rounded-xl border border-red-100 bg-red-50 px-3 py-2.5 text-xs text-red-600">
+              <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+              <div>
+                <p className="font-bold">سبب رفض المحاولة السابقة</p>
+                <p className="mt-0.5 leading-relaxed">
+                  {payTarget.rejection_reason}
+                </p>
+              </div>
+            </div>
+          )}
+
+          <label className="mt-5 flex cursor-pointer flex-col items-center justify-center gap-3 rounded-2xl border-2 border-dashed border-slate-200 bg-slate-50 p-8 text-center transition hover:border-brand-300 hover:bg-brand-50/30">
+            <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-brand-100 text-brand-600">
+              <UploadCloud className="h-7 w-7" />
+            </div>
+
+            <div>
+              <p className="font-bold text-slate-700">
+                {payFile ? payFile.name : "اختر صورة إيصال الدفع"}
+              </p>
+
+              <p className="mt-1 text-xs text-slate-400">JPG / PNG / PDF</p>
+            </div>
+
+            <input
+              type="file"
+              accept="image/*,.pdf"
+              className="hidden"
+              onChange={(event) => {
+                setPayFile(event.target.files?.[0] ?? null);
+              }}
+            />
+          </label>
+
+          <Button
+            className="mt-5 w-full"
+            disabled={!payFile}
+            isLoading={paying}
+            onClick={handlePayInstallment}
+          >
+            إرسال إيصال القسط
+            <CheckCircle2 className="h-4 w-4" />
+          </Button>
+        </div>
+      </Modal>
     </div>
   );
 }

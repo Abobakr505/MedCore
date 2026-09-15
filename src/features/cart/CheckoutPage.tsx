@@ -16,15 +16,25 @@ import {
 import { Button } from "@/components/ui/Button";
 import { Modal } from "@/components/ui/Modal";
 import { EmptyState } from "@/components/ui/EmptyState";
-import { fetchCart, removeFromCart } from "@/services/cart";
-import { uploadReceiptAndCreatePayment } from "@/services/payments";
+import {
+  fetchCart,
+  removeFromCart,
+} from "@/services/cart";
+import {
+  uploadFirstInstallmentAndCreatePlan,
+  uploadReceiptAndCreatePayment,
+} from "@/services/payments";
 import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/contexts/ToastContext";
 import type { CartItem } from "@/types";
 import { formatCurrency } from "@/utils/format";
+import { supabase } from "@/lib/supabase";
 
 /**
- * غيّر البيانات التالية فقط عند إضافة بيانات الدفع الحقيقية.
+ * بيانات الدفع البنكي العامة.
+ *
+ * Vodafone Cash و InstaPay يتم جلبهما
+ * من بيانات المعلم الخاصة بالكورس.
  */
 const PAYMENT_INFO = {
   bank: {
@@ -33,131 +43,466 @@ const PAYMENT_INFO = {
     accountNumber: "0000000000000000",
   },
 
-  vodafone: {
-    number: "01000000000",
-  },
-
   instapay: {
-    username: "medcore@instapay",
     link: "https://ipn.eg/",
   },
 };
 
-type PaymentMethod = "bank" | "vodafone" | "instapay";
+type PaymentMethod =
+  | "bank"
+  | "vodafone"
+  | "instapay";
+
+type PurchaseMode =
+  | "full"
+  | "installment";
+
+type TeacherPayment = {
+  vodafone_number: string | null;
+  instapay_username: string | null;
+};
 
 export default function CheckoutPage() {
   const { session } = useAuth();
   const { showToast } = useToast();
 
+  // =========================
+  // State
+  // =========================
+
   const [items, setItems] = useState<CartItem[]>([]);
-  const [loading, setLoading] = useState(true);
 
-  const [activeItem, setActiveItem] = useState<CartItem | null>(null);
-  const [file, setFile] = useState<File | null>(null);
+  const [loading, setLoading] =
+    useState(true);
 
-  const [submitting, setSubmitting] = useState(false);
-  const [submittedIds, setSubmittedIds] = useState<string[]>([]);
+  const [activeItem, setActiveItem] =
+    useState<CartItem | null>(null);
+
+  const [file, setFile] =
+    useState<File | null>(null);
+
+  const [purchaseMode, setPurchaseMode] =
+    useState<PurchaseMode>("full");
+
+  const [submitting, setSubmitting] =
+    useState(false);
+
+  const [submittedIds, setSubmittedIds] =
+    useState<string[]>([]);
 
   const [paymentMethod, setPaymentMethod] =
     useState<PaymentMethod>("vodafone");
 
+  /**
+   * بيانات الدفع الخاصة بالمعلمين.
+   *
+   * المفتاح = teacher_id
+   */
+  const [teacherPayments, setTeacherPayments] =
+    useState<Record<string, TeacherPayment>>(
+      {}
+    );
+
+  // =========================
+  // Load Cart
+  // =========================
+
   useEffect(() => {
-    if (!session?.user) return;
+    if (!session?.user?.id) {
+      setItems([]);
+      setLoading(false);
+      return;
+    }
+
+    setLoading(true);
 
     fetchCart(session.user.id)
-      .then(setItems)
-      .catch(() =>
-        showToast("تعذّر تحميل بيانات السلة", "error")
-      )
-      .finally(() => setLoading(false));
+      .then((cart) => {
+        console.log(
+          "CHECKOUT CART:",
+          cart
+        );
+
+        console.log(
+          "CHECKOUT FIRST TEACHER:",
+          cart[0]?.course?.teacher_id
+        );
+
+        setItems(cart);
+      })
+      .catch((error) => {
+        console.error(
+          "FETCH CART ERROR:",
+          error
+        );
+
+        showToast(
+          "تعذّر تحميل بيانات السلة",
+          "error"
+        );
+      })
+      .finally(() => {
+        setLoading(false);
+      });
 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session?.user?.id]);
 
+  // =========================
+  // Load Teacher Payment Info
+  // =========================
+
+  useEffect(() => {
+    if (!items.length) {
+      setTeacherPayments({});
+      return;
+    }
+
+    const loadTeacherPayments =
+      async () => {
+        /**
+         * استخراج جميع teacher IDs
+         * الموجودة في السلة.
+         */
+        const teacherIds = [
+          ...new Set(
+            items
+              .map(
+                (item) =>
+                  item.course?.teacher_id
+              )
+              .filter(
+                (
+                  id
+                ): id is string =>
+                  Boolean(id)
+              )
+          ),
+        ];
+
+        console.log(
+          "CHECKOUT TEACHER IDS:",
+          teacherIds
+        );
+
+        if (!teacherIds.length) {
+          setTeacherPayments({});
+          return;
+        }
+
+        const {
+          data,
+          error,
+        } = await supabase
+          .from("profiles")
+          .select(
+            "id, vodafone_number, instapay_username"
+          )
+          .in("id", teacherIds);
+
+        if (error) {
+          console.error(
+            "LOAD TEACHER PAYMENT ERROR:",
+            error
+          );
+
+          setTeacherPayments({});
+          return;
+        }
+
+        console.log(
+          "CHECKOUT TEACHERS PAYMENT DATA:",
+          data
+        );
+
+        const payments: Record<
+          string,
+          TeacherPayment
+        > = {};
+
+        (data ?? []).forEach(
+          (teacher) => {
+            payments[teacher.id] = {
+              vodafone_number:
+                teacher.vodafone_number ??
+                null,
+
+              instapay_username:
+                teacher.instapay_username ??
+                null,
+            };
+          }
+        );
+
+        console.log(
+          "CHECKOUT TEACHER PAYMENTS MAP:",
+          payments
+        );
+
+        setTeacherPayments(payments);
+      };
+
+    loadTeacherPayments();
+  }, [items]);
+
+  // =========================
+  // Total
+  // =========================
+
   const total = useMemo(
     () =>
       items.reduce(
-        (sum, item) => sum + (item.course?.price ?? 0),
+        (sum, item) =>
+          sum +
+          (item.course?.price ?? 0),
         0
       ),
     [items]
   );
 
-  const copyText = async (text: string, message: string) => {
+  // =========================
+  // Active Teacher Payment
+  // =========================
+
+const selectedPaymentCourse =
+  activeItem?.course ?? items[0]?.course ?? null;
+
+const selectedTeacherId =
+  selectedPaymentCourse?.teacher_id ?? null;
+
+const selectedTeacherPayment =
+  selectedTeacherId
+    ? teacherPayments[selectedTeacherId]
+    : null;
+
+const teacherVodafoneNumber =
+  selectedTeacherPayment?.vodafone_number ?? "";
+
+const teacherInstapayUsername =
+  selectedTeacherPayment?.instapay_username ?? "";
+
+  // =========================
+  // Copy Helper
+  // =========================
+
+  const copyText = async (
+    text: string,
+    message: string
+  ) => {
+    if (!text) return;
+
     try {
-      await navigator.clipboard.writeText(text);
-      showToast(message, "success");
-    } catch {
-      showToast("تعذّر النسخ", "error");
-    }
-  };
-
-  const handleUpload = async () => {
-    if (
-      !activeItem ||
-      !file ||
-      !session?.user ||
-      !activeItem.course
-    ) {
-      return;
-    }
-
-    setSubmitting(true);
-
-    try {
-      await uploadReceiptAndCreatePayment({
-        studentId: session.user.id,
-        courseId: activeItem.course.id,
-        amount: activeItem.course.price,
-        file,
-      });
-
-      await removeFromCart(activeItem.id);
-
-      setSubmittedIds((prev) => [...prev, activeItem.id]);
-
-      setItems((prev) =>
-        prev.filter((item) => item.id !== activeItem.id)
+      await navigator.clipboard.writeText(
+        text
       );
 
       showToast(
-        "تم إرسال طلب الدفع، بانتظار المراجعة",
+        message,
         "success"
       );
+    } catch (error) {
+      console.error(
+        "COPY ERROR:",
+        error
+      );
 
-      setActiveItem(null);
-      setFile(null);
-    } catch {
       showToast(
-        "تعذّر رفع الإيصال، حاول مرة أخرى",
+        "تعذر نسخ البيانات",
         "error"
       );
-    } finally {
-      setSubmitting(false);
     }
   };
+
+  // =========================
+  // Open Upload Modal
+  // =========================
+
+  const openUpload = (
+    item: CartItem,
+    mode: PurchaseMode
+  ) => {
+    console.log(
+      "OPEN PAYMENT:",
+      item
+    );
+
+    console.log(
+      "OPEN PAYMENT COURSE:",
+      item.course
+    );
+
+    console.log(
+      "OPEN PAYMENT TEACHER ID:",
+      item.course?.teacher_id
+    );
+
+    setActiveItem(item);
+    setFile(null);
+    setPurchaseMode(mode);
+  };
+
+  // =========================
+  // Handle Upload
+  // =========================
+
+  const handleUpload =
+    async () => {
+      if (
+        !activeItem ||
+        !file ||
+        !session?.user ||
+        !activeItem.course
+      ) {
+        return;
+      }
+
+      setSubmitting(true);
+
+      try {
+        const course =
+          activeItem.course;
+
+        // =========================
+        // Installment
+        // =========================
+
+        if (
+          purchaseMode ===
+            "installment" &&
+          course.is_installment &&
+          course.installment_amount
+        ) {
+          await uploadFirstInstallmentAndCreatePlan(
+            {
+              studentId:
+                session.user.id,
+
+              courseId:
+                course.id,
+
+              amount:
+                course.installment_amount,
+
+              file,
+            }
+          );
+        } else {
+          // =========================
+          // Full Payment
+          // =========================
+
+          await uploadReceiptAndCreatePayment(
+            {
+              studentId:
+                session.user.id,
+
+              courseId:
+                course.id,
+
+              amount:
+                course.price,
+
+              file,
+            }
+          );
+        }
+
+        // =========================
+        // Remove From Cart
+        // =========================
+
+        await removeFromCart(
+          activeItem.id
+        );
+
+        // =========================
+        // Mark As Submitted
+        // =========================
+
+        setSubmittedIds(
+          (prev) => [
+            ...prev,
+            activeItem.id,
+          ]
+        );
+
+        setItems(
+          (prev) =>
+            prev.filter(
+              (item) =>
+                item.id !==
+                activeItem.id
+            )
+        );
+
+        // =========================
+        // Success
+        // =========================
+
+        showToast(
+          "تم إرسال طلب الدفع، بانتظار المراجعة",
+          "success"
+        );
+
+        // =========================
+        // Reset Modal
+        // =========================
+
+        setActiveItem(null);
+        setFile(null);
+        setPurchaseMode("full");
+      } catch (error) {
+        console.error(
+          "PAYMENT UPLOAD ERROR:",
+          error
+        );
+
+        showToast(
+          "تعذّر رفع الإيصال، حاول مرة أخرى",
+          "error"
+        );
+      } finally {
+        setSubmitting(false);
+      }
+    };
+
+  // =========================
+  // Loading
+  // =========================
 
   if (loading) {
     return (
       <div className="mx-auto max-w-5xl px-4 py-12 sm:px-6">
         <div className="animate-pulse space-y-4">
           <div className="h-10 w-48 rounded-xl bg-slate-200" />
+
           <div className="h-5 w-72 rounded-lg bg-slate-200" />
+
           <div className="h-32 rounded-3xl bg-slate-200" />
+
           <div className="h-48 rounded-3xl bg-slate-200" />
         </div>
       </div>
     );
   }
 
-  if (items.length === 0 && submittedIds.length === 0) {
+  // =========================
+  // Empty Cart
+  // =========================
+
+  if (
+    items.length === 0 &&
+    submittedIds.length === 0
+  ) {
     return (
       <div
         dir="rtl"
         className="mx-auto max-w-xl px-4 py-24 sm:px-6"
       >
         <EmptyState
-          icon={<CreditCard className="h-6 w-6" />}
+          icon={
+            <CreditCard className="h-6 w-6" />
+          }
           title="لا توجد كورسات لإتمام الدفع"
           description="أضف كورسًا إلى سلتك أولًا"
           action={
@@ -171,6 +516,10 @@ export default function CheckoutPage() {
       </div>
     );
   }
+
+  // =========================
+  // All Submitted
+  // =========================
 
   if (items.length === 0) {
     return (
@@ -188,8 +537,9 @@ export default function CheckoutPage() {
 
         <p className="mt-3 text-sm leading-7 text-slate-500">
           تم استلام إيصالات الدفع الخاصة بك.
-          سيقوم المعلم أو فريق الإدارة بمراجعتها وتفعيل
-          اشتراكك بعد التأكد من التحويل.
+          سيقوم المعلم أو فريق الإدارة
+          بمراجعتها وتفعيل اشتراكك بعد
+          التأكد من التحويل.
         </p>
 
         <Link
@@ -205,12 +555,17 @@ export default function CheckoutPage() {
     );
   }
 
+  // =========================
+  // Main
+  // =========================
+
   return (
     <div
       dir="rtl"
       className="min-h-[calc(100vh-80px)] bg-slate-50/60"
     >
       <div className="mx-auto max-w-5xl px-4 py-8 sm:px-6 lg:py-12">
+
         {/* Header */}
         <div>
           <div className="flex items-center gap-3">
@@ -230,19 +585,25 @@ export default function CheckoutPage() {
           </div>
         </div>
 
-        {/* Payment methods */}
+        {/* Payment Methods */}
         <section className="mt-8">
           <h2 className="mb-4 text-lg font-black text-slate-800">
             طرق الدفع المتاحة
           </h2>
 
           <div className="grid gap-4 md:grid-cols-3">
+
             {/* Vodafone */}
             <button
               type="button"
-              onClick={() => setPaymentMethod("vodafone")}
+              onClick={() =>
+                setPaymentMethod(
+                  "vodafone"
+                )
+              }
               className={`group rounded-3xl border p-5 text-right transition ${
-                paymentMethod === "vodafone"
+                paymentMethod ===
+                "vodafone"
                   ? "border-brand-500 bg-brand-50 shadow-md ring-2 ring-brand-100"
                   : "border-slate-200 bg-white hover:border-brand-200 hover:shadow-sm"
               }`}
@@ -252,7 +613,8 @@ export default function CheckoutPage() {
                   <Smartphone className="h-6 w-6" />
                 </div>
 
-                {paymentMethod === "vodafone" && (
+                {paymentMethod ===
+                  "vodafone" && (
                   <CheckCircle2 className="h-5 w-5 text-brand-500" />
                 )}
               </div>
@@ -269,9 +631,14 @@ export default function CheckoutPage() {
             {/* InstaPay */}
             <button
               type="button"
-              onClick={() => setPaymentMethod("instapay")}
+              onClick={() =>
+                setPaymentMethod(
+                  "instapay"
+                )
+              }
               className={`group rounded-3xl border p-5 text-right transition ${
-                paymentMethod === "instapay"
+                paymentMethod ===
+                "instapay"
                   ? "border-brand-500 bg-brand-50 shadow-md ring-2 ring-brand-100"
                   : "border-slate-200 bg-white hover:border-brand-200 hover:shadow-sm"
               }`}
@@ -281,7 +648,8 @@ export default function CheckoutPage() {
                   <CreditCard className="h-6 w-6" />
                 </div>
 
-                {paymentMethod === "instapay" && (
+                {paymentMethod ===
+                  "instapay" && (
                   <CheckCircle2 className="h-5 w-5 text-brand-500" />
                 )}
               </div>
@@ -298,7 +666,9 @@ export default function CheckoutPage() {
             {/* Bank */}
             <button
               type="button"
-              onClick={() => setPaymentMethod("bank")}
+              onClick={() =>
+                setPaymentMethod("bank")
+              }
               className={`group rounded-3xl border p-5 text-right transition ${
                 paymentMethod === "bank"
                   ? "border-brand-500 bg-brand-50 shadow-md ring-2 ring-brand-100"
@@ -310,7 +680,8 @@ export default function CheckoutPage() {
                   <Banknote className="h-6 w-6" />
                 </div>
 
-                {paymentMethod === "bank" && (
+                {paymentMethod ===
+                  "bank" && (
                   <CheckCircle2 className="h-5 w-5 text-brand-500" />
                 )}
               </div>
@@ -326,13 +697,17 @@ export default function CheckoutPage() {
           </div>
         </section>
 
-        {/* Selected payment info */}
+        {/* Selected Payment Info */}
         <section className="mt-6 overflow-hidden rounded-3xl border border-brand-100 bg-white shadow-sm">
+
           <div className="bg-gradient-to-r from-brand-600 to-brand-800 p-5 text-white">
             <div className="flex items-center gap-3">
-              {paymentMethod === "bank" ? (
+
+              {paymentMethod ===
+              "bank" ? (
                 <Banknote className="h-6 w-6" />
-              ) : paymentMethod === "vodafone" ? (
+              ) : paymentMethod ===
+                "vodafone" ? (
                 <Smartphone className="h-6 w-6" />
               ) : (
                 <CreditCard className="h-6 w-6" />
@@ -340,9 +715,11 @@ export default function CheckoutPage() {
 
               <div>
                 <h2 className="font-black">
-                  {paymentMethod === "bank"
+                  {paymentMethod ===
+                  "bank"
                     ? "بيانات التحويل البنكي"
-                    : paymentMethod === "vodafone"
+                    : paymentMethod ===
+                      "vodafone"
                     ? "بيانات Vodafone Cash"
                     : "بيانات InstaPay"}
                 </h2>
@@ -355,8 +732,12 @@ export default function CheckoutPage() {
           </div>
 
           <div className="p-5 sm:p-6">
-            {paymentMethod === "vodafone" && (
+
+            {/* Vodafone */}
+            {paymentMethod ===
+              "vodafone" && (
               <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+
                 <div>
                   <p className="text-xs text-slate-400">
                     رقم Vodafone Cash
@@ -366,7 +747,8 @@ export default function CheckoutPage() {
                     dir="ltr"
                     className="mt-1 text-2xl font-black tracking-wide text-slate-800"
                   >
-                    {PAYMENT_INFO.vodafone.number}
+                    {teacherVodafoneNumber ||
+                      "لم يحدد المعلم الرقم بعد"}
                   </p>
                 </div>
 
@@ -374,9 +756,12 @@ export default function CheckoutPage() {
                   variant="secondary"
                   onClick={() =>
                     copyText(
-                      PAYMENT_INFO.vodafone.number,
+                      teacherVodafoneNumber,
                       "تم نسخ رقم Vodafone Cash"
                     )
+                  }
+                  disabled={
+                    !teacherVodafoneNumber
                   }
                 >
                   <Copy className="h-4 w-4" />
@@ -385,9 +770,13 @@ export default function CheckoutPage() {
               </div>
             )}
 
-            {paymentMethod === "instapay" && (
+            {/* InstaPay */}
+            {paymentMethod ===
+              "instapay" && (
               <div className="space-y-5">
+
                 <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+
                   <div>
                     <p className="text-xs text-slate-400">
                       InstaPay Address
@@ -397,18 +786,23 @@ export default function CheckoutPage() {
                       dir="ltr"
                       className="mt-1 text-xl font-black text-slate-800"
                     >
-                      {PAYMENT_INFO.instapay.username}
+                      {teacherInstapayUsername ||
+                        "لم يحدد المعلم العنوان بعد"}
                     </p>
                   </div>
 
                   <div className="flex gap-2">
+
                     <Button
                       variant="secondary"
                       onClick={() =>
                         copyText(
-                          PAYMENT_INFO.instapay.username,
+                          teacherInstapayUsername,
                           "تم نسخ عنوان InstaPay"
                         )
+                      }
+                      disabled={
+                        !teacherInstapayUsername
                       }
                     >
                       <Copy className="h-4 w-4" />
@@ -416,7 +810,11 @@ export default function CheckoutPage() {
                     </Button>
 
                     <a
-                      href={PAYMENT_INFO.instapay.link}
+                      href={
+                        PAYMENT_INFO
+                          .instapay
+                          .link
+                      }
                       target="_blank"
                       rel="noreferrer"
                     >
@@ -425,20 +823,27 @@ export default function CheckoutPage() {
                         <ExternalLink className="h-4 w-4" />
                       </Button>
                     </a>
+
                   </div>
                 </div>
               </div>
             )}
 
-            {paymentMethod === "bank" && (
+            {/* Bank */}
+            {paymentMethod ===
+              "bank" && (
               <div className="grid gap-5 sm:grid-cols-3">
+
                 <div>
                   <p className="text-xs text-slate-400">
                     البنك
                   </p>
 
                   <p className="mt-1 font-black text-slate-800">
-                    {PAYMENT_INFO.bank.bankName}
+                    {
+                      PAYMENT_INFO.bank
+                        .bankName
+                    }
                   </p>
                 </div>
 
@@ -448,7 +853,10 @@ export default function CheckoutPage() {
                   </p>
 
                   <p className="mt-1 font-black text-slate-800">
-                    {PAYMENT_INFO.bank.accountName}
+                    {
+                      PAYMENT_INFO.bank
+                        .accountName
+                    }
                   </p>
                 </div>
 
@@ -458,18 +866,24 @@ export default function CheckoutPage() {
                   </p>
 
                   <div className="mt-1 flex items-center gap-2">
+
                     <p
                       dir="ltr"
                       className="font-black text-slate-800"
                     >
-                      {PAYMENT_INFO.bank.accountNumber}
+                      {
+                        PAYMENT_INFO.bank
+                          .accountNumber
+                      }
                     </p>
 
                     <button
                       type="button"
                       onClick={() =>
                         copyText(
-                          PAYMENT_INFO.bank.accountNumber,
+                          PAYMENT_INFO
+                            .bank
+                            .accountNumber,
                           "تم نسخ رقم الحساب"
                         )
                       }
@@ -477,17 +891,21 @@ export default function CheckoutPage() {
                     >
                       <Copy className="h-4 w-4" />
                     </button>
+
                   </div>
                 </div>
               </div>
             )}
+
           </div>
         </section>
 
         {/* Cart */}
         <section className="mt-8 grid gap-6 lg:grid-cols-[1fr_300px]">
+
           <div>
             <div className="mb-4 flex items-center justify-between">
+
               <h2 className="text-lg font-black text-slate-800">
                 الكورسات المطلوبة
               </h2>
@@ -495,38 +913,102 @@ export default function CheckoutPage() {
               <span className="rounded-full bg-brand-50 px-3 py-1 text-xs font-bold text-brand-600">
                 {items.length} كورس
               </span>
+
             </div>
 
             <div className="space-y-3">
-              {items.map((item) => (
-                <div
-                  key={item.id}
-                  className="flex items-center justify-between gap-4 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm"
-                >
-                  <div className="min-w-0">
-                    <p className="truncate font-black text-slate-800">
-                      {item.course?.title}
-                    </p>
 
-                    <p className="mt-1 text-sm font-bold text-brand-600">
-                      {formatCurrency(item.course?.price ?? 0)}
-                    </p>
-                  </div>
+              {items.map(
+                (item) => {
+                  const course =
+                    item.course;
 
-                  <Button
-                    variant="secondary"
-                    onClick={() => setActiveItem(item)}
-                  >
-                    <UploadCloud className="h-4 w-4" />
-                    رفع الإيصال
-                  </Button>
-                </div>
-              ))}
+                  const canInstallment =
+                    Boolean(
+                      course?.is_installment &&
+                        course.installment_amount &&
+                        course.installment_months
+                    );
+
+                  const installmentAmount =
+                    course?.installment_amount ??
+                    0;
+
+                  return (
+                    <div
+                      key={item.id}
+                      className="flex flex-col gap-4 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:flex-row sm:items-center sm:justify-between"
+                    >
+
+                      <div className="min-w-0">
+
+                        <p className="truncate font-black text-slate-800">
+                          {course?.title}
+                        </p>
+
+                        <p className="mt-1 text-sm font-bold text-brand-600">
+                          {formatCurrency(
+                            course?.price ??
+                              0
+                          )}
+                        </p>
+
+                        {course?.is_installment &&
+                          !canInstallment && (
+                            <p className="mt-2 text-xs font-semibold text-amber-600">
+                              التقسيط غير مكتمل الإعداد، تواصل مع إدارة الكورس.
+                            </p>
+                          )}
+
+                      </div>
+
+                      <div className="flex flex-wrap gap-2 sm:shrink-0">
+
+                        <Button
+                          variant="secondary"
+                          onClick={() =>
+                            openUpload(
+                              item,
+                              "full"
+                            )
+                          }
+                        >
+                          <UploadCloud className="h-4 w-4" />
+                          دفع كامل
+                        </Button>
+
+                        {canInstallment && (
+                          <button
+                            type="button"
+                            onClick={() =>
+                              openUpload(
+                                item,
+                                "installment"
+                              )
+                            }
+                            className="inline-flex items-center justify-center gap-2 rounded-xl bg-brand-600 px-4 py-2.5 text-sm font-bold text-white transition hover:bg-brand-700"
+                          >
+                            <CreditCard className="h-4 w-4" />
+                            تقسيط{" "}
+                            {formatCurrency(
+                              installmentAmount
+                            )}{" "}
+                            / شهر
+                          </button>
+                        )}
+
+                      </div>
+                    </div>
+                  );
+                }
+              )}
+
             </div>
           </div>
 
           {/* Total */}
           <div className="h-fit rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+
             <p className="text-sm text-slate-500">
               إجمالي الطلب
             </p>
@@ -541,6 +1023,7 @@ export default function CheckoutPage() {
               <ShieldCheck className="h-4 w-4 shrink-0 text-emerald-500" />
               سيتم مراجعة الإيصال يدويًا قبل تفعيل الكورس.
             </div>
+
           </div>
         </section>
 
@@ -551,12 +1034,18 @@ export default function CheckoutPage() {
             if (!submitting) {
               setActiveItem(null);
               setFile(null);
+              setPurchaseMode(
+                "full"
+              );
             }
           }}
           title="رفع إيصال الدفع"
         >
           <div dir="rtl">
+
+            {/* Course Info */}
             <div className="rounded-2xl bg-slate-50 p-4">
+
               <p className="text-xs text-slate-400">
                 الكورس
               </p>
@@ -567,32 +1056,127 @@ export default function CheckoutPage() {
 
               <p className="mt-1 text-sm font-bold text-brand-600">
                 {formatCurrency(
-                  activeItem?.course?.price ?? 0
+                  purchaseMode ===
+                    "installment"
+                    ? activeItem
+                        ?.course
+                        ?.installment_amount ??
+                        0
+                    : activeItem
+                        ?.course
+                        ?.price ??
+                        0
                 )}
               </p>
+
             </div>
 
+            {/* Purchase Mode */}
+            {activeItem?.course
+              ?.is_installment &&
+              activeItem.course
+                .installment_amount &&
+              activeItem.course
+                .installment_months && (
+
+              <div className="mt-4 grid grid-cols-2 gap-2 rounded-2xl border border-slate-200 bg-slate-50 p-2">
+
+                <button
+                  type="button"
+                  onClick={() =>
+                    setPurchaseMode(
+                      "full"
+                    )
+                  }
+                  className={`rounded-xl px-3 py-3 text-sm font-bold transition ${
+                    purchaseMode ===
+                    "full"
+                      ? "bg-white text-brand-700 shadow-sm ring-1 ring-brand-200"
+                      : "text-slate-500 hover:bg-white"
+                  }`}
+                >
+                  دفع كامل
+
+                  <span className="mt-1 block text-xs font-normal text-slate-400">
+                    {formatCurrency(
+                      activeItem
+                        .course
+                        .price
+                    )}
+                  </span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() =>
+                    setPurchaseMode(
+                      "installment"
+                    )
+                  }
+                  className={`rounded-xl px-3 py-3 text-sm font-bold transition ${
+                    purchaseMode ===
+                    "installment"
+                      ? "bg-brand-600 text-white shadow-sm"
+                      : "text-slate-500 hover:bg-white"
+                  }`}
+                >
+                  تقسيط شهري
+
+                  <span className="mt-1 block text-xs font-normal opacity-75">
+                    {formatCurrency(
+                      activeItem
+                        .course
+                        .installment_amount ??
+                        0
+                    )}
+                    {" / شهر"}
+                  </span>
+                </button>
+
+              </div>
+            )}
+
+            {/* Payment Method */}
             <div className="mt-4 rounded-2xl border border-brand-100 bg-brand-50 p-4">
+
               <div className="flex items-center gap-2 text-sm font-bold text-brand-800">
                 <FileCheck2 className="h-4 w-4" />
                 طريقة الدفع
               </div>
 
               <p className="mt-1 text-sm text-brand-700">
-                {paymentMethod === "vodafone"
+                {paymentMethod ===
+                "vodafone"
                   ? "Vodafone Cash"
-                  : paymentMethod === "instapay"
+                  : paymentMethod ===
+                    "instapay"
                   ? "InstaPay"
                   : "تحويل بنكي"}
               </p>
+
+              <p className="mt-2 text-xs font-bold text-brand-800">
+                {purchaseMode ===
+                "installment"
+                  ? `قسط الشهر الأول — ${formatCurrency(
+                      activeItem
+                        ?.course
+                        ?.installment_amount ??
+                        0
+                    )}`
+                  : "دفع كامل للكورس"}
+              </p>
+
             </div>
 
+            {/* Upload */}
             <label className="mt-5 flex cursor-pointer flex-col items-center justify-center gap-3 rounded-2xl border-2 border-dashed border-slate-200 bg-slate-50 p-8 text-center transition hover:border-brand-300 hover:bg-brand-50/30">
+
               <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-brand-100 text-brand-600">
                 <UploadCloud className="h-7 w-7" />
               </div>
 
               <div>
+
                 <p className="font-bold text-slate-700">
                   {file
                     ? file.name
@@ -602,29 +1186,38 @@ export default function CheckoutPage() {
                 <p className="mt-1 text-xs text-slate-400">
                   JPG / PNG / PDF
                 </p>
+
               </div>
 
               <input
                 type="file"
                 accept="image/*,.pdf"
                 className="hidden"
-                onChange={(event) => {
+                onChange={(
+                  event
+                ) => {
                   setFile(
-                    event.target.files?.[0] ?? null
+                    event.target.files?.[0] ??
+                      null
                   );
                 }}
               />
+
             </label>
 
+            {/* Submit */}
             <Button
               className="mt-5 w-full"
               disabled={!file}
               isLoading={submitting}
-              onClick={handleUpload}
+              onClick={
+                handleUpload
+              }
             >
               إرسال طلب الدفع
               <CheckCircle2 className="h-4 w-4" />
             </Button>
+
           </div>
         </Modal>
       </div>

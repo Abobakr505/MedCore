@@ -16,6 +16,8 @@ export interface Profile {
   full_name: string;
   email: string;
   phone: string | null;
+  vodafone_number: string | null;
+  instapay_username: string | null;
   role: UserRole;
   college: CollegeType;
   avatar_url: string | null;
@@ -38,6 +40,8 @@ export interface Course {
   rating: number;
   ratings_count: number;
   students_count: number;
+  vodafone_number: string | null;
+  instapay_username: string | null;
   created_at: string;
   updated_at: string;
   teacher?: Pick<Profile, "id" | "full_name" | "avatar_url">;
@@ -208,3 +212,46 @@ export interface UserDevice {
   created_at: string;
   user?: Pick<Profile, "full_name" | "email">;
 }
+
+export type InstallmentStatus = "scheduled" | "pending" | "approved" | "rejected";
+
+export interface Course {
+  // ...existing fields
+  is_installment: boolean;
+  installment_months: number | null;
+  installment_amount: number | null;
+}
+
+export interface CourseSection {
+  // ...existing fields
+  unlock_month: number;
+}
+
+export interface StudentInstallment {
+  id: string;
+  student_id: string;
+  course_id: string;
+  payment_id: string | null;
+  month_number: number;
+  amount: number;
+  due_date: string;
+  status: InstallmentStatus;
+  receipt_path: string | null;
+  rejection_reason: string | null;
+  reviewed_at: string | null;
+  created_at: string;
+  updated_at: string;
+  course?: Pick<Course, "id" | "title" | "thumbnail_path">;
+}
+
+export interface Payment {
+  // ...existing fields
+  installment_id: string | null;
+}
+
+export const INSTALLMENT_STATUS_LABELS: Record<InstallmentStatus, string> = {
+  scheduled: "لم يحن موعده",
+  pending: "قيد المراجعة",
+  approved: "مدفوع",
+  rejected: "مرفوض",
+};

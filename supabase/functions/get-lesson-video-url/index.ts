@@ -42,19 +42,15 @@ Deno.serve(async (req) => {
       return json({ error: "Lesson not found or has no video" }, 404);
     }
 
-    const courseId = (lesson as any).course_sections?.course_id;
-
     if (!lesson.is_preview) {
-      const { data: enrollment } = await adminClient
-        .from("enrollments")
-        .select("id")
-        .eq("course_id", courseId)
-        .eq("student_id", userData.user.id)
-        .eq("status", "active")
-        .maybeSingle();
+      const { data: canAccess, error: accessError } =
+        await adminClient.rpc("can_access_section", {
+          p_section_id: lesson.section_id,
+          p_student_id: userData.user.id,
+        });
 
-      if (!enrollment) {
-        return json({ error: "Not enrolled in this course" }, 403);
+      if (accessError || !canAccess) {
+        return json({ error: "This lesson is locked" }, 403);
       }
     }
 

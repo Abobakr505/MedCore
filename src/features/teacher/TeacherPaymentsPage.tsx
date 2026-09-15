@@ -29,8 +29,8 @@ import { useToast } from "@/contexts/ToastContext";
 
 import {
   fetchTeacherPayments,
-  approvePayment,
-  rejectPayment,
+  approvePaymentByType,
+  rejectPaymentByType,
   getReceiptSignedUrlAsync,
 } from "@/services/payments";
 
@@ -151,7 +151,7 @@ export default function TeacherPaymentsPage() {
     setProcessingId(payment.id);
 
     try {
-      await approvePayment(payment.id);
+      await approvePaymentByType(payment);
 
       showToast(
         "تم قبول الدفع وتفعيل اشتراك الطالب",
@@ -175,8 +175,8 @@ export default function TeacherPaymentsPage() {
     setProcessingId(rejectTarget.id);
 
     try {
-      await rejectPayment(
-        rejectTarget.id,
+      await rejectPaymentByType(
+        rejectTarget,
         rejectReason ||
           "الإيصال غير واضح أو غير مطابق"
       );

@@ -62,6 +62,7 @@ import {
   updateLessonProgress,
   fetchCourseQuizzes,
 } from "@/services/courses";
+import { fetchStudentInstallments } from "@/services/payments";
 
 import type {
   Course,
@@ -593,12 +594,14 @@ function SidebarContent({
   sections,
   activeLessonId,
   progress,
+  isLessonLocked,
   onSelectLesson,
   onClose,
 }: {
   sections: SectionWithLessons[];
   activeLessonId: string | null;
   progress: LessonProgressMap;
+  isLessonLocked: (lesson: LessonWithFiles) => boolean;
   onSelectLesson: (
     lesson: LessonWithFiles
   ) => void;
@@ -672,10 +675,13 @@ function SidebarContent({
                         lesson.files?.length ??
                         0;
 
+                      const locked = isLessonLocked(lesson);
+
                       return (
                         <button
                           key={lesson.id}
                           type="button"
+                          disabled={locked}
                           onClick={() => {
                             onSelectLesson(
                               lesson
@@ -690,7 +696,11 @@ function SidebarContent({
                         >
                           <div className="mt-0.5 shrink-0">
                             {completed ? (
-                              <CheckCircle2 className="h-5 w-5 text-emerald-500" />
+                              locked ? (
+                                <Lock className="h-5 w-5 text-slate-400" />
+                              ) : (
+                                <CheckCircle2 className="h-5 w-5 text-emerald-500" />
+                              )
                             ) : isActive ? (
                               <PlayCircle className="h-5 w-5 text-brand-600" />
                             ) : (
@@ -704,7 +714,9 @@ function SidebarContent({
                                 className={`text-sm font-semibold leading-5 ${
                                   isActive
                                     ? "text-brand-800"
-                                    : "text-slate-700"
+                                    : locked
+                                      ? "text-slate-400"
+                                      : "text-slate-700"
                                 }`}
                               >
                                 {index + 1}.{" "}
@@ -723,6 +735,13 @@ function SidebarContent({
                                 <span className="inline-flex items-center gap-1 text-slate-400">
                                   <FolderOpen className="h-3 w-3" />
                                   {filesCount}
+                                </span>
+                              )}
+
+                              {locked && (
+                                <span className="inline-flex items-center gap-1 text-slate-400">
+                                  <Lock className="h-3 w-3" />
+                                  متاح بعد سداد القسط
                                 </span>
                               )}
                             </div>
@@ -784,20 +803,22 @@ export default function LearningPage() {
     useState<Course | null>(null);
 
   const [sections, setSections] =
-    useState<SectionWithLessons[]>(
-      []
-    );
+    useState<SectionWithLessons[]>([]);
 
   const [quizzes, setQuizzes] =
     useState<Quiz[]>([]);
+
+  const [installments, setInstallments] =
+    useState<import("@/types").StudentInstallment[]>([]);
+
+  const [hasFullPayment, setHasFullPayment] =
+    useState(false);
 
   const [lessonProgress, setLessonProgress] =
     useState<LessonProgressMap>({});
 
   const [activeLesson, setActiveLesson] =
-    useState<LessonWithFiles | null>(
-      null
-    );
+    useState<LessonWithFiles | null>(null);
 
   const [activeVideoUrl, setActiveVideoUrl] =
     useState<string | null>(null);
@@ -834,6 +855,38 @@ export default function LearningPage() {
 
   const [screenRecordingDetected, setScreenRecordingDetected] =
     useState(false);
+
+  const approvedInstallmentMonths = useMemo(
+    () =>
+      new Set(
+        installments
+          .filter((installment) => installment.status === "approved")
+          .map((installment) => installment.month_number)
+      ),
+    [installments]
+  );
+
+  const isSectionLocked = useCallback(
+    (section: Pick<SectionWithLessons, "unlock_month">) =>
+      Boolean(
+        course?.is_installment &&
+          !hasFullPayment &&
+          section.unlock_month > 1 &&
+          !approvedInstallmentMonths.has(section.unlock_month)
+      ),
+    [approvedInstallmentMonths, course?.is_installment, hasFullPayment]
+  );
+
+  const isLessonLocked = useCallback(
+    (lesson: LessonWithFiles) => {
+      const section = sections.find(
+        (item) => item.id === lesson.section_id
+      );
+
+      return section ? isSectionLocked(section) : false;
+    },
+    [isSectionLocked, sections]
+  );
 
   const handleSuspiciousActivity = useCallback(
     (_reason: string) => {
@@ -923,6 +976,32 @@ export default function LearningPage() {
           userResult.data.user;
 
         if (user) {
+          if (loadedCourse.is_installment) {
+            const loadedInstallments =
+              await fetchStudentInstallments(user.id);
+
+            setInstallments(
+              loadedInstallments.filter(
+                (installment) =>
+                  installment.course_id === loadedCourse.id
+              )
+            );
+
+            const { data: fullPayment } = await supabase
+              .from("payments")
+              .select("id")
+              .eq("student_id", user.id)
+              .eq("course_id", loadedCourse.id)
+              .eq("status", "approved")
+              .is("installment_id", null)
+              .maybeSingle();
+
+            setHasFullPayment(Boolean(fullPayment));
+          } else {
+            setInstallments([]);
+            setHasFullPayment(false);
+          }
+
           const progress =
             await fetchLessonProgress(
               user.id,
@@ -1010,6 +1089,11 @@ export default function LearningPage() {
         setActiveVideoUrl(null);
 
         try {
+          if (isLessonLocked(lesson)) {
+            setVideoLoading(false);
+            return;
+          }
+
           const cached =
             await getOfflineVideo(
               lesson.id
@@ -1026,35 +1110,15 @@ export default function LearningPage() {
 
           setOfflineVideo(null);
 
-          const videoPath =
-            (
-              lesson as Lesson & {
-                video_path?: string | null;
-              }
-            ).video_path;
-
-          if (!videoPath) {
-            setVideoLoading(false);
-            return;
-          }
-
-          const {
-            data,
-            error,
-          } = await supabase.storage
-            .from("course-videos")
-            .createSignedUrl(
-              videoPath,
-              60 * 60
+          const { data, error } =
+            await supabase.functions.invoke(
+              "get-lesson-video-url",
+              { body: { lessonId: lesson.id } }
             );
 
-          if (error) {
-            throw error;
-          }
+          if (error) throw error;
 
-          setActiveVideoUrl(
-            data?.signedUrl ?? null
-          );
+          setActiveVideoUrl(data?.url ?? null);
         } catch (error) {
           console.error(
             "Load lesson video error:",
@@ -1066,7 +1130,7 @@ export default function LearningPage() {
           setVideoLoading(false);
         }
       },
-      []
+      [isLessonLocked]
     );
 
   /* ---------------------------------------------------------------------- */
@@ -1121,6 +1185,16 @@ export default function LearningPage() {
       ),
     [sections]
   );
+
+  useEffect(() => {
+    if (!activeLesson || !isLessonLocked(activeLesson)) return;
+
+    const firstAvailableLesson = allLessons.find(
+      (lesson) => !isLessonLocked(lesson)
+    );
+
+    setActiveLesson(firstAvailableLesson ?? null);
+  }, [activeLesson, allLessons, isLessonLocked]);
 
   const activeLessonIndex =
     activeLesson
@@ -1251,16 +1325,9 @@ export default function LearningPage() {
         return;
       }
 
-      const videoPath =
-        (
-          activeLesson as Lesson & {
-            video_path?: string | null;
-          }
-        ).video_path;
-
-      if (!videoPath) {
+      if (isLessonLocked(activeLesson)) {
         alert(
-          "لا يوجد فيديو لهذا الدرس."
+          "هذا الدرس مقفول حتى اعتماد القسط المطلوب."
         );
         return;
       }
@@ -1270,21 +1337,17 @@ export default function LearningPage() {
       setShowOfflineMenu(false);
 
       try {
-        const {
-          data,
-          error,
-        } = await supabase.storage
-          .from("course-videos")
-          .createSignedUrl(
-            videoPath,
-            60 * 60
+        const { data, error } =
+          await supabase.functions.invoke(
+            "get-lesson-video-url",
+            { body: { lessonId: activeLesson.id } }
           );
 
         if (error) {
           throw error;
         }
 
-        if (!data?.signedUrl) {
+        if (!data?.url) {
           throw new Error(
             "تعذر الحصول على رابط الفيديو"
           );
@@ -1292,7 +1355,7 @@ export default function LearningPage() {
 
         const response =
           await fetch(
-            data.signedUrl
+            data.url
           );
 
         if (!response.ok) {
@@ -1702,6 +1765,7 @@ export default function LearningPage() {
                 progress={
                   lessonProgress
                 }
+                isLessonLocked={isLessonLocked}
                 onSelectLesson={
                   setActiveLesson
                 }
@@ -1757,6 +1821,7 @@ export default function LearningPage() {
                     progress={
                       lessonProgress
                     }
+                    isLessonLocked={isLessonLocked}
                     onSelectLesson={
                       setActiveLesson
                     }

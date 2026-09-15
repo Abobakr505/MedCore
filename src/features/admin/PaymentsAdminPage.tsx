@@ -25,8 +25,8 @@ import { useToast } from "@/contexts/ToastContext";
 
 import {
 fetchAllPayments,
-approvePayment,
-rejectPayment,
+approvePaymentByType,
+rejectPaymentByType,
 getReceiptSignedUrlAsync,
 } from "@/services/payments";
 
@@ -113,7 +113,7 @@ setProcessingId(payment.id);
 
 
 try {
-  await approvePayment(payment.id);
+  await approvePaymentByType(payment);
 
   showToast("تم قبول الدفع بنجاح", "success");
 
@@ -134,8 +134,8 @@ if (!rejectTarget) return;
 setProcessingId(rejectTarget.id);
 
 try {
-  await rejectPayment(
-    rejectTarget.id,
+  await rejectPaymentByType(
+    rejectTarget,
     rejectReason.trim() || "لم يتم تحديد سبب"
   );
 

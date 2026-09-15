@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Link, NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import {
   LayoutDashboard,
@@ -25,10 +25,12 @@ import {
   Bell,
   Sparkles,
   Mail,
+  ShoppingCart,
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import clsx from "clsx";
 import { useAuth } from "@/contexts/AuthContext";
+import { supabase } from "@/lib/supabase";
 
 interface NavItem {
   to: string;
@@ -75,7 +77,7 @@ export function DashboardLayout() {
   const [open, setOpen] = useState(false);
   const navigate = useNavigate();
   const location = useLocation();
-
+const [cartCount, setCartCount] = useState(0);
   const nav =
     profile?.role === "admin"
       ? ADMIN_NAV
@@ -101,6 +103,40 @@ export function DashboardLayout() {
         ? location.pathname === "/app/home"
         : location.pathname.startsWith(item.to)
     )?.label || "نظرة عامة";
+useEffect(() => {
+  if (!profile?.id || profile.role !== "student") {
+    setCartCount(0);
+    return;
+  }
+
+  const loadCartCount = async () => {
+    const { count, error } = await supabase
+      .from("cart_items")
+      .select("*", { count: "exact", head: true })
+      .eq("student_id", profile.id);
+
+    if (error) {
+      console.error("CART COUNT ERROR:", error);
+      setCartCount(0);
+      return;
+    }
+
+    setCartCount(count ?? 0);
+  };
+
+  loadCartCount();
+
+  // تحديث العدد عند الرجوع للصفحة
+  const handleCartUpdate = () => {
+    loadCartCount();
+  };
+
+  window.addEventListener("cart-updated", handleCartUpdate);
+
+  return () => {
+    window.removeEventListener("cart-updated", handleCartUpdate);
+  };
+}, [profile?.id, profile?.role]);
 
   return (
     <div
@@ -211,14 +247,21 @@ export function DashboardLayout() {
 
             {/* Header Actions */}
             <div className="flex items-center gap-2 sm:gap-3">
-              <button
-                aria-label="الإشعارات"
-                className="relative grid h-10 w-10 place-items-center rounded-xl border border-slate-200 bg-white text-slate-500 shadow-sm transition hover:border-brand-200 hover:bg-brand-50 hover:text-brand-600"
-              >
-                <Bell className="h-[18px] w-[18px]" />
+{profile?.role === "student" && (
+  <Link
+    to="/app/student/cart"
+    aria-label="السلة"
+    className="relative grid h-10 w-10 place-items-center rounded-xl border border-slate-200 bg-white text-slate-500 shadow-sm transition hover:border-brand-200 hover:bg-brand-50 hover:text-brand-600"
+  >
+    <ShoppingCart className="h-[18px] w-[18px]" />
 
-                <span className="absolute right-2 top-2 h-2 w-2 rounded-full bg-brand-500 ring-2 ring-white" />
-              </button>
+    {cartCount > 0 && (
+      <span className="absolute -right-1 -top-1 grid min-h-[18px] min-w-[18px] place-items-center rounded-full bg-brand-500 px-1 text-[9px] font-black text-white ring-2 ring-white">
+        {cartCount > 99 ? "99+" : cartCount}
+      </span>
+    )}
+  </Link>
+)}
 
               <div className="hidden h-8 w-px bg-slate-200 sm:block" />
 

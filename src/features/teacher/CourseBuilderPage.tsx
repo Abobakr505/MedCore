@@ -43,6 +43,7 @@ import { supabase } from "@/lib/supabase";
 import {
   fetchCourseBySlugOrId,
   fetchSections,
+  updateCourse,
   createSection,
   createLesson,
   updateLesson,
@@ -752,6 +753,10 @@ function SectionBlock({
     section.title
   );
 
+  const [unlockMonth, setUnlockMonth] = useState(
+    section.unlock_month ?? 1
+  );
+
   const [saving, setSaving] = useState(false);
 
   const [localFiles, setLocalFiles] = useState<
@@ -1126,6 +1131,20 @@ function SectionBlock({
     }
   };
 
+  const saveUnlockMonth = async () => {
+    const value = Math.max(1, Math.floor(Number(unlockMonth) || 1));
+    setUnlockMonth(value);
+
+    try {
+      await updateSection(section.id, {
+        unlockMonth: value,
+      });
+    } catch (error) {
+      console.error("Update section unlock month error:", error);
+      alert("تعذر حفظ شهر فتح القسم");
+    }
+  };
+
   const removeSection = async () => {
     const confirmed = window.confirm(
       `هل أنت متأكد من حذف القسم "${section.title}"؟\nسيتم حذف الدروس الموجودة بداخله أيضًا.`
@@ -1232,6 +1251,20 @@ function SectionBlock({
                   <p className="mt-1 text-xs text-slate-500">
                     {lessons.length} درس
                   </p>
+
+                  <label className="mt-2 inline-flex items-center gap-2 text-xs font-semibold text-slate-500">
+                    يفتح من الشهر
+                    <input
+                      type="number"
+                      min={1}
+                      value={unlockMonth}
+                      onChange={(event) =>
+                        setUnlockMonth(Number(event.target.value))
+                      }
+                      onBlur={saveUnlockMonth}
+                      className="w-16 rounded-lg border border-slate-200 bg-white px-2 py-1 text-center text-xs font-bold text-slate-700 outline-none focus:border-brand-500"
+                    />
+                  </label>
                 </>
               )}
             </div>
@@ -1495,6 +1528,16 @@ export default function CourseBuilderPage() {
   const [creatingSection, setCreatingSection] =
     useState(false);
 
+  const [installmentSettings, setInstallmentSettings] =
+    useState({
+      enabled: false,
+      months: 3,
+      amount: 0,
+    });
+
+  const [savingInstallmentSettings, setSavingInstallmentSettings] =
+    useState(false);
+
   const loadData = async (
     showFullLoader = false
   ) => {
@@ -1519,6 +1562,12 @@ export default function CourseBuilderPage() {
       }
 
       setCourse(loadedCourse);
+
+      setInstallmentSettings({
+        enabled: loadedCourse.is_installment,
+        months: loadedCourse.installment_months ?? 3,
+        amount: loadedCourse.installment_amount ?? 0,
+      });
 
       const loadedSections =
         await fetchSections(loadedCourse.id);
@@ -1578,6 +1627,55 @@ export default function CourseBuilderPage() {
       );
     } finally {
       setCreatingSection(false);
+    }
+  };
+
+  const saveInstallmentSettings = async () => {
+    if (!course) return;
+
+    if (
+      installmentSettings.enabled &&
+      (installmentSettings.months < 2 || installmentSettings.amount <= 0)
+    ) {
+      alert("أدخل عدد شهور وقيمة قسط صحيحة");
+      return;
+    }
+
+    setSavingInstallmentSettings(true);
+
+    try {
+      await updateCourse(course.id, {
+        is_installment: installmentSettings.enabled,
+        installment_months: installmentSettings.enabled
+          ? Math.floor(installmentSettings.months)
+          : null,
+        installment_amount: installmentSettings.enabled
+          ? installmentSettings.amount
+          : null,
+      });
+
+      setCourse((current) =>
+        current
+          ? {
+              ...current,
+              is_installment: installmentSettings.enabled,
+              installment_months: installmentSettings.enabled
+                ? Math.floor(installmentSettings.months)
+                : null,
+              installment_amount: installmentSettings.enabled
+                ? installmentSettings.amount
+                : null,
+            }
+          : current
+      );
+    } catch (err) {
+      alert(
+        err instanceof Error
+          ? err.message
+          : "تعذر حفظ إعدادات التقسيط"
+      );
+    } finally {
+      setSavingInstallmentSettings(false);
     }
   };
 
@@ -1810,6 +1908,80 @@ export default function CourseBuilderPage() {
 
         {/* Main */}
         <div className="mt-5">
+          <div className="mb-5 rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
+            <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+              <div>
+                <h2 className="font-black text-slate-900">نظام التقسيط</h2>
+                <p className="mt-1 text-sm text-slate-500">
+                  افتح أقسام الكورس تدريجيًا بعد اعتماد كل قسط.
+                </p>
+              </div>
+
+              <label className="flex items-center gap-2 text-sm font-bold text-slate-700">
+                <input
+                  type="checkbox"
+                  checked={installmentSettings.enabled}
+                  onChange={(event) =>
+                    setInstallmentSettings((current) => ({
+                      ...current,
+                      enabled: event.target.checked,
+                    }))
+                  }
+                  className="h-4 w-4 accent-brand-600"
+                />
+                تفعيل التقسيط
+              </label>
+            </div>
+
+            {installmentSettings.enabled && (
+              <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                <label className="text-sm font-bold text-slate-700">
+                  عدد الشهور
+                  <input
+                    type="number"
+                    min={2}
+                    value={installmentSettings.months}
+                    onChange={(event) =>
+                      setInstallmentSettings((current) => ({
+                        ...current,
+                        months: Number(event.target.value),
+                      }))
+                    }
+                    className="mt-2 w-full rounded-xl border border-slate-200 px-3 py-2.5 outline-none focus:border-brand-500"
+                  />
+                </label>
+
+                <label className="text-sm font-bold text-slate-700">
+                  قيمة القسط الشهري
+                  <input
+                    type="number"
+                    min={1}
+                    value={installmentSettings.amount}
+                    onChange={(event) =>
+                      setInstallmentSettings((current) => ({
+                        ...current,
+                        amount: Number(event.target.value),
+                      }))
+                    }
+                    className="mt-2 w-full rounded-xl border border-slate-200 px-3 py-2.5 outline-none focus:border-brand-500"
+                  />
+                </label>
+              </div>
+            )}
+
+            <button
+              type="button"
+              onClick={saveInstallmentSettings}
+              disabled={savingInstallmentSettings}
+              className="mt-4 inline-flex items-center gap-2 rounded-xl bg-brand-600 px-4 py-2.5 text-sm font-bold text-white disabled:opacity-50"
+            >
+              {savingInstallmentSettings && (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              )}
+              حفظ إعدادات التقسيط
+            </button>
+          </div>
+
           <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div>
               <h2 className="text-xl font-black text-slate-900">

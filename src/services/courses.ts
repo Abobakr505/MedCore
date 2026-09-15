@@ -487,3 +487,26 @@ export async function fetchCourseBySlugOrId(
 
   return data as unknown as Course;
 }
+
+/** يرجع أعلى رقم شهر تم اعتماد دفعه فعليًا لهذا الطالب في هذا الكورس (0 لو ولا شهر) */
+export async function fetchUnlockedMonth(studentId: string, courseId: string) {
+  if (!studentId || !courseId) return 0;
+
+  const { data, error } = await supabase
+    .from("student_installments")
+    .select("month_number")
+    .eq("student_id", studentId)
+    .eq("course_id", courseId)
+    .eq("status", "approved")
+    .order("month_number", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (error) {
+    console.error("fetchUnlockedMonth error:", error);
+    return 0;
+  }
+
+  // كورس غير تقسيط أو لسه مفيش أقساط approved = يعتبر مفتوح لو فيه enrollment عادي (بيتحقق بمكان تاني)
+  return data?.month_number ?? 0;
+}

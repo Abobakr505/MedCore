@@ -345,6 +345,7 @@ export async function updateSection(
     title?: string;
     description?: string | null;
     orderIndex?: number;
+    unlockMonth?: number;
   }
 ) {
   if (!sectionId) {
@@ -363,6 +364,10 @@ export async function updateSection(
 
   if (updates.orderIndex !== undefined) {
     payload.order_index = updates.orderIndex;
+  }
+
+  if (updates.unlockMonth !== undefined) {
+    payload.unlock_month = Math.max(1, Math.floor(updates.unlockMonth));
   }
 
   const { data, error } = await supabase
