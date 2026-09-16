@@ -25,18 +25,23 @@ import { useAuth } from "@/contexts/AuthContext";
 import { fetchTeacherCourses } from "@/services/teacherCourses";
 import { fetchTeacherPayments } from "@/services/payments";
 import { fetchDashboardStats, type DashboardStats } from "@/services/admin";
-import type { Enrollment, Course } from "@/types";
+import type {
+  Enrollment,
+  Course,
+  CollegeType,
+} from "@/types";
 import { CourseCard } from "@/features/courses/CourseCard";
 import { formatCurrency } from "@/utils/format";
 import { fetchStudentEnrollments, fetchLessonProgress, computeCourseProgress } from "@/services/enrollments";
 import { fetchCourseSections } from "@/services/courses";
 import { fetchStudentAttempts } from "@/services/quizzes";
 
-const COLLEGE_LABELS = {
+const COLLEGE_LABELS: Record<CollegeType, string> = {
+  all: "كل الكليات",
   medicine: "الطب",
   dentistry: "طب الأسنان",
   pharmacy: "الصيدلة",
-} as const;
+};
 
 const ROLE_LABELS = {
   student: "طالب",
@@ -83,8 +88,9 @@ function StudentHome() {
   const [loading, setLoading] = useState(true);
 
   const firstName = profile?.full_name?.split(" ")[0] ?? "عزيزي";
-  const collegeLabel = COLLEGE_LABELS[profile?.college ?? "medicine"];
-  const accent = ROLE_ACCENTS.student;
+const collegeLabel =
+  COLLEGE_LABELS[profile?.college ?? "medicine"];
+    const accent = ROLE_ACCENTS.student;
 
   useEffect(() => {
     if (!session?.user) return;
@@ -120,8 +126,7 @@ const passed = attempts.filter((a) => {
   return percentage >= passingScore;
 }).length;
 
-setPassedExamsCount(passed);
-setTotalExamsCount(attempts.length);
+
         setPassedExamsCount(passed);
         setTotalExamsCount(attempts.length);
       } catch (err) {
@@ -268,8 +273,9 @@ function TeacherHome() {
   const [loading, setLoading] = useState(true);
 
   const firstName = profile?.full_name?.split(" ")[0] ?? "أستاذ";
-  const collegeLabel = COLLEGE_LABELS[profile?.college ?? "medicine"];
-  const accent = ROLE_ACCENTS.teacher;
+const collegeLabel =
+  COLLEGE_LABELS[profile?.college ?? "medicine"];
+    const accent = ROLE_ACCENTS.teacher;
 
   useEffect(() => {
     if (!session?.user) return;
