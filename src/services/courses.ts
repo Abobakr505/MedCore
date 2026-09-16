@@ -36,6 +36,10 @@ export interface LessonFile {
    Fetch Courses
 ========================================================= */
 
+/* =========================================================
+   Fetch Courses
+========================================================= */
+
 export async function fetchCourses(filters: CourseFilters = {}) {
   const {
     search,
@@ -61,27 +65,62 @@ export async function fetchCourses(filters: CourseFilters = {}) {
     )
     .eq("is_published", true);
 
-  /* Search */
+  /* =======================================================
+     Search + College
+     
+     الحالات:
+     
+     1. بدون بحث + بدون كلية
+        => كل الكورسات
 
-  if (search?.trim()) {
+     2. بحث فقط
+        => title OR description
+
+     3. كلية فقط
+        => selected college OR all
+
+     4. بحث + كلية
+        => (title OR description)
+        AND
+        (selected college OR all)
+  ======================================================= */
+
+  const cleanSearch = search?.trim();
+  const cleanCollege = college?.trim();
+
+  if (cleanSearch && cleanCollege && cleanCollege !== "all") {
+    const escapedSearch = cleanSearch
+      .replace(/[%_]/g, "\\$&")
+      .replace(/,/g, "\\,");
+
     query = query.or(
-      `title.ilike.%${search.trim()}%,description.ilike.%${search.trim()}%`
+      `and(title.ilike.%${escapedSearch}%,college.eq.${cleanCollege}),and(description.ilike.%${escapedSearch}%,college.eq.${cleanCollege}),and(title.ilike.%${escapedSearch}%,college.eq.all),and(description.ilike.%${escapedSearch}%,college.eq.all)`
+    );
+  } else if (cleanSearch) {
+    const escapedSearch = cleanSearch
+      .replace(/[%_]/g, "\\$&")
+      .replace(/,/g, "\\,");
+
+    query = query.or(
+      `title.ilike.%${escapedSearch}%,description.ilike.%${escapedSearch}%`
+    );
+  } else if (cleanCollege && cleanCollege !== "all") {
+    query = query.or(
+      `college.eq.${cleanCollege},college.eq.all`
     );
   }
 
-  /* College */
-
-  if (college) {
-    query = query.eq("college", college);
-  }
-
-  /* Teacher */
+  /* =======================================================
+     Teacher
+  ======================================================= */
 
   if (teacherId) {
     query = query.eq("teacher_id", teacherId);
   }
 
-  /* Sorting */
+  /* =======================================================
+     Sorting
+  ======================================================= */
 
   switch (sort) {
     case "oldest":
@@ -122,7 +161,9 @@ export async function fetchCourses(filters: CourseFilters = {}) {
       break;
   }
 
-  /* Pagination */
+  /* =======================================================
+     Pagination
+  ======================================================= */
 
   const safePage = Math.max(1, page);
   const safePageSize = Math.max(1, pageSize);
@@ -148,7 +189,6 @@ export async function fetchCourses(filters: CourseFilters = {}) {
     total: count ?? 0,
   };
 }
-
 /* =========================================================
    Fetch Course By Slug
 ========================================================= */

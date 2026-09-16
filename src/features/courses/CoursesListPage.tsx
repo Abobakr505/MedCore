@@ -36,6 +36,7 @@ type SortOption =
   | "popular";
   
 const collegeLabels: Record<string, string> = {
+  all: "كل الكليات",
   medicine: "طب بشري",
   dentistry: "طب أسنان",
   pharmacy: "صيدلة",
@@ -84,13 +85,9 @@ const sort: SortOption =
   const isStudent = role === "student";
   const isTeacher = role === "teacher";
 
-  const effectiveCollege = useMemo(() => {
-    if (isStudent && profile?.college) {
-      return college || profile.college;
-    }
-
-    return college;
-  }, [college, isStudent, profile?.college]);
+const effectiveCollege = useMemo(() => {
+  return college;
+}, [college]);
 
   const collegeLabel = effectiveCollege
     ? collegeLabels[effectiveCollege] ?? "تخصص طبي"
@@ -186,17 +183,10 @@ const sort: SortOption =
   /*
    * Reset filters
    */
-  const resetFilters = () => {
-    setSearchInput("");
-
-    if (isStudent && profile?.college) {
-      setSearchParams({
-        college: profile.college,
-      });
-    } else {
-      setSearchParams({});
-    }
-  };
+const resetFilters = () => {
+  setSearchInput("");
+  setSearchParams({});
+};
 
   /*
    * Pagination

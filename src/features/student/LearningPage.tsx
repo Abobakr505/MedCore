@@ -71,6 +71,7 @@ import type {
   LessonProgress,
   Quiz,
 } from "@/types";
+import LessonVideoPlayer from "@/components/video/LessonVideoPlayer";
 
 /* -------------------------------------------------------------------------- */
 /* Types                                                                      */
@@ -1912,8 +1913,7 @@ const loadLessonVideo =
 
                 {/* Video */}
                 <div className="relative overflow-hidden rounded-3xl bg-black shadow-2xl">
-                  <div className="relative aspect-video">
-                    {videoLoading ? (
+{videoLoading ? (
   <div className="absolute inset-0 flex flex-col items-center justify-center gap-3">
     <Loader2 className="h-10 w-10 animate-spin text-white" />
     {videoDownloadPct > 0 && (
@@ -1922,28 +1922,19 @@ const loadLessonVideo =
       </span>
     )}
   </div>
-) : activeVideoUrl  ? (
-                      <video
-                        ref={videoRef}
-                        key={activeVideoUrl}
-                        src={
-                          activeVideoUrl
-                        }
-                        controls
-                        playsInline
-                        controlsList="nodownload"
-                        onContextMenu={(event) =>
-                          event.preventDefault()
-                        }
-                        className="h-full w-full object-contain"
-                        onTimeUpdate={
-                          handleVideoTimeUpdate
-                        }
-                        onEnded={
-                          markLessonCompleted
-                        }
-                      />
-                    ) : (
+) : activeVideoUrl ? (
+  <LessonVideoPlayer
+    key={activeVideoUrl}
+    src={activeVideoUrl}
+    onTimeUpdate={(currentTime, duration) => {
+      if (!duration) return;
+      const percentage = Math.round((currentTime / duration) * 100);
+      if (percentage >= 90) markLessonCompleted();
+    }}
+    onEnded={markLessonCompleted}
+    className="h-full w-full"
+  />
+) : (
                       <div className="absolute inset-0 flex flex-col items-center justify-center px-5 text-center">
                         <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-white/10 text-white">
                           <VideoIcon />
@@ -2009,7 +2000,6 @@ const loadLessonVideo =
                         </motion.div>
                       )}
                     </AnimatePresence>
-                  </div>
                 </div>
 
                 {/* Video Offline */}

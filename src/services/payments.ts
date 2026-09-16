@@ -36,17 +36,69 @@ export async function fetchStudentPayments(studentId: string) {
   return (data ?? []) as unknown as Payment[];
 }
 
-export async function fetchTeacherPayments(teacherId: string, status?: string) {
+export async function fetchTeacherPayments(
+  teacherId: string,
+  status?: string
+): Promise<Payment[]> {
+  if (!teacherId) {
+    throw new Error("Teacher ID is required");
+  }
+
   let query = supabase
     .from("payments")
-    .select("*, course:courses!inner(id, title, thumbnail_path, teacher_id), student:profiles!payments_student_id_fkey(id, full_name, email)")
+    .select(`
+      *,
+      course:courses!inner(
+        id,
+        title,
+        thumbnail_path,
+        teacher_id
+      ),
+      student:profiles!payments_student_id_fkey(
+        id,
+        full_name,
+        email
+      )
+    `)
     .eq("course.teacher_id", teacherId)
-    .order("created_at", { ascending: false });
-  if (status) query = query.eq("status", status);
+    .order("created_at", {
+      ascending: false,
+    });
+
+  if (status) {
+    query = query.eq("status", status);
+  }
+
   const { data, error } = await query;
-  if (error) throw error;
-  return (data ?? []) as unknown as Payment[];
+
+  if (error) {
+    console.error(
+      "fetchTeacherPayments error:",
+      error
+    );
+
+    throw error;
+  }
+
+  const payments = (data ?? []) as unknown as Payment[];
+
+  console.log(
+    "Teacher payments:",
+    payments
+  );
+
+  console.log(
+    "Students:",
+    payments.map((payment) => ({
+      paymentId: payment.id,
+      studentId: payment.student_id,
+      student: payment.student,
+    }))
+  );
+
+  return payments;
 }
+
 
 export async function fetchAllPayments(status?: string) {
   let query = supabase

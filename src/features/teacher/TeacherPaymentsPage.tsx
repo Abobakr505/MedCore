@@ -83,12 +83,22 @@ export default function TeacherPaymentsPage() {
           filter || undefined
         )
       );
+const result = await fetchTeacherPayments(
+  session.user.id,
+  filter || undefined
+);
+
+console.log("PAYMENTS RESULT:", result);
+
+setPayments(result);
+
     } catch {
       showToast("تعذّر تحميل المدفوعات", "error");
     } finally {
       setLoading(false);
     }
   };
+  
 
   useEffect(() => {
     load();

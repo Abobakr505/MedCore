@@ -19,7 +19,12 @@ export const registerSchema = z.object({
   phone: z.string().regex(/^01[0-2,5]{1}[0-9]{8}$|^\+?[0-9]{8,15}$/, arabicMessages.phone),
   password: z.string().min(6, arabicMessages.minPassword),
   confirmPassword: z.string().min(6, arabicMessages.minPassword),
-  college: z.enum(["medicine", "dentistry", "pharmacy"], { required_error: arabicMessages.required }),
+  college: z.enum([
+  "all",
+  "medicine",
+  "dentistry",
+  "pharmacy",
+], { required_error: arabicMessages.required }),
   role: z.enum(["student", "teacher"], { required_error: arabicMessages.required }),
 }).refine((data) => data.password === data.confirmPassword, {
   message: "كلمتا المرور غير متطابقتين",
@@ -51,7 +56,12 @@ export type TicketFormValues = z.infer<typeof ticketSchema>;
 export const courseSchema = z.object({
   title: z.string().min(3, "العنوان قصير جدًا"),
   description: z.string().min(10, "الوصف قصير جدًا"),
-  college: z.enum(["medicine", "dentistry", "pharmacy"]),
+  college: z.enum([
+  "all",
+  "medicine",
+  "dentistry",
+  "pharmacy",
+]),
   price: z.coerce.number().min(0, "السعر لا يمكن أن يكون سالبًا"),
 });
 export type CourseFormValues = z.infer<typeof courseSchema>;

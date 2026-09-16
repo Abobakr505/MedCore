@@ -174,8 +174,9 @@ export default function TeacherCoursesPage() {
         (statusFilter === "draft" && !course.is_published);
 
       const matchesCollege =
-        collegeFilter === "all" ||
-        course.college === collegeFilter;
+  collegeFilter === "all" ||
+  course.college === collegeFilter ||
+  course.college === "all";
 
       return matchesSearch && matchesStatus && matchesCollege;
     });
@@ -678,23 +679,29 @@ export default function TeacherCoursesPage() {
           </div>
 
           <div className="grid gap-4 sm:grid-cols-2">
-            <Select
-              label="الكلية"
-              {...register("college")}
-            >
-              <option value="medicine">
-                طب بشري
-              </option>
-              <option value="dentistry">
-                طب أسنان
-              </option>
-              <option value="pharmacy">
-                صيدلة
-              </option>
-            </Select>
+<Select
+  label="الكلية"
+  {...register("college")}
+>
+  <option value="all">
+    كل الكليات
+  </option>
+
+  <option value="medicine">
+    طب بشري
+  </option>
+
+  <option value="dentistry">
+    طب أسنان
+  </option>
+
+  <option value="pharmacy">
+    صيدلة
+  </option>
+</Select>
 
             <Input
-              label="السعر (ر.س)"
+              label="السعر (ج.م)"
               type="number"
               min="0"
               step="0.01"
@@ -760,20 +767,26 @@ export default function TeacherCoursesPage() {
           </div>
 
           <div className="grid gap-4 sm:grid-cols-2">
-            <Select
-              label="الكلية"
-              {...registerEdit("college")}
-            >
-              <option value="medicine">
-                طب بشري
-              </option>
-              <option value="dentistry">
-                طب أسنان
-              </option>
-              <option value="pharmacy">
-                صيدلة
-              </option>
-            </Select>
+<Select
+  label="الكلية"
+  {...registerEdit("college")}
+>
+  <option value="all">
+    كل الكليات
+  </option>
+
+  <option value="medicine">
+    طب بشري
+  </option>
+
+  <option value="dentistry">
+    طب أسنان
+  </option>
+
+  <option value="pharmacy">
+    صيدلة
+  </option>
+</Select>
 
             <Input
               label="السعر (ج.م)"

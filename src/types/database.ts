@@ -2,8 +2,12 @@
 // (بديل مبسّط ومكتوب يدويًا عن Supabase CLI type generation، حدّثه عند تغيير الـ SQL)
 
 export type UserRole = "student" | "teacher" | "admin";
-export type CollegeType = "medicine" | "dentistry" | "pharmacy";
-export type UserStatus = "active" | "suspended" | "pending_verification";
+export type CollegeType =
+  | "all"
+  | "medicine"
+  | "dentistry"
+  | "pharmacy";
+  export type UserStatus = "active" | "suspended" | "pending_verification";
 export type CourseStatus = "draft" | "published" | "archived";
 export type EnrollmentStatus = "pending" | "active" | "suspended" | "cancelled";
 export type PaymentStatus = "pending" | "approved" | "rejected";

@@ -1,6 +1,7 @@
 export * from "./database";
 
 export const COLLEGE_LABELS: Record<string, string> = {
+  all: "كل الكليات",
   medicine: "طب بشري",
   dentistry: "طب أسنان",
   pharmacy: "صيدلة",

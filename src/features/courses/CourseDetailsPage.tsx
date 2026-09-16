@@ -35,7 +35,7 @@ import { useToast } from "@/contexts/ToastContext";
 
 import type { Course, CourseSection, Lesson } from "@/types";
 import { COLLEGE_LABELS } from "@/types";
-
+import { enrollFreeCourse } from "@/services/enrollments";
 import { formatCurrency, formatDuration } from "@/utils/format";
 import { getPublicUrl } from "@/lib/supabase";
 
@@ -52,7 +52,30 @@ export default function CourseDetailsPage() {
   const [openSection, setOpenSection] = useState<string | null>(null);
   const [addingToCart, setAddingToCart] = useState(false);
   const [playingLesson, setPlayingLesson] = useState<Lesson | null>(null);
+const [enrollingFree, setEnrollingFree] = useState(false);
 
+const handleFreeEnroll = async () => {
+  if (!session?.user || !course) return;
+
+  setEnrollingFree(true);
+
+  try {
+    await enrollFreeCourse(session.user.id, course.id);
+
+    showToast("تم تسجيلك في الكورس بنجاح", "success");
+
+    navigate(`/app/student/courses/${course.id}/learn`);
+  } catch (error) {
+    console.error("Free enroll error:", error);
+
+    showToast(
+      error instanceof Error ? error.message : "تعذّر التسجيل في الكورس",
+      "error"
+    );
+  } finally {
+    setEnrollingFree(false);
+  }
+};
   useEffect(() => {
     if (!slug) return;
 
@@ -365,7 +388,6 @@ export default function CourseDetailsPage() {
                       {course.price > 0 ? "كورس مدفوع" : "مجاني"}
                     </span>
                   </div>
-
                   {enrolled ? (
                     <Link
                       to={`/app/student/courses/${course.id}/learn`}
@@ -378,6 +400,16 @@ export default function CourseDetailsPage() {
                         متابعة التعلّم
                       </Button>
                     </Link>
+                  ) : course.price === 0 ? (
+                    <Button
+                      className="mt-5 h-12 w-full rounded-2xl"
+                      size="lg"
+                      isLoading={enrollingFree}
+                      onClick={handleFreeEnroll}
+                    >
+                      <PlayCircle className="h-5 w-5" />
+                      ابدأ الكورس مجانًا
+                    </Button>
                   ) : (
                     <Button
                       className="mt-5 h-12 w-full rounded-2xl"

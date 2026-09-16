@@ -59,3 +59,25 @@ export function computeCourseProgress(totalLessons: number, completedLessons: nu
   return Math.round((completedLessons / totalLessons) * 100);
 }
 
+// services/enrollment.ts
+export async function enrollFreeCourse(studentId: string, courseId: string) {
+  const { data: course, error: courseError } = await supabase
+    .from("courses")
+    .select("price, is_installment")
+    .eq("id", courseId)
+    .maybeSingle();
+
+  if (courseError) throw courseError;
+  if (!course || course.price > 0) {
+    throw new Error("هذا الكورس ليس مجانيًا");
+  }
+
+  const { error } = await supabase
+    .from("enrollments")
+    .upsert(
+      { student_id: studentId, course_id: courseId, status: "active" },
+      { onConflict: "student_id,course_id" }
+    );
+
+  if (error) throw error;
+}
