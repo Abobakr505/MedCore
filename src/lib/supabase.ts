@@ -4,13 +4,13 @@ const supabaseUrl = import.meta.env.VITE_SUPABASE_URL as string;
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY as string;
 
 if (!supabaseUrl || !supabaseAnonKey) {
-  // لا نرمي استثناء يوقف التطبيق بالكامل، لكن ننبّه بوضوح أثناء التطوير
-  // بدل خطأ Supabase غامض لاحقًا.
   // eslint-disable-next-line no-console
   console.error(
     "متغيرات بيئة Supabase غير موجودة. تأكد من إنشاء ملف .env بناءً على .env.example"
   );
 }
+
+export { supabaseUrl, supabaseAnonKey };
 
 export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
   auth: {

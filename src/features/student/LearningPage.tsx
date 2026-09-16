@@ -54,7 +54,7 @@ import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/contexts/AuthContext";
 import { VideoWatermark } from "@/components/video/VideoWatermark";
 import { useScreenRecordingGuard } from "@/hooks/useScreenRecordingGuard";
-
+import { buildLessonVideoBlobUrl } from "@/services/videoPlayback";
 import {
   fetchCourseBySlugOrId,
   fetchCourseSections,
@@ -826,8 +826,11 @@ export default function LearningPage() {
   const [loading, setLoading] =
     useState(true);
 
-  const [videoLoading, setVideoLoading] =
-    useState(false);
+const [videoLoading, setVideoLoading] =
+  useState(false);
+
+const [videoDownloadPct, setVideoDownloadPct] =
+  useState(0); // جديد
 
   const [filesLoading, setFilesLoading] =
     useState(false);
@@ -1080,59 +1083,77 @@ export default function LearningPage() {
   /* Get video URL                                                           */
   /* ---------------------------------------------------------------------- */
 
-  const loadLessonVideo =
-    useCallback(
-      async (
-        lesson: LessonWithFiles
-      ) => {
-        setVideoLoading(true);
-        setActiveVideoUrl(null);
+const loadLessonVideo =
+  useCallback(
+    async (
+      lesson: LessonWithFiles
+    ) => {
+      setVideoLoading(true);
+      setActiveVideoUrl(null);
+      setVideoDownloadPct(0);
 
-        try {
-          if (isLessonLocked(lesson)) {
-            setVideoLoading(false);
-            return;
-          }
+      try {
+        if (isLessonLocked(lesson)) {
+          setVideoLoading(false);
+          return;
+        }
 
-          const cached =
-            await getOfflineVideo(
-              lesson.id
-            );
-
-          if (cached) {
-            setOfflineVideo(cached);
-            setActiveVideoUrl(
-              cached.blobUrl
-            );
-            setVideoLoading(false);
-            return;
-          }
-
-          setOfflineVideo(null);
-
-          const { data, error } =
-            await supabase.functions.invoke(
-              "get-lesson-video-url",
-              { body: { lessonId: lesson.id } }
-            );
-
-          if (error) throw error;
-
-          setActiveVideoUrl(data?.url ?? null);
-        } catch (error) {
-          console.error(
-            "Load lesson video error:",
-            error
+        const cached =
+          await getOfflineVideo(
+            lesson.id
           );
 
-          setActiveVideoUrl(null);
-        } finally {
+        if (cached) {
+          setOfflineVideo(cached);
+          setActiveVideoUrl(
+            cached.blobUrl
+          );
           setVideoLoading(false);
+          return;
         }
-      },
-      [isLessonLocked]
-    );
 
+        setOfflineVideo(null);
+
+        // فيديو مقسّم لأجزاء (chunked) بسبب حد الـ 50MB
+        const chunkCount =
+          (lesson as LessonWithFiles & { video_chunk_count?: number })
+            .video_chunk_count;
+
+        if (chunkCount && chunkCount > 0) {
+          const blobUrl = await buildLessonVideoBlobUrl(
+            lesson.id,
+            chunkCount,
+            setVideoDownloadPct
+          );
+
+          setActiveVideoUrl(blobUrl);
+          setVideoLoading(false);
+          return;
+        }
+
+        // فيديو عادي (رابط موقّع من edge function)
+        const { data, error } =
+          await supabase.functions.invoke(
+            "get-lesson-video-url",
+            { body: { lessonId: lesson.id } }
+          );
+
+        if (error) throw error;
+
+        setActiveVideoUrl(data?.url ?? null);
+      } catch (error) {
+        console.error(
+          "Load lesson video error:",
+          error
+        );
+
+        setActiveVideoUrl(null);
+      } finally {
+        setVideoLoading(false);
+      }
+    },
+    [isLessonLocked]
+  );
   /* ---------------------------------------------------------------------- */
   /* Active lesson                                                           */
   /* ---------------------------------------------------------------------- */
@@ -1159,19 +1180,26 @@ export default function LearningPage() {
 
   useEffect(() => {
     return () => {
-      if (activeVideoUrl?.startsWith("blob:")) {
+      if (
+        activeVideoUrl?.startsWith("blob:") &&
+        !offlineVideo
+      ) {
         URL.revokeObjectURL(
           activeVideoUrl
         );
       }
+    };
+  }, [activeVideoUrl, offlineVideo]);
 
+  useEffect(() => {
+    return () => {
       if (offlineVideo?.blobUrl) {
         URL.revokeObjectURL(
           offlineVideo.blobUrl
         );
       }
     };
-  }, []);
+  }, [offlineVideo]);
 
   /* ---------------------------------------------------------------------- */
   /* Navigation                                                              */
@@ -1886,10 +1914,15 @@ export default function LearningPage() {
                 <div className="relative overflow-hidden rounded-3xl bg-black shadow-2xl">
                   <div className="relative aspect-video">
                     {videoLoading ? (
-                      <div className="absolute inset-0 flex items-center justify-center">
-                        <Loader2 className="h-10 w-10 animate-spin text-white" />
-                      </div>
-                    ) : activeVideoUrl ? (
+  <div className="absolute inset-0 flex flex-col items-center justify-center gap-3">
+    <Loader2 className="h-10 w-10 animate-spin text-white" />
+    {videoDownloadPct > 0 && (
+      <span className="text-sm font-bold text-white/80">
+        {videoDownloadPct}%
+      </span>
+    )}
+  </div>
+) : activeVideoUrl  ? (
                       <video
                         ref={videoRef}
                         key={activeVideoUrl}

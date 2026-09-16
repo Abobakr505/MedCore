@@ -50,9 +50,8 @@ import {
   deleteLesson,
   deleteSection,
   updateSection,
-  updateLessonVideoPath,
-  deleteLessonVideo,
-  getVideoStoragePath,
+  uploadLessonVideoChunked,   // <-- بدل updateLessonVideoPath و getVideoStoragePath
+  deleteLessonVideoChunks,    // <-- بدل deleteLessonVideo
 } from "@/services/teacherCourses";
 
 import type {
@@ -561,7 +560,7 @@ function LessonCard({
   videoUploadState?: UploadState;
 }) {
   const hasVideo = Boolean(
-    (lesson as Lesson & { video_path?: string | null }).video_path
+    (lesson as Lesson & { video_chunk_count?: number }).video_chunk_count
   );
 
   const isUploading = videoUploadState?.uploading ?? false;
@@ -943,7 +942,7 @@ function SectionBlock({
     }
   };
 
-  const uploadVideo = async (
+    const uploadVideo = async (
     lesson: LessonWithFiles
   ) => {
     const input = document.createElement("input");
@@ -967,57 +966,19 @@ function SectionBlock({
       }));
 
       try {
-        const oldVideoPath = (
-          lesson as Lesson & {
-            video_path?: string | null;
-          }
-        ).video_path;
-
-        const storagePath =
-          getVideoStoragePath(
-            lesson.id,
-            file.name
-          );
-
-        const { error: uploadError } =
-          await supabase.storage
-            .from("course-videos")
-            .upload(
-              storagePath,
-              file,
-              {
-                cacheControl: "3600",
-                upsert: true,
-                contentType:
-                  file.type || "video/mp4",
-              }
-            );
-
-        if (uploadError) {
-          throw uploadError;
-        }
-
-        setVideoUploadStates((current) => ({
-          ...current,
-          [lesson.id]: {
-            ...current[lesson.id],
-            progress: 80,
-          },
-        }));
-
-        await updateLessonVideoPath(
+        await uploadLessonVideoChunked(
           lesson.id,
-          storagePath
+          file,
+          (pct) => {
+            setVideoUploadStates((current) => ({
+              ...current,
+              [lesson.id]: {
+                ...current[lesson.id],
+                progress: pct,
+              },
+            }));
+          }
         );
-
-        if (
-          oldVideoPath &&
-          oldVideoPath !== storagePath
-        ) {
-          await supabase.storage
-            .from("course-videos")
-            .remove([oldVideoPath]);
-        }
 
         setVideoUploadStates((current) => ({
           ...current,
@@ -1062,7 +1023,7 @@ function SectionBlock({
     input.click();
   };
 
-  const deleteVideo = async (
+    const deleteVideo = async (
     lesson: LessonWithFiles
   ) => {
     const confirmed = window.confirm(
@@ -1072,18 +1033,7 @@ function SectionBlock({
     if (!confirmed) return;
 
     try {
-      const videoPath = (
-        lesson as Lesson & {
-          video_path?: string | null;
-        }
-      ).video_path;
-
-      if (!videoPath) return;
-
-      await deleteLessonVideo(
-        lesson.id,
-        videoPath
-      );
+      await deleteLessonVideoChunks(lesson.id);
 
       await onRefresh();
     } catch (error) {

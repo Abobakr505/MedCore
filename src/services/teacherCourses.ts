@@ -1,7 +1,8 @@
-import { supabase } from "@/lib/supabase";
+import { supabase, supabaseUrl, supabaseAnonKey } from "@/lib/supabase";
 import { slugify } from "@/utils/format";
 import type { Course, CourseSection, Lesson } from "@/types";
 
+import { splitFileIntoChunks, getChunkPath } from "@/utils/videoChunking";
 export async function fetchTeacherCourses(teacherId: string) {
   const { data, error } = await supabase
     .from("courses")
@@ -383,4 +384,164 @@ export async function updateSection(
   }
 
   return data;
+}
+
+// services/teacherCourses.ts
+
+function uploadChunkWithProgress(
+  bucket: string,
+  path: string,
+  chunk: Blob,
+  contentType: string,
+  accessToken: string,
+  onChunkLoaded: (loadedBytes: number) => void
+): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    const url = `${supabaseUrl}/storage/v1/object/${bucket}/${path}`;
+
+    xhr.open("POST", url, true);
+    xhr.setRequestHeader("Authorization", `Bearer ${accessToken}`);
+    xhr.setRequestHeader("apikey", supabaseAnonKey);
+    xhr.setRequestHeader("Content-Type", contentType);
+    xhr.setRequestHeader("x-upsert", "true");
+    xhr.setRequestHeader("cache-control", "3600");
+
+    xhr.upload.onprogress = (event) => {
+      if (event.lengthComputable) {
+        onChunkLoaded(event.loaded);
+      }
+    };
+
+    xhr.onload = () => {
+      if (xhr.status >= 200 && xhr.status < 300) {
+        resolve();
+      } else {
+        let message = xhr.responseText || `HTTP ${xhr.status}`;
+        try {
+          const parsed = JSON.parse(xhr.responseText);
+          message = parsed.message || parsed.error || message;
+        } catch {
+          // تجاهل، استخدم النص الخام
+        }
+        reject(new Error(message));
+      }
+    };
+
+    xhr.onerror = () => {
+      reject(new Error("فشل الاتصال أثناء رفع الفيديو"));
+    };
+
+    xhr.onabort = () => {
+      reject(new Error("تم إلغاء رفع الفيديو"));
+    };
+
+    xhr.send(chunk);
+  });
+}
+
+// services/teacherCourses.ts
+export async function uploadLessonVideoChunked(
+  lessonId: string,
+  file: File,
+  onProgress?: (pct: number) => void
+) {
+  if (!(file instanceof File) || !file.size) {
+    throw new Error("الملف غير صالح");
+  }
+
+  const {
+    data: { session },
+  } = await supabase.auth.getSession();
+
+  const accessToken = session?.access_token;
+
+  if (!accessToken) {
+    throw new Error("انتهت الجلسة، برجاء تسجيل الدخول مرة أخرى");
+  }
+
+  const chunks = splitFileIntoChunks(file);
+  const contentType = file.type || "video/mp4";
+  const totalBytes = file.size;
+
+  await deleteLessonVideoChunks(lessonId);
+
+  let completedBytes = 0;
+
+  for (let i = 0; i < chunks.length; i++) {
+    const chunk = chunks[i];
+    const path = getChunkPath(lessonId, i);
+    const chunkOffset = completedBytes;
+
+    try {
+      await uploadChunkWithProgress(
+        "course-videos",
+        path,
+        chunk,
+        contentType,
+        accessToken,
+        (loadedInChunk) => {
+          const overallLoaded = chunkOffset + loadedInChunk;
+          const pct = Math.min(
+            100,
+            Math.round((overallLoaded / totalBytes) * 100)
+          );
+          onProgress?.(pct);
+        }
+      );
+    } catch (err) {
+      throw new Error(
+        `فشل رفع الجزء ${i + 1}: ${
+          err instanceof Error ? err.message : "خطأ غير معروف"
+        }`
+      );
+    }
+
+    completedBytes += chunk.size;
+
+    const pct = Math.min(
+      100,
+      Math.round((completedBytes / totalBytes) * 100)
+    );
+    onProgress?.(pct);
+  }
+
+  const { error: dbError } = await supabase
+    .from("lessons")
+    .update({
+      video_path: `${lessonId}/`,
+      video_chunk_count: chunks.length,
+    })
+    .eq("id", lessonId);
+
+  if (dbError) {
+    throw new Error(`تم رفع الفيديو لكن تعذر ربطه بالدرس: ${dbError.message}`);
+  }
+}
+
+export async function deleteLessonVideoChunks(lessonId: string) {
+  const { data: existing } = await supabase
+    .from("lessons")
+    .select("video_chunk_count")
+    .eq("id", lessonId)
+    .maybeSingle();
+
+  const count = existing?.video_chunk_count ?? 0;
+  if (!count) {
+    // برضه امسح video_path لو فيه قيمة قديمة عالقة
+    await supabase
+      .from("lessons")
+      .update({ video_path: null, video_chunk_count: 0 })
+      .eq("id", lessonId);
+    return;
+  }
+
+  const paths = Array.from({ length: count }, (_, i) => getChunkPath(lessonId, i));
+
+  await supabase.storage.from("course-videos").remove(paths);
+
+  await supabase
+    .from("lessons")
+    .update({ video_path: null, video_chunk_count: 0 })
+    .eq("id", lessonId);
 }

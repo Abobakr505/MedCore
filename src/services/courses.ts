@@ -216,7 +216,7 @@ export async function fetchCourseSections(
           order_index,
           is_preview,
           video_path,
-
+          video_chunk_count,
           lesson_files (
             id,
             lesson_id,
