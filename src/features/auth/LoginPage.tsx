@@ -76,16 +76,18 @@ export default function LoginPage() {
     setLoading(true);
 
     try {
-      const { error } = await signIn(
+      const { error, reason } = await signIn(
         email.trim().toLowerCase(),
         password
       );
 
       if (error) {
-        showToast(
-          "البريد الإلكتروني أو كلمة المرور غير صحيحة",
-          "error"
-        );
+        if (reason === "pending_verification") {
+          navigate("/auth/pending-approval", { replace: true });
+          return;
+        }
+
+        showToast(error, "error");
         return;
       }
 

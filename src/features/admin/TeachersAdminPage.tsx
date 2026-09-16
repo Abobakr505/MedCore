@@ -141,6 +141,38 @@ export default function TeachersAdminPage() {
     }
   };
 
+  const approveTeacher = async (teacher: Profile) => {
+    setProcessingId(teacher.id);
+
+    try {
+      await updateUserStatus(teacher.id, "active");
+
+      showToast("تم قبول المعلم وتفعيل حسابه", "success");
+
+      await load();
+    } catch {
+      showToast("تعذّر تفعيل الحساب", "error");
+    } finally {
+      setProcessingId(null);
+    }
+  };
+
+  const rejectTeacher = async (teacher: Profile) => {
+    setProcessingId(teacher.id);
+
+    try {
+      await updateUserStatus(teacher.id, "suspended");
+
+      showToast("تم رفض طلب المعلم", "success");
+
+      await load();
+    } catch {
+      showToast("تعذّر رفض الطلب", "error");
+    } finally {
+      setProcessingId(null);
+    }
+  };
+
   const filters = [
     {
       value: "all",
@@ -407,8 +439,29 @@ export default function TeachersAdminPage() {
 
                       {/* Action */}
                       <td className="px-5 py-4">
-                        {teacher.status !==
-                        "pending_verification" ? (
+                        {teacher.status === "pending_verification" ? (
+                          <div className="flex items-center gap-2">
+                            <Button
+                              size="sm"
+                              variant="secondary"
+                              isLoading={processingId === teacher.id}
+                              onClick={() => approveTeacher(teacher)}
+                            >
+                              <CheckCircle2 className="h-3.5 w-3.5" />
+                              قبول
+                            </Button>
+
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              isLoading={processingId === teacher.id}
+                              onClick={() => rejectTeacher(teacher)}
+                            >
+                              <Ban className="h-3.5 w-3.5 text-red-500" />
+                              رفض
+                            </Button>
+                          </div>
+                        ) : (
                           <Button
                             size="sm"
                             variant={
@@ -433,10 +486,6 @@ export default function TeachersAdminPage() {
                               ? "تفعيل"
                               : "إيقاف"}
                           </Button>
-                        ) : (
-                          <span className="text-xs font-medium text-slate-400">
-                            بانتظار التفعيل
-                          </span>
                         )}
                       </td>
                     </tr>
@@ -521,8 +570,29 @@ export default function TeachersAdminPage() {
                   </div>
                 </div>
 
-                {teacher.status !==
-                  "pending_verification" && (
+                {teacher.status === "pending_verification" ? (
+                  <div className="mt-3 grid grid-cols-2 gap-2">
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      isLoading={processingId === teacher.id}
+                      onClick={() => approveTeacher(teacher)}
+                    >
+                      <CheckCircle2 className="h-4 w-4" />
+                      قبول
+                    </Button>
+
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      isLoading={processingId === teacher.id}
+                      onClick={() => rejectTeacher(teacher)}
+                    >
+                      <Ban className="h-4 w-4 text-red-500" />
+                      رفض
+                    </Button>
+                  </div>
+                ) : (
                   <Button
                     size="sm"
                     variant={

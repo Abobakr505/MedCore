@@ -9,6 +9,8 @@ interface DeviceCheckResult {
   reason: string;
 }
 
+type SignInBlockReason = "pending_verification" | "suspended";
+
 interface AuthContextValue {
   session: Session | null;
   profile: Profile | null;
@@ -22,7 +24,10 @@ interface AuthContextValue {
     college: CollegeType;
     role: Extract<UserRole, "student" | "teacher">;
   }) => Promise<{ error: string | null }>;
-  signIn: (email: string, password: string) => Promise<{ error: string | null }>;
+  signIn: (
+    email: string,
+    password: string
+  ) => Promise<{ error: string | null; reason?: SignInBlockReason }>;
   signOut: () => Promise<void>;
   refreshProfile: () => Promise<void>;
 }
@@ -43,7 +48,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       .single();
     if (!error && data) {
       setProfile(data as Profile);
+      return data as Profile;
     }
+    return null;
   }, []);
 
   const checkDevice = useCallback(async () => {
@@ -86,84 +93,120 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       listener.subscription.unsubscribe();
     };
   }, [loadProfile, checkDevice]);
-  
-const signUp: AuthContextValue["signUp"] = async ({
-  fullName,
-  email,
-  password,
-  phone,
-  college,
-  role,
-}) => {
-  try {
-    console.log("SIGNUP DEBUG:", {
-      fullName,
-      email,
-      passwordLength: password.length,
-      phone,
-      college,
-      role,
-    });
 
-    if (!fullName.trim()) {
-      return { error: "من فضلك أدخل الاسم الثلاثي" };
-    }
-
-    if (!email.trim()) {
-      return { error: "من فضلك أدخل البريد الإلكتروني" };
-    }
-
-    if (password.length < 6) {
-      return { error: "كلمة المرور يجب أن تكون 6 أحرف على الأقل" };
-    }
-
-    if (!phone.trim()) {
-      return { error: "من فضلك أدخل رقم الهاتف" };
-    }
-
-    const { data, error } = await supabase.auth.signUp({
-      email: email.trim().toLowerCase(),
-      password,
-      options: {
-        data: {
-          full_name: fullName.trim(),
-          phone: phone.trim(),
-          college,
-          role,
-        },
-      },
-    });
-
-    // مهم جدًا: إظهار الخطأ الحقيقي من Supabase
-    console.log("SIGNUP RESPONSE:", data);
-    console.log("SIGNUP ERROR:", error);
-
-    if (error) {
-      console.error("SUPABASE SIGNUP ERROR:", {
-        message: error.message,
-        status: error.status,
-        name: error.name,
+  const signUp: AuthContextValue["signUp"] = async ({
+    fullName,
+    email,
+    password,
+    phone,
+    college,
+    role,
+  }) => {
+    try {
+      console.log("SIGNUP DEBUG:", {
+        fullName,
+        email,
+        passwordLength: password.length,
+        phone,
+        college,
+        role,
       });
 
+      if (!fullName.trim()) {
+        return { error: "من فضلك أدخل الاسم الثلاثي" };
+      }
+
+      if (!email.trim()) {
+        return { error: "من فضلك أدخل البريد الإلكتروني" };
+      }
+
+      if (password.length < 6) {
+        return { error: "كلمة المرور يجب أن تكون 6 أحرف على الأقل" };
+      }
+
+      if (!phone.trim()) {
+        return { error: "من فضلك أدخل رقم الهاتف" };
+      }
+
+      const { data, error } = await supabase.auth.signUp({
+        email: email.trim().toLowerCase(),
+        password,
+        options: {
+          data: {
+            full_name: fullName.trim(),
+            phone: phone.trim(),
+            college,
+            role,
+            // يُستخدم بواسطة الـ trigger في قاعدة البيانات (handle_new_user)
+            // ليحدد حالة الحساب الابتدائية: المعلم يبقى pending_verification
+            // والطالب يبقى active مباشرة.
+            status: role === "teacher" ? "pending_verification" : "active",
+          },
+        },
+      });
+
+      console.log("SIGNUP RESPONSE:", data);
+      console.log("SIGNUP ERROR:", error);
+
+      if (error) {
+        console.error("SUPABASE SIGNUP ERROR:", {
+          message: error.message,
+          status: error.status,
+          name: error.name,
+        });
+
+        return {
+          error: translateAuthError(error.message),
+        };
+      }
+
+      return { error: null };
+    } catch (err) {
+      console.error("SIGNUP EXCEPTION:", err);
+
       return {
-        error: translateAuthError(error.message),
+        error: "حدث خطأ أثناء إنشاء الحساب، يرجى المحاولة مرة أخرى",
+      };
+    }
+  };
+
+  const signIn: AuthContextValue["signIn"] = async (email, password) => {
+    const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+
+    if (error) {
+      return { error: translateAuthError(error.message) };
+    }
+
+    if (!data.session?.user) {
+      return { error: "حدث خطأ غير متوقع، يرجى المحاولة مرة أخرى" };
+    }
+
+    // نجيب البروفايل عشان نتأكد من حالة الحساب قبل ما نسمح بالدخول
+    const userProfile = await loadProfile(data.session.user.id);
+
+    if (userProfile?.status === "pending_verification") {
+      await supabase.auth.signOut();
+      setSession(null);
+      setProfile(null);
+      return {
+        error:
+          "حسابك كمعلم لسه قيد المراجعة من الإدارة. هيتم إشعارك بمجرد الموافقة عليه.",
+        reason: "pending_verification",
       };
     }
 
-    return { error: null };
-  } catch (err) {
-    console.error("SIGNUP EXCEPTION:", err);
+    if (userProfile?.status === "suspended") {
+      await supabase.auth.signOut();
+      setSession(null);
+      setProfile(null);
+      return {
+        error: "تم إيقاف هذا الحساب. تواصل مع الإدارة لمزيد من التفاصيل.",
+        reason: "suspended",
+      };
+    }
 
-    return {
-      error: "حدث خطأ أثناء إنشاء الحساب، يرجى المحاولة مرة أخرى",
-    };
-  }
-};
+    await checkDevice();
 
-
-  const signIn: AuthContextValue["signIn"] = async (email, password) => {
-    const { error } = await supabase.auth.signInWithPassword({ email, password });
-    if (error) return { error: translateAuthError(error.message) };
     return { error: null };
   };
 

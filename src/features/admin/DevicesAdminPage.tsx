@@ -300,6 +300,7 @@ export default function DevicesAdminPage() {
           ))}
         </div>
       )}
+      
 
       {/* Confirm Dialog */}
       <ConfirmDialog

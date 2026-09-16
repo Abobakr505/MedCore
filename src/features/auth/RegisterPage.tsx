@@ -79,17 +79,14 @@ export default function RegisterPage() {
   const [showConfirmPassword, setShowConfirmPassword] =
     useState(false);
 
-  const [values, setValues] = useState<
-    Partial<RegisterFormValues>
-  >({
-    role: "student",
-    college: "medicine",
-  });
+const [values, setValues] = useState<Partial<RegisterFormValues>>({
+  role: "student",
+  college: "medicine",
+});
 
-  const [errors, setErrors] = useState<
-    Partial<Record<keyof RegisterFormValues, string>>
-  >({});
-
+const [errors, setErrors] = useState<Partial<Record<keyof RegisterFormValues, string>>>(
+  {}
+);
   const password = values.password ?? "";
   const confirmPassword = values.confirmPassword ?? "";
 
@@ -179,14 +176,20 @@ export default function RegisterPage() {
         return;
       }
 
-      showToast(
-        "تم إنشاء الحساب! تحقق من بريدك الإلكتروني لتفعيل الحساب.",
-        "success"
-      );
+      if (data.role === "teacher") {
+        navigate("/auth/pending-approval", {
+          replace: true,
+        });
+      } else {
+        showToast(
+          "تم إنشاء الحساب! تحقق من بريدك الإلكتروني لتفعيل الحساب.",
+          "success"
+        );
 
-      navigate("/auth/login", {
-        replace: true,
-      });
+        navigate("/auth/login", {
+          replace: true,
+        });
+      }
     } catch (error) {
       console.error("REGISTER ERROR:", error);
 

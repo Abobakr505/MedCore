@@ -52,6 +52,7 @@ import SupportPage from "@/features/support/SupportPage";
 
 import NotFoundPage from "@/features/NotFoundPage";
 import ContactMessagesAdminPage from "@/features/admin/ContactMessagesAdminPage";
+import PendingApprovalPage from "@/features/auth/PendingApprovalPage";
 
 export const router = createBrowserRouter([
   {
@@ -70,6 +71,7 @@ export const router = createBrowserRouter([
   { path: "/auth/register", element: <RegisterPage /> },
   { path: "/auth/forgot-password", element: <ForgotPasswordPage /> },
   { path: "/auth/reset-password", element: <ResetPasswordPage /> },
+{ path:"/auth/pending-approval" , element: <PendingApprovalPage /> },
 
   // صفحة التعلّم بدون Sidebar عادي (تخطيط خاص بمشغّل الفيديو)
   {
