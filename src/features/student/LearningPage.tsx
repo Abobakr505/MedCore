@@ -1276,27 +1276,47 @@ const loadLessonVideo = useCallback(
   /* ---------------------------------------------------------------------- */
   /* Mark progress                                                           */
   /* ---------------------------------------------------------------------- */
+  const [completingLesson, setCompletingLesson] =
+  useState(false);
+  
 const markLessonCompleted = useCallback(
   async (durationSeconds?: number) => {
-    if (!activeLesson) return;
-    const userResult = await supabase.auth.getUser();
+    if (!activeLesson || !course) return;
+
+    const userResult =
+      await supabase.auth.getUser();
+
     const user = userResult.data.user;
-    if (!user || !course) return;
+
+    if (!user) return;
+
+    setCompletingLesson(true);
 
     try {
-      const updated = await updateLessonProgress(
-        user.id,
-        activeLesson.id,
-        course.id,
-        durationSeconds ?? 0,
-        true
-      );
+      const updated =
+        await updateLessonProgress(
+          user.id,
+          activeLesson.id,
+          course.id,
+          durationSeconds ?? 0,
+          true
+        );
+
       setLessonProgress((current) => ({
         ...current,
         [activeLesson.id]: updated,
       }));
     } catch (error) {
-      console.error("Update lesson progress error:", error);
+      console.error(
+        "Update lesson progress error:",
+        error
+      );
+
+      alert(
+        "تعذر تسجيل إكمال الدرس. حاول مرة أخرى."
+      );
+    } finally {
+      setCompletingLesson(false);
     }
   },
   [activeLesson, course]
@@ -2156,6 +2176,7 @@ const markLessonCompleted = useCallback(
                   </div>
 
                   {activeLesson.description && (
+                    <>
                     <div className="mt-5 border-t border-slate-100 pt-5">
                       <h2 className="mb-2 text-sm font-black text-slate-800">
                         وصف الدرس
@@ -2167,6 +2188,69 @@ const markLessonCompleted = useCallback(
                         }
                       </p>
                     </div>
+                    <div className="mt-5 border-t border-slate-100 pt-5">
+  {lessonProgress[activeLesson.id]?.completed ? (
+    <div className="flex flex-col gap-3 rounded-2xl border border-emerald-200 bg-emerald-50 p-4 sm:flex-row sm:items-center sm:justify-between">
+      <div className="flex items-center gap-3">
+        <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-emerald-100 text-emerald-600">
+          <CheckCircle2 className="h-6 w-6" />
+        </div>
+
+        <div>
+          <p className="font-black text-emerald-800">
+            تم إكمال الدرس
+          </p>
+
+          <p className="mt-1 text-xs text-emerald-600">
+            تم تسجيل تقدمك في هذا الدرس بنجاح.
+          </p>
+        </div>
+      </div>
+
+      <span className="inline-flex items-center justify-center rounded-xl bg-emerald-600 px-4 py-2 text-xs font-bold text-white">
+        مكتمل ✓
+      </span>
+    </div>
+  ) : (
+    <div className="flex flex-col gap-3 rounded-2xl border border-brand-100 bg-brand-50/50 p-4 sm:flex-row sm:items-center sm:justify-between">
+      <div className="flex items-center gap-3">
+        <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-white text-brand-600 shadow-sm">
+          <CheckCircle2 className="h-5 w-5" />
+        </div>
+
+        <div>
+          <p className="font-black text-slate-800">
+            أنهيت مشاهدة الدرس؟
+          </p>
+
+          <p className="mt-1 text-xs text-slate-500">
+            اضغط على الزر لتسجيل الدرس كمكتمل وحساب تقدمك.
+          </p>
+        </div>
+      </div>
+
+<button
+  type="button"
+  disabled={completingLesson}
+  onClick={() => markLessonCompleted()}
+  className="inline-flex items-center justify-center gap-2 rounded-xl bg-brand-600 px-5 py-3 text-sm font-black text-white shadow-sm transition hover:bg-brand-700 hover:shadow-md active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60"
+>
+  {completingLesson ? (
+    <>
+      <Loader2 className="h-4 w-4 animate-spin" />
+      جاري الحفظ...
+    </>
+  ) : (
+    <>
+      <CheckCircle2 className="h-4 w-4" />
+      تم إكمال الدرس
+    </>
+  )}
+</button>
+    </div>
+  )}
+</div>
+  </>
                   )}
                 </section>
 
