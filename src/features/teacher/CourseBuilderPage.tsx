@@ -50,8 +50,8 @@ import {
   deleteLesson,
   deleteSection,
   updateSection,
-uploadLessonVideoBunny,
-deleteLessonVideoBunny,
+  uploadLessonVideoBunny,
+  deleteLessonVideoBunny,
 } from "@/services/teacherCourses";
 
 import type {
@@ -538,7 +538,7 @@ function LessonCard({
   index,
   files,
   onFilesChange,
-  onRename,
+  onSaveEdit,
   onDelete,
   onTogglePreview,
   onUploadVideo,
@@ -552,18 +552,87 @@ function LessonCard({
     lessonId: string,
     files: LessonFile[]
   ) => void;
-  onRename: (lesson: LessonWithFiles) => void;
+  onSaveEdit: (
+    lesson: LessonWithFiles,
+    title: string,
+    description: string
+  ) => Promise<void>;
   onDelete: (lesson: LessonWithFiles) => void;
   onTogglePreview: (lesson: LessonWithFiles) => void;
   onUploadVideo: (lesson: LessonWithFiles) => void;
   onDeleteVideo: (lesson: LessonWithFiles) => void;
   videoUploadState?: UploadState;
 }) {
-const hasVideo = Boolean(
-  (lesson as Lesson & { bunny_video_id?: string }).bunny_video_id
-);
+  const [editing, setEditing] = useState(false);
+  const [editTitle, setEditTitle] = useState(lesson.title);
+  const [editDescription, setEditDescription] = useState(
+    lesson.description ?? ""
+  );
+  const [savingEdit, setSavingEdit] = useState(false);
+
+  const hasVideo = Boolean(
+    (lesson as Lesson & { bunny_video_id?: string }).bunny_video_id
+  );
 
   const isUploading = videoUploadState?.uploading ?? false;
+
+  useEffect(() => {
+    if (!editing) {
+      setEditTitle(lesson.title);
+      setEditDescription(lesson.description ?? "");
+    }
+  }, [
+    lesson.title,
+    lesson.description,
+    editing,
+  ]);
+
+  const startEditing = () => {
+    setEditTitle(lesson.title);
+    setEditDescription(lesson.description ?? "");
+    setEditing(true);
+  };
+
+  const cancelEditing = () => {
+    setEditTitle(lesson.title);
+    setEditDescription(lesson.description ?? "");
+    setEditing(false);
+  };
+
+  const saveEditing = async () => {
+    const title = editTitle.trim();
+    const description = editDescription.trim();
+
+    if (!title) {
+      alert("اسم الدرس مطلوب");
+      return;
+    }
+
+    setSavingEdit(true);
+
+    try {
+      await onSaveEdit(
+        lesson,
+        title,
+        description
+      );
+
+      setEditing(false);
+    } catch (error) {
+      console.error(
+        "Save lesson edit error:",
+        error
+      );
+
+      alert(
+        error instanceof Error
+          ? error.message
+          : "تعذر حفظ تعديلات الدرس"
+      );
+    } finally {
+      setSavingEdit(false);
+    }
+  };
 
   return (
     <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
@@ -576,23 +645,91 @@ const hasVideo = Boolean(
           </div>
 
           <div className="min-w-0 flex-1">
-            <div className="flex flex-wrap items-center gap-2">
-              <h4 className="truncate font-bold text-slate-900">
-                {lesson.title}
-              </h4>
+            {editing ? (
+              <div className="space-y-3">
+                <div>
+                  <label className="mb-2 block text-xs font-bold text-slate-600">
+                    اسم الدرس
+                  </label>
 
-              {lesson.is_preview && (
-                <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2 py-1 text-[10px] font-bold text-emerald-700">
-                  <Eye className="h-3 w-3" />
-                  معاينة مجانية
-                </span>
-              )}
-            </div>
+                  <input
+                    value={editTitle}
+                    onChange={(event) =>
+                      setEditTitle(event.target.value)
+                    }
+                    autoFocus
+                    className="w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm font-bold text-slate-900 outline-none transition focus:border-brand-500 focus:ring-4 focus:ring-brand-500/10"
+                    placeholder="اسم الدرس"
+                  />
+                </div>
 
-            {lesson.description && (
-              <p className="mt-1 line-clamp-2 text-sm leading-6 text-slate-500">
-                {lesson.description}
-              </p>
+                <div>
+                  <label className="mb-2 block text-xs font-bold text-slate-600">
+                    تفاصيل الدرس
+                  </label>
+
+                  <textarea
+                    rows={3}
+                    value={editDescription}
+                    onChange={(event) =>
+                      setEditDescription(event.target.value)
+                    }
+                    className="w-full resize-none rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm leading-6 text-slate-700 outline-none transition focus:border-brand-500 focus:ring-4 focus:ring-brand-500/10"
+                    placeholder="اكتب تفاصيل الدرس..."
+                  />
+                </div>
+
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    disabled={
+                      savingEdit ||
+                      !editTitle.trim()
+                    }
+                    onClick={saveEditing}
+                    className="inline-flex items-center gap-2 rounded-xl bg-brand-600 px-4 py-2.5 text-xs font-bold text-white transition hover:bg-brand-700 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    {savingEdit ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <CheckCircle2 className="h-4 w-4" />
+                    )}
+
+                    حفظ التعديلات
+                  </button>
+
+                  <button
+                    type="button"
+                    disabled={savingEdit}
+                    onClick={cancelEditing}
+                    className="inline-flex items-center gap-2 rounded-xl bg-slate-100 px-4 py-2.5 text-xs font-bold text-slate-700 transition hover:bg-slate-200 disabled:opacity-50"
+                  >
+                    <X className="h-4 w-4" />
+                    إلغاء
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <>
+                <div className="flex flex-wrap items-center gap-2">
+                  <h4 className="truncate font-bold text-slate-900">
+                    {lesson.title}
+                  </h4>
+
+                  {lesson.is_preview && (
+                    <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2 py-1 text-[10px] font-bold text-emerald-700">
+                      <Eye className="h-3 w-3" />
+                      معاينة مجانية
+                    </span>
+                  )}
+                </div>
+
+                {lesson.description && (
+                  <p className="mt-1 line-clamp-2 text-sm leading-6 text-slate-500">
+                    {lesson.description}
+                  </p>
+                )}
+              </>
             )}
 
             <div className="mt-3 flex flex-wrap gap-2">
@@ -624,66 +761,70 @@ const hasVideo = Boolean(
         </div>
 
         <div className="flex flex-wrap gap-2 lg:justify-end">
-          <button
-            type="button"
-            onClick={() => onRename(lesson)}
-            className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 transition hover:bg-slate-50"
-          >
-            <Pencil className="h-3.5 w-3.5" />
-            تعديل
-          </button>
+          {!editing && (
+            <>
+              <button
+                type="button"
+                onClick={startEditing}
+                className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 transition hover:bg-slate-50"
+              >
+                <Pencil className="h-3.5 w-3.5" />
+                تعديل
+              </button>
 
-          <button
-            type="button"
-            onClick={() => onTogglePreview(lesson)}
-            className={`inline-flex items-center gap-2 rounded-xl px-3 py-2 text-xs font-semibold transition ${
-              lesson.is_preview
-                ? "bg-emerald-50 text-emerald-700 hover:bg-emerald-100"
-                : "bg-slate-100 text-slate-700 hover:bg-slate-200"
-            }`}
-          >
-            <Eye className="h-3.5 w-3.5" />
+              <button
+                type="button"
+                onClick={() => onTogglePreview(lesson)}
+                className={`inline-flex items-center gap-2 rounded-xl px-3 py-2 text-xs font-semibold transition ${
+                  lesson.is_preview
+                    ? "bg-emerald-50 text-emerald-700 hover:bg-emerald-100"
+                    : "bg-slate-100 text-slate-700 hover:bg-slate-200"
+                }`}
+              >
+                <Eye className="h-3.5 w-3.5" />
 
-            {lesson.is_preview
-              ? "إلغاء المعاينة"
-              : "تفعيل المعاينة"}
-          </button>
+                {lesson.is_preview
+                  ? "إلغاء المعاينة"
+                  : "تفعيل المعاينة"}
+              </button>
 
-          <button
-            type="button"
-            disabled={isUploading}
-            onClick={() => onUploadVideo(lesson)}
-            className="inline-flex items-center gap-2 rounded-xl bg-brand-600 px-3 py-2 text-xs font-semibold text-white transition hover:bg-brand-700 disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            {isUploading ? (
-              <Loader2 className="h-3.5 w-3.5 animate-spin" />
-            ) : (
-              <Upload className="h-3.5 w-3.5" />
-            )}
+              <button
+                type="button"
+                disabled={isUploading}
+                onClick={() => onUploadVideo(lesson)}
+                className="inline-flex items-center gap-2 rounded-xl bg-brand-600 px-3 py-2 text-xs font-semibold text-white transition hover:bg-brand-700 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {isUploading ? (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  <Upload className="h-3.5 w-3.5" />
+                )}
 
-            {hasVideo ? "استبدال الفيديو" : "رفع الفيديو"}
-          </button>
+                {hasVideo ? "استبدال الفيديو" : "رفع الفيديو"}
+              </button>
 
-          {hasVideo && (
-            <button
-              type="button"
-              disabled={isUploading}
-              onClick={() => onDeleteVideo(lesson)}
-              className="inline-flex items-center gap-2 rounded-xl border border-red-200 px-3 py-2 text-xs font-semibold text-red-600 transition hover:bg-red-50 disabled:opacity-50"
-            >
-              <Trash2 className="h-3.5 w-3.5" />
-              حذف الفيديو
-            </button>
+              {hasVideo && (
+                <button
+                  type="button"
+                  disabled={isUploading}
+                  onClick={() => onDeleteVideo(lesson)}
+                  className="inline-flex items-center gap-2 rounded-xl border border-red-200 px-3 py-2 text-xs font-semibold text-red-600 transition hover:bg-red-50 disabled:opacity-50"
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                  حذف الفيديو
+                </button>
+              )}
+
+              <button
+                type="button"
+                onClick={() => onDelete(lesson)}
+                className="inline-flex items-center gap-2 rounded-xl border border-red-200 px-3 py-2 text-xs font-semibold text-red-600 transition hover:bg-red-50"
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+                حذف
+              </button>
+            </>
           )}
-
-          <button
-            type="button"
-            onClick={() => onDelete(lesson)}
-            className="inline-flex items-center gap-2 rounded-xl border border-red-200 px-3 py-2 text-xs font-semibold text-red-600 transition hover:bg-red-50"
-          >
-            <Trash2 className="h-3.5 w-3.5" />
-            حذف
-          </button>
         </div>
       </div>
 
@@ -725,6 +866,34 @@ const hasVideo = Boolean(
       />
     </div>
   );
+}
+
+function getVideoDuration(file: File): Promise<number> {
+  return new Promise((resolve, reject) => {
+    const video = document.createElement("video");
+
+    video.preload = "metadata";
+
+    const objectUrl = URL.createObjectURL(file);
+
+    video.onloadedmetadata = () => {
+      URL.revokeObjectURL(objectUrl);
+
+      if (!Number.isFinite(video.duration) || video.duration <= 0) {
+        reject(new Error("تعذر تحديد مدة الفيديو"));
+        return;
+      }
+
+      resolve(Math.round(video.duration));
+    };
+
+    video.onerror = () => {
+      URL.revokeObjectURL(objectUrl);
+      reject(new Error("تعذر قراءة مدة الفيديو"));
+    };
+
+    video.src = objectUrl;
+  });
 }
 
 /* -------------------------------------------------------------------------- */
@@ -850,31 +1019,17 @@ function SectionBlock({
     }
   };
 
-  const renameLesson = async (
-    lesson: LessonWithFiles
+  const saveLessonEdit = async (
+    lesson: LessonWithFiles,
+    title: string,
+    description: string
   ) => {
-    const title = window.prompt(
-      "اسم الدرس الجديد:",
-      lesson.title
-    );
+    await updateLesson(lesson.id, {
+      title,
+      description,
+    });
 
-    if (!title?.trim()) return;
-
-    try {
-      await updateLesson(lesson.id, {
-        title: title.trim(),
-      });
-
-      await onRefresh();
-    } catch (error) {
-      console.error("Rename lesson error:", error);
-
-      alert(
-        error instanceof Error
-          ? error.message
-          : "تعذر تعديل اسم الدرس"
-      );
-    }
+    await onRefresh();
   };
 
   const deleteLessonHandler = async (
@@ -942,7 +1097,7 @@ function SectionBlock({
     }
   };
 
-    const uploadVideo = async (
+  const uploadVideo = async (
     lesson: LessonWithFiles
   ) => {
     const input = document.createElement("input");
@@ -966,21 +1121,37 @@ function SectionBlock({
       }));
 
       try {
-await uploadLessonVideoBunny(
-  lesson.id,
-  file,
-  (pct) => {
-    setVideoUploadStates((current) => ({
-      ...current,
-      [lesson.id]: {
-        uploading: true,
-        progress: pct,
-        error: null,
-        fileName: file.name,
-      },
-    }));
-  }
-);
+        // حساب مدة الفيديو قبل الرفع
+        const durationSeconds = await getVideoDuration(file);
+
+        console.log(
+          "Video duration:",
+          durationSeconds,
+          "seconds"
+        );
+
+        // رفع الفيديو إلى Bunny
+        await uploadLessonVideoBunny(
+          lesson.id,
+          file,
+          (pct) => {
+            setVideoUploadStates((current) => ({
+              ...current,
+              [lesson.id]: {
+                uploading: true,
+                progress: pct,
+                error: null,
+                fileName: file.name,
+              },
+            }));
+          }
+        );
+
+        // حفظ مدة الفيديو في Supabase
+        await updateLesson(lesson.id, {
+          durationSeconds,
+        });
+
         setVideoUploadStates((current) => ({
           ...current,
           [lesson.id]: {
@@ -1024,7 +1195,7 @@ await uploadLessonVideoBunny(
     input.click();
   };
 
-    const deleteVideo = async (
+  const deleteVideo = async (
     lesson: LessonWithFiles
   ) => {
     const confirmed = window.confirm(
@@ -1034,7 +1205,7 @@ await uploadLessonVideoBunny(
     if (!confirmed) return;
 
     try {
-      await deleteLessonVideoBunny(lesson.id);   
+      await deleteLessonVideoBunny(lesson.id);
       await onRefresh();
     } catch (error) {
       console.error(
@@ -1082,7 +1253,11 @@ await uploadLessonVideoBunny(
   };
 
   const saveUnlockMonth = async () => {
-    const value = Math.max(1, Math.floor(Number(unlockMonth) || 1));
+    const value = Math.max(
+      1,
+      Math.floor(Number(unlockMonth) || 1)
+    );
+
     setUnlockMonth(value);
 
     try {
@@ -1090,7 +1265,11 @@ await uploadLessonVideoBunny(
         unlockMonth: value,
       });
     } catch (error) {
-      console.error("Update section unlock month error:", error);
+      console.error(
+        "Update section unlock month error:",
+        error
+      );
+
       alert("تعذر حفظ شهر فتح القسم");
     }
   };
@@ -1209,7 +1388,9 @@ await uploadLessonVideoBunny(
                       min={1}
                       value={unlockMonth}
                       onChange={(event) =>
-                        setUnlockMonth(Number(event.target.value))
+                        setUnlockMonth(
+                          Number(event.target.value)
+                        )
                       }
                       onBlur={saveUnlockMonth}
                       className="w-16 rounded-lg border border-slate-200 bg-white px-2 py-1 text-center text-xs font-bold text-slate-700 outline-none focus:border-brand-500"
@@ -1392,7 +1573,7 @@ await uploadLessonVideoBunny(
                   onFilesChange={
                     handleFilesChange
                   }
-                  onRename={renameLesson}
+                  onSaveEdit={saveLessonEdit}
                   onDelete={
                     deleteLessonHandler
                   }
@@ -1585,7 +1766,8 @@ export default function CourseBuilderPage() {
 
     if (
       installmentSettings.enabled &&
-      (installmentSettings.months < 2 || installmentSettings.amount <= 0)
+      (installmentSettings.months < 2 ||
+        installmentSettings.amount <= 0)
     ) {
       alert("أدخل عدد شهور وقيمة قسط صحيحة");
       return;
@@ -1608,13 +1790,18 @@ export default function CourseBuilderPage() {
         current
           ? {
               ...current,
-              is_installment: installmentSettings.enabled,
-              installment_months: installmentSettings.enabled
-                ? Math.floor(installmentSettings.months)
-                : null,
-              installment_amount: installmentSettings.enabled
-                ? installmentSettings.amount
-                : null,
+              is_installment:
+                installmentSettings.enabled,
+              installment_months:
+                installmentSettings.enabled
+                  ? Math.floor(
+                      installmentSettings.months
+                    )
+                  : null,
+              installment_amount:
+                installmentSettings.enabled
+                  ? installmentSettings.amount
+                  : null,
             }
           : current
       );
@@ -1634,12 +1821,16 @@ export default function CourseBuilderPage() {
       (section) => section.lessons ?? []
     );
 
-const videos = lessons.filter(
-  (lesson) =>
-    Boolean(
-      (lesson as Lesson & { bunny_video_id?: string }).bunny_video_id
-    )
-).length;
+    const videos = lessons.filter(
+      (lesson) =>
+        Boolean(
+          (
+            lesson as Lesson & {
+              bunny_video_id?: string;
+            }
+          ).bunny_video_id
+        )
+    ).length;
 
     const previews = lessons.filter(
       (lesson) => lesson.is_preview
@@ -1752,8 +1943,6 @@ const videos = lessons.filter(
 
               <div className="flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
                 <div className="min-w-0">
-
-
                   <h1 className="truncate text-2xl font-black sm:text-3xl lg:text-4xl">
                     {course.title}
                   </h1>
@@ -1857,7 +2046,10 @@ const videos = lessons.filter(
           <div className="mb-5 rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
             <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
               <div>
-                <h2 className="font-black text-slate-900">نظام التقسيط</h2>
+                <h2 className="font-black text-slate-900">
+                  نظام التقسيط
+                </h2>
+
                 <p className="mt-1 text-sm text-slate-500">
                   افتح أقسام الكورس تدريجيًا بعد اعتماد كل قسط.
                 </p>
@@ -1868,10 +2060,13 @@ const videos = lessons.filter(
                   type="checkbox"
                   checked={installmentSettings.enabled}
                   onChange={(event) =>
-                    setInstallmentSettings((current) => ({
-                      ...current,
-                      enabled: event.target.checked,
-                    }))
+                    setInstallmentSettings(
+                      (current) => ({
+                        ...current,
+                        enabled:
+                          event.target.checked,
+                      })
+                    )
                   }
                   className="h-4 w-4 accent-brand-600"
                 />
@@ -1886,12 +2081,18 @@ const videos = lessons.filter(
                   <input
                     type="number"
                     min={2}
-                    value={installmentSettings.months}
+                    value={
+                      installmentSettings.months
+                    }
                     onChange={(event) =>
-                      setInstallmentSettings((current) => ({
-                        ...current,
-                        months: Number(event.target.value),
-                      }))
+                      setInstallmentSettings(
+                        (current) => ({
+                          ...current,
+                          months: Number(
+                            event.target.value
+                          ),
+                        })
+                      )
                     }
                     className="mt-2 w-full rounded-xl border border-slate-200 px-3 py-2.5 outline-none focus:border-brand-500"
                   />
@@ -1902,12 +2103,18 @@ const videos = lessons.filter(
                   <input
                     type="number"
                     min={1}
-                    value={installmentSettings.amount}
+                    value={
+                      installmentSettings.amount
+                    }
                     onChange={(event) =>
-                      setInstallmentSettings((current) => ({
-                        ...current,
-                        amount: Number(event.target.value),
-                      }))
+                      setInstallmentSettings(
+                        (current) => ({
+                          ...current,
+                          amount: Number(
+                            event.target.value
+                          ),
+                        })
+                      )
                     }
                     className="mt-2 w-full rounded-xl border border-slate-200 px-3 py-2.5 outline-none focus:border-brand-500"
                   />
@@ -1918,7 +2125,9 @@ const videos = lessons.filter(
             <button
               type="button"
               onClick={saveInstallmentSettings}
-              disabled={savingInstallmentSettings}
+              disabled={
+                savingInstallmentSettings
+              }
               className="mt-4 inline-flex items-center gap-2 rounded-xl bg-brand-600 px-4 py-2.5 text-sm font-bold text-white disabled:opacity-50"
             >
               {savingInstallmentSettings && (

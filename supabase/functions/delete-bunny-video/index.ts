@@ -1,12 +1,18 @@
+// supabase/functions/delete-bunny-video/index.ts
+
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers":
     "authorization, x-client-info, apikey, content-type",
-  "Access-Control-Allow-Methods": "POST, OPTIONS",
+  "Access-Control-Allow-Methods":
+    "POST, OPTIONS",
 };
 
 Deno.serve(async (req) => {
-  // مهم جدًا: التعامل مع CORS preflight
+  // =========================================
+  // CORS
+  // =========================================
+
   if (req.method === "OPTIONS") {
     return new Response("ok", {
       status: 200,
@@ -15,136 +21,225 @@ Deno.serve(async (req) => {
   }
 
   if (req.method !== "POST") {
-    return new Response(
-      JSON.stringify({
-        error: "Method not allowed",
-      }),
+    return json(
       {
-        status: 405,
-        headers: {
-          ...corsHeaders,
-          "Content-Type": "application/json",
-        },
-      }
+        success: false,
+        error: "Method not allowed",
+      },
+      405
     );
   }
 
   try {
+    // =========================================
+    // Request
+    // =========================================
+
     const body = await req.json();
 
-    console.log("Delete Bunny request:", body);
+    const videoId = body?.videoId;
 
-    const { videoId } = body;
+    console.log("====================================");
+    console.log("DELETE BUNNY VIDEO");
+    console.log("Video ID:", videoId);
+    console.log("====================================");
 
-    if (!videoId) {
-      return new Response(
-        JSON.stringify({
+    if (!videoId || typeof videoId !== "string") {
+      return json(
+        {
+          success: false,
           error: "videoId is required",
-        }),
-        {
-          status: 400,
-          headers: {
-            ...corsHeaders,
-            "Content-Type": "application/json",
-          },
-        }
+        },
+        400
       );
     }
 
-    const libraryId = Deno.env.get("BUNNY_LIBRARY_ID");
-    const apiKey = Deno.env.get("BUNNY_STREAM_API_KEY");
+    // =========================================
+    // Environment
+    // =========================================
 
-    console.log("Bunny library exists:", Boolean(libraryId));
-    console.log("Bunny API key exists:", Boolean(apiKey));
+    const libraryId =
+      Deno.env.get("BUNNY_LIBRARY_ID");
 
-    if (!libraryId || !apiKey) {
-      return new Response(
-        JSON.stringify({
-          error: "Missing Bunny environment variables",
-        }),
-        {
-          status: 500,
-          headers: {
-            ...corsHeaders,
-            "Content-Type": "application/json",
-          },
-        }
-      );
-    }
-
-    const bunnyUrl =
-      `https://video.bunnycdn.com/library/${libraryId}/videos/${videoId}`;
-
-    console.log("Deleting Bunny video:", bunnyUrl);
-
-    const bunnyResponse = await fetch(bunnyUrl, {
-      method: "DELETE",
-      headers: {
-        AccessKey: apiKey,
-      },
-    });
+    const apiKey =
+      Deno.env.get("BUNNY_STREAM_API_KEY");
 
     console.log(
-      "Bunny delete status:",
-      bunnyResponse.status
+      "Library ID exists:",
+      Boolean(libraryId)
     );
 
-    if (!bunnyResponse.ok) {
-      const errorText = await bunnyResponse.text();
+    console.log(
+      "API key exists:",
+      Boolean(apiKey)
+    );
 
-      console.error(
-        "Bunny delete error:",
-        errorText
-      );
-
-      return new Response(
-        JSON.stringify({
-          error: errorText || "Failed to delete Bunny video",
-          status: bunnyResponse.status,
-        }),
+    if (!libraryId) {
+      return json(
         {
-          status: 500,
-          headers: {
-            ...corsHeaders,
-            "Content-Type": "application/json",
-          },
-        }
+          success: false,
+          error:
+            "Missing BUNNY_LIBRARY_ID",
+        },
+        500
       );
     }
 
-    return new Response(
-      JSON.stringify({
-        success: true,
-        videoId,
-      }),
+    if (!apiKey) {
+      return json(
+        {
+          success: false,
+          error:
+            "Missing BUNNY_STREAM_API_KEY",
+        },
+        500
+      );
+    }
+
+    // =========================================
+    // Bunny API URL
+    // =========================================
+
+    const bunnyUrl =
+      `https://video.bunnycdn.com/library/` +
+      `${libraryId}/videos/${videoId}`;
+
+    console.log(
+      "Bunny DELETE URL:",
+      bunnyUrl
+    );
+
+    // =========================================
+    // DELETE from Bunny
+    // =========================================
+
+    const bunnyResponse = await fetch(
+      bunnyUrl,
       {
-        status: 200,
+        method: "DELETE",
+
         headers: {
-          ...corsHeaders,
-          "Content-Type": "application/json",
+          AccessKey: apiKey,
+          Accept: "application/json",
         },
       }
     );
-  } catch (error) {
-    console.error(
-      "Delete Bunny video error:",
-      error
+
+    console.log(
+      "Bunny DELETE status:",
+      bunnyResponse.status
     );
 
-    return new Response(
-      JSON.stringify({
+    const responseText =
+      await bunnyResponse.text();
+
+    console.log(
+      "Bunny DELETE response:",
+      responseText
+    );
+
+    // =========================================
+    // Bunny deletion failed
+    // =========================================
+
+    if (!bunnyResponse.ok) {
+      return json(
+        {
+          success: false,
+
+          error:
+            "Bunny refused to delete the video.",
+
+          bunnyStatus:
+            bunnyResponse.status,
+
+          bunnyResponse:
+            responseText,
+
+          videoId,
+
+          libraryId,
+        },
+        500
+      );
+    }
+
+    // =========================================
+    // Bunny deletion succeeded
+    // =========================================
+
+    console.log(
+      "✅ Video deleted from Bunny successfully"
+    );
+
+    console.log(
+      "Video ID:",
+      videoId
+    );
+
+    // =========================================
+    // Return success
+    // =========================================
+
+    return json({
+      success: true,
+
+      bunnyDeleted: true,
+
+      videoId,
+
+      bunnyStatus:
+        bunnyResponse.status,
+
+      message:
+        "Video successfully deleted from Bunny Stream.",
+    });
+  } catch (error) {
+    console.error(
+      "===================================="
+    );
+
+    console.error(
+      "DELETE BUNNY VIDEO ERROR"
+    );
+
+    console.error(error);
+
+    console.error(
+      "===================================="
+    );
+
+    return json(
+      {
+        success: false,
+
         error:
           error instanceof Error
             ? error.message
             : String(error),
-      }),
-      {
-        status: 500,
-        headers: {
-          ...corsHeaders,
-          "Content-Type": "application/json",
-        },
-      }
+      },
+      500
     );
   }
 });
+
+// =========================================
+// JSON helper
+// =========================================
+
+function json(
+  data: unknown,
+  status = 200
+): Response {
+  return new Response(
+    JSON.stringify(data),
+    {
+      status,
+      headers: {
+        ...corsHeaders,
+        "Content-Type":
+          "application/json",
+      },
+    }
+  );
+}

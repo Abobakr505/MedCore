@@ -26,8 +26,7 @@ export function CourseCard({ course, index = 0 }: CourseCardProps) {
     ? getPublicUrl("course-thumbnails", course.thumbnail_path)
     : null;
 
-  const rating = Number(course.rating ?? 0);
-  const ratingsCount = Number(course.ratings_count ?? 0);
+
   const studentsCount = Number(course.students_count ?? 0);
   const price = Number(course.price ?? 0);
 
@@ -93,19 +92,7 @@ export function CourseCard({ course, index = 0 }: CourseCardProps) {
             </span>
           </div>
 
-          {/* Rating */}
-          <div className="absolute bottom-4 left-4">
-            <div className="flex items-center gap-1.5 rounded-full border border-white/20 bg-slate-950/60 px-3 py-1.5 text-xs font-bold text-white backdrop-blur-md">
-              <Star className="h-3.5 w-3.5 fill-amber-400 text-amber-400" />
-              <span>{rating.toFixed(1)}</span>
 
-              {ratingsCount > 0 && (
-                <span className="text-white/60">
-                  ({ratingsCount})
-                </span>
-              )}
-            </div>
-          </div>
 
           {/* Free / paid */}
           <div className="absolute bottom-4 right-4">

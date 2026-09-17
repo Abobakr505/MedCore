@@ -260,8 +260,6 @@ const handleFreeEnroll = async () => {
     course.thumbnail_path
   );
 
-  const rating = Number(course.rating ?? 0);
-  const ratingsCount = Number(course.ratings_count ?? 0);
   const studentsCount = Number(course.students_count ?? 0);
 
   const playingVideoUrl = playingLesson?.video_path
@@ -317,13 +315,7 @@ const handleFreeEnroll = async () => {
               </p>
 
               <div className="mt-7 flex flex-wrap gap-3">
-                <div className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-4 py-2 text-xs font-bold backdrop-blur">
-                  <Star className="h-4 w-4 fill-amber-400 text-amber-400" />
-                  {rating.toFixed(1)}
-                  <span className="font-medium text-white/50">
-                    ({ratingsCount} تقييم)
-                  </span>
-                </div>
+
 
                 <div className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-4 py-2 text-xs font-bold backdrop-blur">
                   <Users className="h-4 w-4 text-brand-300" />
@@ -635,13 +627,7 @@ const handleFreeEnroll = async () => {
                   </span>
                 </div>
 
-                <div className="flex items-center justify-between text-sm">
-                  <span className="text-slate-400">التقييم</span>
-                  <span className="flex items-center gap-1 font-bold text-slate-700">
-                    <Star className="h-3.5 w-3.5 fill-amber-400 text-amber-400" />
-                    {rating.toFixed(1)}
-                  </span>
-                </div>
+
               </div>
             </div>
           </aside>

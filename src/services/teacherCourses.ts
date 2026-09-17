@@ -299,6 +299,7 @@ export async function updateLesson(
     orderIndex?: number;
     isPreview?: boolean;
     videoPath?: string | null;
+    durationSeconds?: number;
   }
 ) {
   if (!lessonId) {
@@ -325,6 +326,14 @@ export async function updateLesson(
 
   if (updates.videoPath !== undefined) {
     payload.video_path = updates.videoPath;
+  }
+
+  // حفظ مدة الفيديو بالثواني
+  if (updates.durationSeconds !== undefined) {
+    payload.duration_seconds = Math.max(
+      0,
+      Math.round(updates.durationSeconds)
+    );
   }
 
   const { data, error } = await supabase
