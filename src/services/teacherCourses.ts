@@ -1,6 +1,7 @@
 import { supabase, supabaseUrl, supabaseAnonKey } from "@/lib/supabase";
 import { slugify } from "@/utils/format";
 import type { Course, CourseSection, Lesson } from "@/types";
+import * as tus from "tus-js-client";
 
 import { splitFileIntoChunks, getChunkPath } from "@/utils/videoChunking";
 export async function fetchTeacherCourses(teacherId: string) {
@@ -544,4 +545,108 @@ export async function deleteLessonVideoChunks(lessonId: string) {
     .from("lessons")
     .update({ video_path: null, video_chunk_count: 0 })
     .eq("id", lessonId);
+}
+
+// services/teacherCourses.ts
+export async function uploadLessonVideoBunny(
+  lessonId: string,
+  file: File,
+  onProgress: (pct: number) => void
+): Promise<string> {
+  const { data, error } = await supabase.functions.invoke(
+    "create-bunny-video",
+    { body: { lessonId, title: file.name } }
+  );
+
+  if (error) {
+    let details = error.message ?? "خطأ غير معروف";
+
+    if (error.context) {
+      try {
+        const errorBody = await error.context.json();
+        console.error("Edge function error body:", errorBody);
+        details = errorBody.error ?? JSON.stringify(errorBody);
+      } catch {
+        try {
+          const errorText = await error.context.text();
+          console.error("Edge function error text:", errorText);
+          details = errorText;
+        } catch {
+          // مفيش تفاصيل إضافية متاحة
+        }
+      }
+    }
+
+    throw new Error(`فشل إنشاء الفيديو: ${details}`);
+  }
+
+  if (data?.error) {
+    // الفنكشن نفسها رجعت { error: "..." } برسالة 500
+    throw new Error(`خطأ من الخادم: ${data.error}`);
+  }
+
+  if (!data?.videoId) {
+    throw new Error(`رد غير متوقع من الخادم: ${JSON.stringify(data)}`);
+  }
+
+  const { videoId, libraryId, expiration, signature, tusEndpoint } = data;
+
+
+  await new Promise<void>((resolve, reject) => {
+    const upload = new tus.Upload(file, {
+      endpoint: tusEndpoint,
+      retryDelays: [0, 3000, 5000, 10000],
+      headers: {
+        AuthorizationSignature: signature,
+        AuthorizationExpire: String(expiration),
+        VideoId: videoId,
+        LibraryId: String(libraryId),
+      },
+      metadata: { filetype: file.type, title: file.name },
+      onProgress: (uploaded, total) => {
+        onProgress(Math.round((uploaded / total) * 100));
+      },
+      onSuccess: () => resolve(),
+      onError: reject,
+    });
+
+    upload.start();
+  });
+
+  // اربط الـ videoId بالدرس في قاعدة البيانات
+  const { error: updateError } = await supabase
+    .from("lessons")
+    .update({
+      bunny_video_id: videoId,
+      bunny_video_status: "processing",
+    })
+    .eq("id", lessonId);
+
+  if (updateError) throw updateError;
+
+  return videoId;
+}
+
+export async function deleteLessonVideoBunny(lessonId: string) {
+  const { data: lesson, error: fetchError } = await supabase
+    .from("lessons")
+    .select("bunny_video_id")
+    .eq("id", lessonId)
+    .single();
+
+  if (fetchError) throw fetchError;
+
+  if (lesson?.bunny_video_id) {
+    const { error } = await supabase.functions.invoke("delete-bunny-video", {
+      body: { videoId: lesson.bunny_video_id },
+    });
+    if (error) throw error;
+  }
+
+  const { error: updateError } = await supabase
+    .from("lessons")
+    .update({ bunny_video_id: null, bunny_video_status: "pending" })
+    .eq("id", lessonId);
+
+  if (updateError) throw updateError;
 }

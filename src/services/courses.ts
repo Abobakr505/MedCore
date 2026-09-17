@@ -231,7 +231,6 @@ export async function fetchCourseBySlug(slug: string) {
    Fetch Course Sections
    Includes Lessons + Lesson Files
 ========================================================= */
-
 export async function fetchCourseSections(
   courseId: string
 ) {
@@ -257,6 +256,8 @@ export async function fetchCourseSections(
           is_preview,
           video_path,
           video_chunk_count,
+          bunny_video_id,
+          bunny_video_status,
           lesson_files (
             id,
             lesson_id,
@@ -285,16 +286,6 @@ export async function fetchCourseSections(
     throw error;
   }
 
-  /*
-   * ترتيب:
-   *
-   * Sections
-   *   ↓
-   * Lessons
-   *   ↓
-   * Files
-   */
-
   const sections = (data ?? []).map(
     (section: any) => {
       const lessons = (section.lessons ?? [])
@@ -314,16 +305,6 @@ export async function fetchCourseSections(
 
           return {
             ...lesson,
-
-            /*
-             * LearningPage يستخدم:
-             *
-             * lesson.files
-             *
-             * بدل:
-             *
-             * lesson.lesson_files
-             */
             files,
           };
         });
@@ -337,7 +318,6 @@ export async function fetchCourseSections(
 
   return sections as CourseSection[];
 }
-
 /* =========================================================
    Check Student Enrollment
 ========================================================= */
@@ -392,72 +372,62 @@ export async function fetchCourseQuizzes(courseId: string) {
   return data ?? [];
 }
 export async function fetchLessonProgress(
-  studentId: string,
+  userId: string,
   courseId: string
 ) {
-  if (!studentId || !courseId) {
-    return [];
-  }
+  const { data: sections, error: sectionsError } = await supabase
+    .from("course_sections")
+    .select("id")
+    .eq("course_id", courseId);
+
+  if (sectionsError) throw sectionsError;
+
+  const sectionIds = (sections ?? []).map((s) => s.id);
+  if (!sectionIds.length) return [];
+
+  const { data: lessons, error: lessonsError } = await supabase
+    .from("lessons")
+    .select("id")
+    .in("section_id", sectionIds);
+
+  if (lessonsError) throw lessonsError;
+
+  const lessonIds = (lessons ?? []).map((l) => l.id);
+  if (!lessonIds.length) return [];
 
   const { data, error } = await supabase
     .from("lesson_progress")
     .select("*")
-    .eq("student_id", studentId)
-    .eq("course_id", courseId);
+    .eq("student_id", userId)   // بدل user_id
+    .in("lesson_id", lessonIds);
 
-  if (error) {
-    console.error(
-      "fetchLessonProgress error:",
-      error
-    );
+  if (error) throw error;
 
-    throw error;
-  }
-
-  return data ?? [];
+  return data;
 }
 export async function updateLessonProgress(
-  studentId: string,
+  userId: string,
   lessonId: string,
-  courseId: string,
-  progressPercentage: number,
-  completed = false
+  courseId: string,   // مش مستخدم فعليًا لأن الجدول مالوش course_id
+  percentage: number,
+  completed: boolean
 ) {
-  if (!studentId || !lessonId || !courseId) {
-    throw new Error("Missing lesson progress data");
-  }
-
-  const progress = Math.min(
-    100,
-    Math.max(0, progressPercentage)
-  );
-
   const { data, error } = await supabase
     .from("lesson_progress")
     .upsert(
       {
-        student_id: studentId,
+        student_id: userId,        // بدل user_id
         lesson_id: lessonId,
-        course_id: courseId,
-        progress_percentage: progress,
+        progress_seconds: percentage, // انتبه: العمود progress_seconds مش percentage — لو الـ percentage اللي بتوصله فعليًا ثواني، سيبه كده. لو نسبة مئوية (0-100) هيبقى فيه لبس، شوف الملاحظة تحت
         completed,
-        updated_at: new Date().toISOString(),
+        last_watched_at: new Date().toISOString(),  // بدل updated_at
       },
-      {
-        onConflict: "student_id,lesson_id",
-      }
+      { onConflict: "student_id,lesson_id" }
     )
-    .select()
+    .select("*")
     .single();
 
-  if (error) {
-    console.error(
-      "updateLessonProgress error:",
-      error
-    );
-
-    throw error;
-  }
+  if (error) throw error;
 
   return data;
 }

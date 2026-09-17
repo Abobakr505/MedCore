@@ -1,1 +1,12 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><rect width="32" height="32" rx="8" fill="#3B82F6"/><text x="16" y="22" font-size="16" font-family="Arial" fill="white" text-anchor="middle" font-weight="bold">M</text></svg>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="32" y2="32" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#4F8EF7"/>
+      <stop offset="100%" stop-color="#1D4ED8"/>
+    </linearGradient>
+  </defs>
+  <rect width="32" height="32" rx="9" fill="url(#bg)"/>
+  <!-- Medical cross subtly behind the letter -->
+  <path d="M14.5 6h3v6h6v3h-6v6h-3v-6h-6v-3h6z" fill="white" fill-opacity="0.14"/>
+  <text x="16" y="22.5" font-size="15" font-family="Arial, sans-serif" fill="white" text-anchor="middle" font-weight="800">M</text>
+</svg>

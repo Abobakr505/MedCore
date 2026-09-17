@@ -50,8 +50,8 @@ import {
   deleteLesson,
   deleteSection,
   updateSection,
-  uploadLessonVideoChunked,   // <-- بدل updateLessonVideoPath و getVideoStoragePath
-  deleteLessonVideoChunks,    // <-- بدل deleteLessonVideo
+uploadLessonVideoBunny,
+deleteLessonVideoBunny,
 } from "@/services/teacherCourses";
 
 import type {
@@ -559,9 +559,9 @@ function LessonCard({
   onDeleteVideo: (lesson: LessonWithFiles) => void;
   videoUploadState?: UploadState;
 }) {
-  const hasVideo = Boolean(
-    (lesson as Lesson & { video_chunk_count?: number }).video_chunk_count
-  );
+const hasVideo = Boolean(
+  (lesson as Lesson & { bunny_video_id?: string }).bunny_video_id
+);
 
   const isUploading = videoUploadState?.uploading ?? false;
 
@@ -966,20 +966,21 @@ function SectionBlock({
       }));
 
       try {
-        await uploadLessonVideoChunked(
-          lesson.id,
-          file,
-          (pct) => {
-            setVideoUploadStates((current) => ({
-              ...current,
-              [lesson.id]: {
-                ...current[lesson.id],
-                progress: pct,
-              },
-            }));
-          }
-        );
-
+await uploadLessonVideoBunny(
+  lesson.id,
+  file,
+  (pct) => {
+    setVideoUploadStates((current) => ({
+      ...current,
+      [lesson.id]: {
+        uploading: true,
+        progress: pct,
+        error: null,
+        fileName: file.name,
+      },
+    }));
+  }
+);
         setVideoUploadStates((current) => ({
           ...current,
           [lesson.id]: {
@@ -1033,8 +1034,7 @@ function SectionBlock({
     if (!confirmed) return;
 
     try {
-      await deleteLessonVideoChunks(lesson.id);
-
+      await deleteLessonVideoBunny(lesson.id);   
       await onRefresh();
     } catch (error) {
       console.error(
@@ -1634,16 +1634,12 @@ export default function CourseBuilderPage() {
       (section) => section.lessons ?? []
     );
 
-    const videos = lessons.filter(
-      (lesson) =>
-        Boolean(
-          (
-            lesson as Lesson & {
-              video_path?: string | null;
-            }
-          ).video_path
-        )
-    ).length;
+const videos = lessons.filter(
+  (lesson) =>
+    Boolean(
+      (lesson as Lesson & { bunny_video_id?: string }).bunny_video_id
+    )
+).length;
 
     const previews = lessons.filter(
       (lesson) => lesson.is_preview

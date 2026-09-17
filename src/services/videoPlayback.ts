@@ -1,29 +1,21 @@
 // services/videoPlayback.ts
 import { supabase } from "@/lib/supabase";
-import { getChunkPath } from "@/utils/videoChunking";
 
-export async function buildLessonVideoBlobUrl(
-  lessonId: string,
-  chunkCount: number,
-  onProgress?: (pct: number) => void
+/**
+ * يجيب رابط مشاهدة HLS آمن ومؤقت من Bunny Stream
+ * عبر Edge Function (التوكن بيتولّد سيرفر-سايد فقط)
+ */
+export async function getLessonPlaybackUrl(
+  videoId: string
 ): Promise<string> {
-  const parts: Blob[] = [];
+  const { data, error } = await supabase.functions.invoke(
+    "get-bunny-playback-url",
+    { body: { videoId } }
+  );
 
-  for (let i = 0; i < chunkCount; i++) {
-    const path = getChunkPath(lessonId, i);
-
-    const { data, error } = await supabase.storage
-      .from("course-videos")
-      .download(path);
-
-    if (error || !data) {
-      throw new Error(`تعذّر تحميل جزء الفيديو ${i + 1}`);
-    }
-
-    parts.push(data);
-    onProgress?.(Math.round(((i + 1) / chunkCount) * 100));
+  if (error || !data?.url) {
+    throw new Error("تعذّر تحميل رابط الفيديو");
   }
 
-  const fullBlob = new Blob(parts, { type: "video/mp4" });
-  return URL.createObjectURL(fullBlob);
+  return data.url as string;
 }

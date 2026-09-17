@@ -54,7 +54,7 @@ import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/contexts/AuthContext";
 import { VideoWatermark } from "@/components/video/VideoWatermark";
 import { useScreenRecordingGuard } from "@/hooks/useScreenRecordingGuard";
-import { buildLessonVideoBlobUrl } from "@/services/videoPlayback";
+import { getLessonPlaybackUrl } from "@/services/videoPlayback";
 import {
   fetchCourseBySlugOrId,
   fetchCourseSections,
@@ -1083,78 +1083,88 @@ const [videoDownloadPct, setVideoDownloadPct] =
   /* ---------------------------------------------------------------------- */
   /* Get video URL                                                           */
   /* ---------------------------------------------------------------------- */
+const loadLessonVideo = useCallback(
+  async (lesson: LessonWithFiles) => {
+    setVideoLoading(true);
+    setActiveVideoUrl(null);
+    setOfflineVideo(null);
 
-const loadLessonVideo =
-  useCallback(
-    async (
-      lesson: LessonWithFiles
-    ) => {
-      setVideoLoading(true);
-      setActiveVideoUrl(null);
-      setVideoDownloadPct(0);
+    try {
+      if (isLessonLocked(lesson)) {
+        console.log(
+          "Lesson is locked, skipping video load"
+        );
 
-      try {
-        if (isLessonLocked(lesson)) {
-          setVideoLoading(false);
-          return;
+        return;
+      }
+
+      const cached = await getOfflineVideo(
+        lesson.id
+      );
+
+      if (cached) {
+        console.log(
+          "Using cached offline video"
+        );
+
+        setOfflineVideo(cached);
+        setActiveVideoUrl(
+          cached.blobUrl
+        );
+
+        return;
+      }
+
+      const bunnyVideoId = (
+        lesson as LessonWithFiles & {
+          bunny_video_id?: string;
         }
+      ).bunny_video_id;
 
-        const cached =
-          await getOfflineVideo(
-            lesson.id
-          );
+      console.log(
+        "Lesson object:",
+        lesson
+      );
 
-        if (cached) {
-          setOfflineVideo(cached);
-          setActiveVideoUrl(
-            cached.blobUrl
-          );
-          setVideoLoading(false);
-          return;
-        }
+      console.log(
+        "bunnyVideoId:",
+        bunnyVideoId
+      );
 
-        setOfflineVideo(null);
-
-        // فيديو مقسّم لأجزاء (chunked) بسبب حد الـ 50MB
-        const chunkCount =
-          (lesson as LessonWithFiles & { video_chunk_count?: number })
-            .video_chunk_count;
-
-        if (chunkCount && chunkCount > 0) {
-          const blobUrl = await buildLessonVideoBlobUrl(
-            lesson.id,
-            chunkCount,
-            setVideoDownloadPct
-          );
-
-          setActiveVideoUrl(blobUrl);
-          setVideoLoading(false);
-          return;
-        }
-
-        // فيديو عادي (رابط موقّع من edge function)
-        const { data, error } =
-          await supabase.functions.invoke(
-            "get-lesson-video-url",
-            { body: { lessonId: lesson.id } }
-          );
-
-        if (error) throw error;
-
-        setActiveVideoUrl(data?.url ?? null);
-      } catch (error) {
-        console.error(
-          "Load lesson video error:",
-          error
+      if (!bunnyVideoId) {
+        console.log(
+          "No bunnyVideoId found on lesson"
         );
 
         setActiveVideoUrl(null);
-      } finally {
-        setVideoLoading(false);
+
+        return;
       }
-    },
-    [isLessonLocked]
-  );
+
+      const url =
+        await getLessonPlaybackUrl(
+          bunnyVideoId
+        );
+
+      console.log(
+        "Playback URL received:",
+        url
+      );
+
+      setActiveVideoUrl(url);
+    } catch (error) {
+      console.error(
+        "Load lesson video error:",
+        error
+      );
+
+      setActiveVideoUrl(null);
+    } finally {
+      setVideoLoading(false);
+    }
+  },
+  [isLessonLocked]
+);
   /* ---------------------------------------------------------------------- */
   /* Active lesson                                                           */
   /* ---------------------------------------------------------------------- */
@@ -1266,46 +1276,31 @@ const loadLessonVideo =
   /* ---------------------------------------------------------------------- */
   /* Mark progress                                                           */
   /* ---------------------------------------------------------------------- */
+const markLessonCompleted = useCallback(
+  async (durationSeconds?: number) => {
+    if (!activeLesson) return;
+    const userResult = await supabase.auth.getUser();
+    const user = userResult.data.user;
+    if (!user || !course) return;
 
-  const markLessonCompleted =
-    useCallback(
-      async () => {
-        if (!activeLesson) return;
-
-        const userResult =
-          await supabase.auth.getUser();
-
-        const user =
-          userResult.data.user;
-
-        if (!user || !course) return;
-
-        try {
-          const updated =
-            await updateLessonProgress(
-              user.id,
-              activeLesson.id,
-              course.id,
-              100,
-              true
-            );
-
-          setLessonProgress(
-            (current) => ({
-              ...current,
-              [activeLesson.id]:
-                updated,
-            })
-          );
-        } catch (error) {
-          console.error(
-            "Update lesson progress error:",
-            error
-          );
-        }
-      },
-      [activeLesson, course]
-    );
+    try {
+      const updated = await updateLessonProgress(
+        user.id,
+        activeLesson.id,
+        course.id,
+        durationSeconds ?? 0,
+        true
+      );
+      setLessonProgress((current) => ({
+        ...current,
+        [activeLesson.id]: updated,
+      }));
+    } catch (error) {
+      console.error("Update lesson progress error:", error);
+    }
+  },
+  [activeLesson, course]
+);
 
   /* ---------------------------------------------------------------------- */
   /* Video progress                                                          */
@@ -1361,6 +1356,17 @@ const loadLessonVideo =
         return;
       }
 
+      const bunnyVideoId = (
+        activeLesson as LessonWithFiles & { bunny_video_id?: string }
+      ).bunny_video_id;
+
+      if (!bunnyVideoId) {
+        alert(
+          "لا يوجد فيديو متاح لهذا الدرس."
+        );
+        return;
+      }
+
       setDownloadingOffline(true);
       setOfflineProgress(0);
       setShowOfflineMenu(false);
@@ -1368,8 +1374,8 @@ const loadLessonVideo =
       try {
         const { data, error } =
           await supabase.functions.invoke(
-            "get-lesson-video-url",
-            { body: { lessonId: activeLesson.id } }
+            "get-bunny-download-url",
+            { body: { videoId: bunnyVideoId } }
           );
 
         if (error) {
