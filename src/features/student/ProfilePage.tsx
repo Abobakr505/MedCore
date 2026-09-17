@@ -179,25 +179,7 @@ export default function ProfilePage() {
                   )}{" "}
                 </div>{" "}
                 {/* Upload button */}{" "}
-                <label
-                  className={`absolute -bottom-1 -left-1 grid h-9 w-9 cursor-pointer place-items-center rounded-full border-2 border-brand-800 bg-white text-brand-700 shadow-lg transition-transform hover:scale-110 ${uploading ? "pointer-events-none opacity-60" : ""}`}
-                >
-                  {" "}
-                  <Camera className="h-4 w-4" />{" "}
-                  <input
-                    type="file"
-                    accept="image/png,image/jpeg,image/webp"
-                    className="hidden"
-                    disabled={uploading}
-                    onChange={(e) => {
-                      const file = e.target.files?.[0];
-                      if (file) {
-                        handleAvatarUpload(file);
-                      }
-                      e.target.value = "";
-                    }}
-                  />{" "}
-                </label>{" "}
+
               </div>{" "}
               {/* User info */}{" "}
               <div className="min-w-0 flex-1 text-center sm:text-right">
