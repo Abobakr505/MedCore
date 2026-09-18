@@ -13,7 +13,6 @@ import {
   MoreVertical,
   Trophy,
   CircleHelp,
-  BarChart3,
   Sparkles,
   X,
   Pencil,
@@ -24,20 +23,29 @@ import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import { Card } from "@/components/ui/Card";
 import { Modal } from "@/components/ui/Modal";
+import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { Skeleton } from "@/components/ui/Skeleton";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { useToast } from "@/contexts/ToastContext";
+
 import {
   fetchCourseQuizzes,
   createQuiz,
   updateQuiz,
+  deleteQuiz,
   fetchQuizForEditing,
   addQuestion,
   addOption,
   deleteQuestion,
 } from "@/services/quizzes";
+
 import { fetchCourseSections } from "@/services/courses";
-import type { CourseSection, Quiz, QuizQuestion } from "@/types";
+
+import type {
+  CourseSection,
+  Quiz,
+  QuizQuestion,
+} from "@/types";
 
 type QuizScope = "course" | "section" | "lesson";
 
@@ -50,11 +58,20 @@ export default function QuizBuilderPage() {
   const [activeQuiz, setActiveQuiz] = useState<Quiz | null>(null);
   const [questions, setQuestions] = useState<QuizQuestion[]>([]);
   const [loading, setLoading] = useState(true);
+
   const [createModalOpen, setCreateModalOpen] = useState(false);
 
   const [editModalOpen, setEditModalOpen] = useState(false);
   const [editingQuiz, setEditingQuiz] = useState<Quiz | null>(null);
   const [editLoading, setEditLoading] = useState(false);
+
+  // =========================
+  // Delete quiz
+  // =========================
+
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [deletingQuiz, setDeletingQuiz] = useState<Quiz | null>(null);
+  const [deleteLoading, setDeleteLoading] = useState(false);
 
   const [quizForm, setQuizForm] = useState({
     title: "",
@@ -83,8 +100,12 @@ export default function QuizBuilderPage() {
 
     try {
       const list = await fetchCourseQuizzes(courseId);
+
       setQuizzes(list);
-      setSections((await fetchCourseSections(courseId)) as CourseSection[]);
+
+      setSections(
+        (await fetchCourseSections(courseId)) as CourseSection[]
+      );
     } catch {
       showToast("تعذّر تحميل الاختبارات", "error");
     } finally {
@@ -94,17 +115,32 @@ export default function QuizBuilderPage() {
 
   useEffect(() => {
     load();
+
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [courseId]);
+
+  // =========================
+  // Open quiz
+  // =========================
 
   const openQuiz = async (quiz: Quiz) => {
     try {
       setActiveQuiz(quiz);
-      setQuestions(await fetchQuizForEditing(quiz.id));
+
+      setQuestions(
+        await fetchQuizForEditing(quiz.id)
+      );
     } catch {
-      showToast("تعذّر تحميل أسئلة الاختبار", "error");
+      showToast(
+        "تعذّر تحميل أسئلة الاختبار",
+        "error"
+      );
     }
   };
+
+  // =========================
+  // Edit quiz
+  // =========================
 
   const openEditQuiz = (quiz: Quiz) => {
     let scope: QuizScope = "course";
@@ -130,41 +166,136 @@ export default function QuizBuilderPage() {
     setEditModalOpen(true);
   };
 
+  // =========================
+  // Delete quiz dialog
+  // =========================
+
+  const openDeleteQuiz = (quiz: Quiz) => {
+    setDeletingQuiz(quiz);
+    setDeleteDialogOpen(true);
+  };
+
+  // =========================
+  // Delete quiz
+  // =========================
+
+  const handleDeleteQuiz = async () => {
+    if (!deletingQuiz) return;
+
+    try {
+      setDeleteLoading(true);
+
+      await deleteQuiz(deletingQuiz.id);
+
+      setQuizzes((current) =>
+        current.filter(
+          (quiz) => quiz.id !== deletingQuiz.id
+        )
+      );
+
+      if (activeQuiz?.id === deletingQuiz.id) {
+        setActiveQuiz(null);
+        setQuestions([]);
+      }
+
+      if (editingQuiz?.id === deletingQuiz.id) {
+        setEditModalOpen(false);
+        setEditingQuiz(null);
+      }
+
+      showToast(
+        "تم حذف الاختبار بنجاح",
+        "success"
+      );
+
+      setDeleteDialogOpen(false);
+      setDeletingQuiz(null);
+    } catch (error) {
+      console.error(
+        "Delete quiz error:",
+        error
+      );
+
+      showToast(
+        "تعذّر حذف الاختبار",
+        "error"
+      );
+    } finally {
+      setDeleteLoading(false);
+    }
+  };
+
+  // =========================
+  // Create quiz
+  // =========================
+
   const handleCreateQuiz = async () => {
     if (!courseId || !quizForm.title.trim()) {
-      showToast("أدخل عنوان الاختبار", "error");
+      showToast(
+        "أدخل عنوان الاختبار",
+        "error"
+      );
+
       return;
     }
 
     if (
-      (quizForm.scope === "section" || quizForm.scope === "lesson") &&
+      (quizForm.scope === "section" ||
+        quizForm.scope === "lesson") &&
       !quizForm.sectionId
     ) {
-      showToast("اختر القسم المرتبط بالاختبار", "error");
+      showToast(
+        "اختر القسم المرتبط بالاختبار",
+        "error"
+      );
+
       return;
     }
 
-    if (quizForm.scope === "lesson" && !quizForm.lessonId) {
-      showToast("اختر الدرس المرتبط بالاختبار", "error");
+    if (
+      quizForm.scope === "lesson" &&
+      !quizForm.lessonId
+    ) {
+      showToast(
+        "اختر الدرس المرتبط بالاختبار",
+        "error"
+      );
+
       return;
     }
 
     try {
       await createQuiz({
         courseId,
-        title: quizForm.title,
-        description: quizForm.description,
-        durationMinutes: quizForm.durationMinutes,
-        passingScore: quizForm.passingScore,
+        title: quizForm.title.trim(),
+        description:
+          quizForm.description.trim(),
+        durationMinutes: Math.max(
+          1,
+          quizForm.durationMinutes
+        ),
+        passingScore: Math.min(
+          100,
+          Math.max(
+            1,
+            quizForm.passingScore
+          )
+        ),
         sectionId:
-          quizForm.scope === "section" || quizForm.scope === "lesson"
+          quizForm.scope === "section" ||
+          quizForm.scope === "lesson"
             ? quizForm.sectionId || null
             : null,
         lessonId:
-          quizForm.scope === "lesson" ? quizForm.lessonId || null : null,
+          quizForm.scope === "lesson"
+            ? quizForm.lessonId || null
+            : null,
       });
 
-      showToast("تم إنشاء الاختبار بنجاح", "success");
+      showToast(
+        "تم إنشاء الاختبار بنجاح",
+        "success"
+      );
 
       setCreateModalOpen(false);
 
@@ -180,15 +311,26 @@ export default function QuizBuilderPage() {
 
       load();
     } catch {
-      showToast("تعذّر إنشاء الاختبار", "error");
+      showToast(
+        "تعذّر إنشاء الاختبار",
+        "error"
+      );
     }
   };
+
+  // =========================
+  // Update quiz
+  // =========================
 
   const handleUpdateQuiz = async () => {
     if (!editingQuiz) return;
 
     if (!editQuizForm.title.trim()) {
-      showToast("أدخل عنوان الاختبار", "error");
+      showToast(
+        "أدخل عنوان الاختبار",
+        "error"
+      );
+
       return;
     }
 
@@ -197,53 +339,89 @@ export default function QuizBuilderPage() {
         editQuizForm.scope === "lesson") &&
       !editQuizForm.sectionId
     ) {
-      showToast("اختر القسم المرتبط بالاختبار", "error");
+      showToast(
+        "اختر القسم المرتبط بالاختبار",
+        "error"
+      );
+
       return;
     }
 
-    if (editQuizForm.scope === "lesson" && !editQuizForm.lessonId) {
-      showToast("اختر الدرس المرتبط بالاختبار", "error");
+    if (
+      editQuizForm.scope === "lesson" &&
+      !editQuizForm.lessonId
+    ) {
+      showToast(
+        "اختر الدرس المرتبط بالاختبار",
+        "error"
+      );
+
       return;
     }
 
     try {
       setEditLoading(true);
 
-      const updatedQuiz = await updateQuiz({
-        quizId: editingQuiz.id,
-        title: editQuizForm.title.trim(),
-        description: editQuizForm.description.trim(),
-        durationMinutes: Math.max(
-          1,
-          editQuizForm.durationMinutes
-        ),
-        passingScore: Math.min(
-          100,
-          Math.max(1, editQuizForm.passingScore)
-        ),
-        sectionId:
-          editQuizForm.scope === "section" ||
-          editQuizForm.scope === "lesson"
-            ? editQuizForm.sectionId || null
-            : null,
-        lessonId:
-          editQuizForm.scope === "lesson"
-            ? editQuizForm.lessonId || null
-            : null,
-      });
+      const updatedQuiz =
+        await updateQuiz({
+          quizId: editingQuiz.id,
+
+          title: editQuizForm.title.trim(),
+
+          description:
+            editQuizForm.description.trim(),
+
+          durationMinutes: Math.max(
+            1,
+            editQuizForm.durationMinutes
+          ),
+
+          passingScore: Math.min(
+            100,
+            Math.max(
+              1,
+              editQuizForm.passingScore
+            )
+          ),
+
+          sectionId:
+            editQuizForm.scope === "section" ||
+            editQuizForm.scope === "lesson"
+              ? editQuizForm.sectionId ||
+                null
+              : null,
+
+          lessonId:
+            editQuizForm.scope === "lesson"
+              ? editQuizForm.lessonId ||
+                null
+              : null,
+        });
 
       setQuizzes((current) =>
         current.map((quiz) =>
-          quiz.id === updatedQuiz.id ? updatedQuiz : quiz
+          quiz.id === updatedQuiz.id
+            ? updatedQuiz
+            : quiz
         )
       );
+
+      if (activeQuiz?.id === updatedQuiz.id) {
+        setActiveQuiz(updatedQuiz);
+      }
 
       setEditModalOpen(false);
       setEditingQuiz(null);
 
-      showToast("تم تعديل الاختبار بنجاح", "success");
+      showToast(
+        "تم تعديل الاختبار بنجاح",
+        "success"
+      );
     } catch {
-      showToast("تعذّر تعديل الاختبار", "error");
+      showToast(
+        "تعذّر تعديل الاختبار",
+        "error"
+      );
     } finally {
       setEditLoading(false);
     }
@@ -251,18 +429,35 @@ export default function QuizBuilderPage() {
 
   const totalQuestions = quizzes.length;
 
+  // Prevent unused variable warning if strict linting
+  void totalQuestions;
+
+  // =========================
+  // Loading
+  // =========================
+
   if (loading) {
     return (
       <div className="space-y-5">
         <Skeleton className="h-24 rounded-3xl" />
+
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {Array.from({ length: 3 }).map((_, i) => (
-            <Skeleton key={i} className="h-48 rounded-3xl" />
-          ))}
+          {Array.from({ length: 3 }).map(
+            (_, i) => (
+              <Skeleton
+                key={i}
+                className="h-48 rounded-3xl"
+              />
+            )
+          )}
         </div>
       </div>
     );
   }
+
+  // =========================
+  // Quiz editor
+  // =========================
 
   if (activeQuiz) {
     return (
@@ -271,7 +466,11 @@ export default function QuizBuilderPage() {
         questions={questions}
         onBack={() => setActiveQuiz(null)}
         onRefresh={async () => {
-          setQuestions(await fetchQuizForEditing(activeQuiz.id));
+          setQuestions(
+            await fetchQuizForEditing(
+              activeQuiz.id
+            )
+          );
         }}
       />
     );
@@ -282,6 +481,7 @@ export default function QuizBuilderPage() {
       {/* Header */}
       <div className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-brand-900 via-brand-900 to-brand-500 p-6 text-white shadow-lg">
         <div className="absolute -left-10 -top-10 h-40 w-40 rounded-full bg-white/10 blur-2xl" />
+
         <div className="absolute -bottom-16 right-10 h-44 w-44 rounded-full bg-white/10 blur-3xl" />
 
         <div className="relative flex flex-col justify-between gap-5 md:flex-row md:items-center">
@@ -296,13 +496,15 @@ export default function QuizBuilderPage() {
             </h1>
 
             <p className="mt-2 max-w-xl text-sm leading-6 text-white/80">
-              أنشئ الاختبارات، أضف الأسئلة والاختيارات، وحدد مدة الاختبار
-              ودرجة النجاح للطلاب.
+              أنشئ الاختبارات، أضف الأسئلة والاختيارات،
+              وحدد مدة الاختبار ودرجة النجاح للطلاب.
             </p>
           </div>
 
           <Button
-            onClick={() => setCreateModalOpen(true)}
+            onClick={() =>
+              setCreateModalOpen(true)
+            }
             className="bg-brand-500 text-brand-700 hover:bg-brand-900"
           >
             <Plus className="h-4 w-4" />
@@ -333,7 +535,9 @@ export default function QuizBuilderPage() {
             quizzes.length
               ? `${Math.round(
                   quizzes.reduce(
-                    (sum, q) => sum + q.duration_minutes,
+                    (sum, q) =>
+                      sum +
+                      q.duration_minutes,
                     0
                   ) / quizzes.length
                 )} د`
@@ -348,7 +552,9 @@ export default function QuizBuilderPage() {
             quizzes.length
               ? `${Math.round(
                   quizzes.reduce(
-                    (sum, q) => sum + q.passing_score,
+                    (sum, q) =>
+                      sum +
+                      q.passing_score,
                     0
                   ) / quizzes.length
                 )}%`
@@ -362,10 +568,16 @@ export default function QuizBuilderPage() {
       {quizzes.length === 0 ? (
         <div className="rounded-3xl border border-dashed border-slate-200 bg-white p-10">
           <EmptyState
-            icon={<ClipboardList className="h-7 w-7" />}
+            icon={
+              <ClipboardList className="h-7 w-7" />
+            }
             title="لا توجد اختبارات بعد"
             action={
-              <Button onClick={() => setCreateModalOpen(true)}>
+              <Button
+                onClick={() =>
+                  setCreateModalOpen(true)
+                }
+              >
                 <Plus className="h-4 w-4" />
                 إنشاء أول اختبار
               </Button>
@@ -377,13 +589,23 @@ export default function QuizBuilderPage() {
           {quizzes.map((quiz, index) => (
             <motion.div
               key={quiz.id}
-              initial={{ opacity: 0, y: 15 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: index * 0.05 }}
+              initial={{
+                opacity: 0,
+                y: 15,
+              }}
+              animate={{
+                opacity: 1,
+                y: 0,
+              }}
+              transition={{
+                delay: index * 0.05,
+              }}
             >
               <Card
                 className="group relative cursor-pointer overflow-hidden p-0 transition-all duration-300 hover:-translate-y-1 hover:shadow-xl"
-                onClick={() => openQuiz(quiz)}
+                onClick={() =>
+                  openQuiz(quiz)
+                }
               >
                 <div className="h-1.5 bg-gradient-to-r from-brand-500 to-cyan-400" />
 
@@ -393,16 +615,32 @@ export default function QuizBuilderPage() {
                       <ClipboardList className="h-5 w-5" />
                     </div>
 
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        openEditQuiz(quiz);
-                      }}
-                      className="rounded-lg p-2 text-slate-400 hover:bg-slate-100 hover:text-brand-600"
-                      title="تعديل الاختبار"
-                    >
-                      <MoreVertical className="h-4 w-4" />
-                    </button>
+                    {/* Actions */}
+                    <div className="flex items-center gap-1">
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          openEditQuiz(quiz);
+                        }}
+                        className="rounded-lg p-2 text-slate-400 transition hover:bg-slate-100 hover:text-brand-600"
+                        title="تعديل الاختبار"
+                      >
+                        <MoreVertical className="h-4 w-4" />
+                      </button>
+
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          openDeleteQuiz(
+                            quiz
+                          );
+                        }}
+                        className="rounded-lg p-2 text-slate-400 transition hover:bg-red-50 hover:text-red-500"
+                        title="حذف الاختبار"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </button>
+                    </div>
                   </div>
 
                   <h3 className="mt-4 line-clamp-1 text-lg font-black text-slate-800">
@@ -410,10 +648,14 @@ export default function QuizBuilderPage() {
                   </h3>
 
                   <p className="mt-1 min-h-[40px] line-clamp-2 text-sm leading-5 text-slate-400">
-                    {quiz.description || "لا يوجد وصف لهذا الاختبار"}
+                    {quiz.description ||
+                      "لا يوجد وصف لهذا الاختبار"}
                   </p>
 
-                  <QuizScopeBadge quiz={quiz} sections={sections} />
+                  <QuizScopeBadge
+                    quiz={quiz}
+                    sections={sections}
+                  />
 
                   <div className="mt-5 grid grid-cols-2 gap-2">
                     <MiniInfo
@@ -445,10 +687,12 @@ export default function QuizBuilderPage() {
         </div>
       )}
 
-      {/* Create modal */}
+      {/* Create Modal */}
       <Modal
         open={createModalOpen}
-        onClose={() => setCreateModalOpen(false)}
+        onClose={() =>
+          setCreateModalOpen(false)
+        }
         title="إنشاء اختبار جديد"
         maxWidth="max-w-2xl"
       >
@@ -472,7 +716,8 @@ export default function QuizBuilderPage() {
               onChange={(e) =>
                 setQuizForm({
                   ...quizForm,
-                  description: e.target.value,
+                  description:
+                    e.target.value,
                 })
               }
               placeholder="وصف مختصر للاختبار..."
@@ -490,13 +735,17 @@ export default function QuizBuilderPage() {
                   <button
                     type="button"
                     onClick={() =>
-                      setQuizForm((prev) => ({
-                        ...prev,
-                        durationMinutes: Math.max(
-                          1,
-                          prev.durationMinutes - 5
-                        ),
-                      }))
+                      setQuizForm(
+                        (prev) => ({
+                          ...prev,
+                          durationMinutes:
+                            Math.max(
+                              1,
+                              prev.durationMinutes -
+                                5
+                            ),
+                        })
+                      )
                     }
                     className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-slate-100 text-xl font-black text-slate-600 transition active:scale-95 hover:bg-slate-200"
                   >
@@ -508,22 +757,32 @@ export default function QuizBuilderPage() {
                       type="number"
                       min={1}
                       inputMode="numeric"
-                      value={quizForm.durationMinutes}
+                      value={
+                        quizForm.durationMinutes
+                      }
                       onChange={(e) => {
-                        const value = Number(e.target.value);
+                        const value =
+                          Number(
+                            e.target.value
+                          );
 
-                        setQuizForm((prev) => ({
-                          ...prev,
-                          durationMinutes:
-                            e.target.value === ""
-                              ? 1
-                              : Math.max(
-                                  1,
-                                  Number.isFinite(value)
-                                    ? value
-                                    : 1
-                                ),
-                        }));
+                        setQuizForm(
+                          (prev) => ({
+                            ...prev,
+                            durationMinutes:
+                              e.target.value ===
+                              ""
+                                ? 1
+                                : Math.max(
+                                    1,
+                                    Number.isFinite(
+                                      value
+                                    )
+                                      ? value
+                                      : 1
+                                  ),
+                          })
+                        );
                       }}
                       className="h-12 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 text-center text-lg font-black text-slate-800 outline-none transition focus:border-brand-500 focus:bg-white focus:ring-2 focus:ring-brand-500/10"
                     />
@@ -536,11 +795,14 @@ export default function QuizBuilderPage() {
                   <button
                     type="button"
                     onClick={() =>
-                      setQuizForm((prev) => ({
-                        ...prev,
-                        durationMinutes:
-                          prev.durationMinutes + 5,
-                      }))
+                      setQuizForm(
+                        (prev) => ({
+                          ...prev,
+                          durationMinutes:
+                            prev.durationMinutes +
+                            5,
+                        })
+                      )
                     }
                     className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-brand-50 text-xl font-black text-brand-600 transition active:scale-95 hover:bg-brand-100"
                   >
@@ -559,13 +821,17 @@ export default function QuizBuilderPage() {
                   <button
                     type="button"
                     onClick={() =>
-                      setQuizForm((prev) => ({
-                        ...prev,
-                        passingScore: Math.max(
-                          1,
-                          prev.passingScore - 5
-                        ),
-                      }))
+                      setQuizForm(
+                        (prev) => ({
+                          ...prev,
+                          passingScore:
+                            Math.max(
+                              1,
+                              prev.passingScore -
+                                5
+                            ),
+                        })
+                      )
                     }
                     className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-slate-100 text-xl font-black text-slate-600 transition active:scale-95 hover:bg-slate-200"
                   >
@@ -578,25 +844,35 @@ export default function QuizBuilderPage() {
                       min={1}
                       max={100}
                       inputMode="numeric"
-                      value={quizForm.passingScore}
+                      value={
+                        quizForm.passingScore
+                      }
                       onChange={(e) => {
-                        const value = Number(e.target.value);
+                        const value =
+                          Number(
+                            e.target.value
+                          );
 
-                        setQuizForm((prev) => ({
-                          ...prev,
-                          passingScore:
-                            e.target.value === ""
-                              ? 1
-                              : Math.min(
-                                  100,
-                                  Math.max(
-                                    1,
-                                    Number.isFinite(value)
-                                      ? value
-                                      : 1
-                                  )
-                                ),
-                        }));
+                        setQuizForm(
+                          (prev) => ({
+                            ...prev,
+                            passingScore:
+                              e.target.value ===
+                              ""
+                                ? 1
+                                : Math.min(
+                                    100,
+                                    Math.max(
+                                      1,
+                                      Number.isFinite(
+                                        value
+                                      )
+                                        ? value
+                                        : 1
+                                    )
+                                  ),
+                          })
+                        );
                       }}
                       className="h-12 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 text-center text-lg font-black text-slate-800 outline-none transition focus:border-brand-500 focus:bg-white focus:ring-2 focus:ring-brand-500/10"
                     />
@@ -609,13 +885,17 @@ export default function QuizBuilderPage() {
                   <button
                     type="button"
                     onClick={() =>
-                      setQuizForm((prev) => ({
-                        ...prev,
-                        passingScore: Math.min(
-                          100,
-                          prev.passingScore + 5
-                        ),
-                      }))
+                      setQuizForm(
+                        (prev) => ({
+                          ...prev,
+                          passingScore:
+                            Math.min(
+                              100,
+                              prev.passingScore +
+                                5
+                            ),
+                        })
+                      )
                     }
                     className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-brand-50 text-xl font-black text-brand-600 transition active:scale-95 hover:bg-brand-100"
                   >
@@ -643,68 +923,100 @@ export default function QuizBuilderPage() {
                   onChange={(e) =>
                     setQuizForm({
                       ...quizForm,
-                      scope: e.target.value as QuizScope,
+                      scope:
+                        e.target
+                          .value as QuizScope,
                       sectionId: "",
                       lessonId: "",
                     })
                   }
                   className="w-full rounded-xl border border-slate-200 bg-white px-3 py-3 text-sm font-bold text-slate-700 outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-500/10 sm:w-auto"
                 >
-                  <option value="course">كل الكورس</option>
-                  <option value="section">قسم محدد</option>
-                  <option value="lesson">درس محدد</option>
+                  <option value="course">
+                    كل الكورس
+                  </option>
+
+                  <option value="section">
+                    قسم محدد
+                  </option>
+
+                  <option value="lesson">
+                    درس محدد
+                  </option>
                 </select>
               </div>
 
-              {quizForm.scope !== "course" && (
+              {quizForm.scope !==
+                "course" && (
                 <select
-                  value={quizForm.sectionId}
+                  value={
+                    quizForm.sectionId
+                  }
                   onChange={(e) =>
                     setQuizForm({
                       ...quizForm,
-                      sectionId: e.target.value,
+                      sectionId:
+                        e.target.value,
                       lessonId: "",
                     })
                   }
                   className="w-full rounded-xl border border-slate-200 bg-white px-3 py-3 text-sm text-slate-700 outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-500/10"
                 >
-                  <option value="">اختر القسم</option>
+                  <option value="">
+                    اختر القسم
+                  </option>
 
-                  {sections.map((section) => (
-                    <option key={section.id} value={section.id}>
-                      {section.title}
-                    </option>
-                  ))}
+                  {sections.map(
+                    (section) => (
+                      <option
+                        key={section.id}
+                        value={section.id}
+                      >
+                        {section.title}
+                      </option>
+                    )
+                  )}
                 </select>
               )}
 
-              {quizForm.scope === "lesson" &&
+              {quizForm.scope ===
+                "lesson" &&
                 quizForm.sectionId && (
                   <select
-                    value={quizForm.lessonId}
+                    value={
+                      quizForm.lessonId
+                    }
                     onChange={(e) =>
                       setQuizForm({
                         ...quizForm,
-                        lessonId: e.target.value,
+                        lessonId:
+                          e.target.value,
                       })
                     }
                     className="mt-3 w-full rounded-xl border border-slate-200 bg-white px-3 py-3 text-sm text-slate-700 outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-500/10"
                   >
-                    <option value="">اختر الدرس</option>
+                    <option value="">
+                      اختر الدرس
+                    </option>
 
                     {sections
                       .find(
                         (section) =>
-                          section.id === quizForm.sectionId
+                          section.id ===
+                          quizForm.sectionId
                       )
-                      ?.lessons?.map((lesson) => (
-                        <option
-                          key={lesson.id}
-                          value={lesson.id}
-                        >
-                          {lesson.title}
-                        </option>
-                      ))}
+                      ?.lessons?.map(
+                        (lesson) => (
+                          <option
+                            key={lesson.id}
+                            value={
+                              lesson.id
+                            }
+                          >
+                            {lesson.title}
+                          </option>
+                        )
+                      )}
                   </select>
                 )}
             </div>
@@ -717,12 +1029,12 @@ export default function QuizBuilderPage() {
               </div>
 
               <p className="mt-1 text-xs leading-5 text-brand-600/80">
-                اجعل الأسئلة متنوعة وواضحة، وحدد درجة نجاح مناسبة
+                اجعل الأسئلة متنوعة وواضحة،
+                وحدد درجة نجاح مناسبة
                 لمستوى الكورس.
               </p>
             </div>
 
-            {/* زر الإنشاء */}
             <div className="sticky bottom-0 bg-white/95 pt-2 backdrop-blur-sm">
               <Button
                 className="w-full py-3.5 text-base"
@@ -735,7 +1047,7 @@ export default function QuizBuilderPage() {
         </div>
       </Modal>
 
-      {/* Edit modal */}
+      {/* Edit Modal */}
       <Modal
         open={editModalOpen}
         onClose={() => {
@@ -761,7 +1073,8 @@ export default function QuizBuilderPage() {
                   </h3>
 
                   <p className="mt-1 text-sm leading-6 text-slate-500">
-                    يمكنك تعديل معلومات الاختبار ومكان ظهوره داخل
+                    يمكنك تعديل معلومات
+                    الاختبار ومكان ظهوره داخل
                     الكورس.
                   </p>
                 </div>
@@ -782,11 +1095,14 @@ export default function QuizBuilderPage() {
 
             <Input
               label="الوصف"
-              value={editQuizForm.description}
+              value={
+                editQuizForm.description
+              }
               onChange={(e) =>
                 setEditQuizForm({
                   ...editQuizForm,
-                  description: e.target.value,
+                  description:
+                    e.target.value,
                 })
               }
               placeholder="وصف مختصر للاختبار..."
@@ -804,13 +1120,17 @@ export default function QuizBuilderPage() {
                   <button
                     type="button"
                     onClick={() =>
-                      setEditQuizForm((prev) => ({
-                        ...prev,
-                        durationMinutes: Math.max(
-                          1,
-                          prev.durationMinutes - 5
-                        ),
-                      }))
+                      setEditQuizForm(
+                        (prev) => ({
+                          ...prev,
+                          durationMinutes:
+                            Math.max(
+                              1,
+                              prev.durationMinutes -
+                                5
+                            ),
+                        })
+                      )
                     }
                     className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-slate-100 text-xl font-black text-slate-600 transition active:scale-95 hover:bg-slate-200"
                   >
@@ -822,22 +1142,32 @@ export default function QuizBuilderPage() {
                       type="number"
                       min={1}
                       inputMode="numeric"
-                      value={editQuizForm.durationMinutes}
+                      value={
+                        editQuizForm.durationMinutes
+                      }
                       onChange={(e) => {
-                        const value = Number(e.target.value);
+                        const value =
+                          Number(
+                            e.target.value
+                          );
 
-                        setEditQuizForm((prev) => ({
-                          ...prev,
-                          durationMinutes:
-                            e.target.value === ""
-                              ? 1
-                              : Math.max(
-                                  1,
-                                  Number.isFinite(value)
-                                    ? value
-                                    : 1
-                                ),
-                        }));
+                        setEditQuizForm(
+                          (prev) => ({
+                            ...prev,
+                            durationMinutes:
+                              e.target.value ===
+                              ""
+                                ? 1
+                                : Math.max(
+                                    1,
+                                    Number.isFinite(
+                                      value
+                                    )
+                                      ? value
+                                      : 1
+                                  ),
+                          })
+                        );
                       }}
                       className="h-12 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 text-center text-lg font-black text-slate-800 outline-none transition focus:border-brand-500 focus:bg-white focus:ring-2 focus:ring-brand-500/10"
                     />
@@ -850,11 +1180,14 @@ export default function QuizBuilderPage() {
                   <button
                     type="button"
                     onClick={() =>
-                      setEditQuizForm((prev) => ({
-                        ...prev,
-                        durationMinutes:
-                          prev.durationMinutes + 5,
-                      }))
+                      setEditQuizForm(
+                        (prev) => ({
+                          ...prev,
+                          durationMinutes:
+                            prev.durationMinutes +
+                            5,
+                        })
+                      )
                     }
                     className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-brand-50 text-xl font-black text-brand-600 transition active:scale-95 hover:bg-brand-100"
                   >
@@ -873,13 +1206,17 @@ export default function QuizBuilderPage() {
                   <button
                     type="button"
                     onClick={() =>
-                      setEditQuizForm((prev) => ({
-                        ...prev,
-                        passingScore: Math.max(
-                          1,
-                          prev.passingScore - 5
-                        ),
-                      }))
+                      setEditQuizForm(
+                        (prev) => ({
+                          ...prev,
+                          passingScore:
+                            Math.max(
+                              1,
+                              prev.passingScore -
+                                5
+                            ),
+                        })
+                      )
                     }
                     className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-slate-100 text-xl font-black text-slate-600 transition active:scale-95 hover:bg-slate-200"
                   >
@@ -892,25 +1229,35 @@ export default function QuizBuilderPage() {
                       min={1}
                       max={100}
                       inputMode="numeric"
-                      value={editQuizForm.passingScore}
+                      value={
+                        editQuizForm.passingScore
+                      }
                       onChange={(e) => {
-                        const value = Number(e.target.value);
+                        const value =
+                          Number(
+                            e.target.value
+                          );
 
-                        setEditQuizForm((prev) => ({
-                          ...prev,
-                          passingScore:
-                            e.target.value === ""
-                              ? 1
-                              : Math.min(
-                                  100,
-                                  Math.max(
-                                    1,
-                                    Number.isFinite(value)
-                                      ? value
-                                      : 1
-                                  )
-                                ),
-                        }));
+                        setEditQuizForm(
+                          (prev) => ({
+                            ...prev,
+                            passingScore:
+                              e.target.value ===
+                              ""
+                                ? 1
+                                : Math.min(
+                                    100,
+                                    Math.max(
+                                      1,
+                                      Number.isFinite(
+                                        value
+                                      )
+                                        ? value
+                                        : 1
+                                    )
+                                  ),
+                          })
+                        );
                       }}
                       className="h-12 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 text-center text-lg font-black text-slate-800 outline-none transition focus:border-brand-500 focus:bg-white focus:ring-2 focus:ring-brand-500/10"
                     />
@@ -923,13 +1270,17 @@ export default function QuizBuilderPage() {
                   <button
                     type="button"
                     onClick={() =>
-                      setEditQuizForm((prev) => ({
-                        ...prev,
-                        passingScore: Math.min(
-                          100,
-                          prev.passingScore + 5
-                        ),
-                      }))
+                      setEditQuizForm(
+                        (prev) => ({
+                          ...prev,
+                          passingScore:
+                            Math.min(
+                              100,
+                              prev.passingScore +
+                                5
+                            ),
+                        })
+                      )
                     }
                     className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-brand-50 text-xl font-black text-brand-600 transition active:scale-95 hover:bg-brand-100"
                   >
@@ -948,77 +1299,112 @@ export default function QuizBuilderPage() {
                   </p>
 
                   <p className="mt-1 text-xs text-slate-500">
-                    حدّد أين يظهر الاختبار للطلاب
+                    حدّد أين يظهر الاختبار
+                    للطلاب
                   </p>
                 </div>
 
                 <select
-                  value={editQuizForm.scope}
+                  value={
+                    editQuizForm.scope
+                  }
                   onChange={(e) =>
                     setEditQuizForm({
                       ...editQuizForm,
-                      scope: e.target.value as QuizScope,
+                      scope:
+                        e.target
+                          .value as QuizScope,
                       sectionId: "",
                       lessonId: "",
                     })
                   }
                   className="w-full rounded-xl border border-slate-200 bg-white px-3 py-3 text-sm font-bold text-slate-700 outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-500/10 sm:w-auto"
                 >
-                  <option value="course">كل الكورس</option>
-                  <option value="section">قسم محدد</option>
-                  <option value="lesson">درس محدد</option>
+                  <option value="course">
+                    كل الكورس
+                  </option>
+
+                  <option value="section">
+                    قسم محدد
+                  </option>
+
+                  <option value="lesson">
+                    درس محدد
+                  </option>
                 </select>
               </div>
 
-              {editQuizForm.scope !== "course" && (
+              {editQuizForm.scope !==
+                "course" && (
                 <select
-                  value={editQuizForm.sectionId}
+                  value={
+                    editQuizForm.sectionId
+                  }
                   onChange={(e) =>
                     setEditQuizForm({
                       ...editQuizForm,
-                      sectionId: e.target.value,
+                      sectionId:
+                        e.target.value,
                       lessonId: "",
                     })
                   }
                   className="w-full rounded-xl border border-slate-200 bg-white px-3 py-3 text-sm text-slate-700 outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-500/10"
                 >
-                  <option value="">اختر القسم</option>
+                  <option value="">
+                    اختر القسم
+                  </option>
 
-                  {sections.map((section) => (
-                    <option key={section.id} value={section.id}>
-                      {section.title}
-                    </option>
-                  ))}
+                  {sections.map(
+                    (section) => (
+                      <option
+                        key={section.id}
+                        value={section.id}
+                      >
+                        {section.title}
+                      </option>
+                    )
+                  )}
                 </select>
               )}
 
-              {editQuizForm.scope === "lesson" &&
+              {editQuizForm.scope ===
+                "lesson" &&
                 editQuizForm.sectionId && (
                   <select
-                    value={editQuizForm.lessonId}
+                    value={
+                      editQuizForm.lessonId
+                    }
                     onChange={(e) =>
                       setEditQuizForm({
                         ...editQuizForm,
-                        lessonId: e.target.value,
+                        lessonId:
+                          e.target.value,
                       })
                     }
                     className="mt-3 w-full rounded-xl border border-slate-200 bg-white px-3 py-3 text-sm text-slate-700 outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-500/10"
                   >
-                    <option value="">اختر الدرس</option>
+                    <option value="">
+                      اختر الدرس
+                    </option>
 
                     {sections
                       .find(
                         (section) =>
-                          section.id === editQuizForm.sectionId
+                          section.id ===
+                          editQuizForm.sectionId
                       )
-                      ?.lessons?.map((lesson) => (
-                        <option
-                          key={lesson.id}
-                          value={lesson.id}
-                        >
-                          {lesson.title}
-                        </option>
-                      ))}
+                      ?.lessons?.map(
+                        (lesson) => (
+                          <option
+                            key={lesson.id}
+                            value={
+                              lesson.id
+                            }
+                          >
+                            {lesson.title}
+                          </option>
+                        )
+                      )}
                   </select>
                 )}
             </div>
@@ -1031,12 +1417,14 @@ export default function QuizBuilderPage() {
               </div>
 
               <p className="mt-1 text-xs leading-5 text-brand-600/80">
-                يمكنك تغيير نطاق الاختبار أو مدته ودرجة النجاح دون
-                التأثير على الأسئلة الموجودة.
+                يمكنك تغيير نطاق الاختبار
+                أو مدته ودرجة النجاح دون
+                التأثير على الأسئلة
+                الموجودة.
               </p>
             </div>
 
-            {/* زر الحفظ */}
+            {/* حفظ */}
             <div className="sticky bottom-0 bg-white/95 pt-2 backdrop-blur-sm">
               <Button
                 className="w-full py-3.5 text-base"
@@ -1059,9 +1447,34 @@ export default function QuizBuilderPage() {
           </div>
         </div>
       </Modal>
+
+      {/* Delete Confirmation */}
+      <ConfirmDialog
+        open={deleteDialogOpen}
+        title="حذف الاختبار"
+        description={
+          deletingQuiz
+            ? `هل أنت متأكد من حذف اختبار "${deletingQuiz.title}"؟ سيتم حذف الاختبار وجميع البيانات المرتبطة به. لا يمكن التراجع عن هذا الإجراء.`
+            : "هل أنت متأكد من حذف هذا الاختبار؟"
+        }
+        confirmLabel="حذف الاختبار"
+        danger
+        isLoading={deleteLoading}
+        onCancel={() => {
+          if (!deleteLoading) {
+            setDeleteDialogOpen(false);
+            setDeletingQuiz(null);
+          }
+        }}
+        onConfirm={handleDeleteQuiz}
+      />
     </div>
   );
 }
+
+// ============================================================
+// Quiz Editor
+// ============================================================
 
 function QuizEditor({
   quiz,
@@ -1076,79 +1489,163 @@ function QuizEditor({
 }) {
   const { showToast } = useToast();
 
-  const [questionModalOpen, setQuestionModalOpen] = useState(false);
-  const [questionText, setQuestionText] = useState("");
-  const [points, setPoints] = useState(1);
+  const [questionModalOpen, setQuestionModalOpen] =
+    useState(false);
+
+  const [questionText, setQuestionText] =
+    useState("");
+
+  const [points, setPoints] =
+    useState(1);
+
   const [options, setOptions] = useState([
-    { text: "", correct: false },
-    { text: "", correct: false },
+    {
+      text: "",
+      correct: false,
+    },
+    {
+      text: "",
+      correct: false,
+    },
   ]);
 
   const totalPoints = useMemo(
-    () => questions.reduce((sum, q) => sum + Number(q.points || 0), 0),
+    () =>
+      questions.reduce(
+        (sum, q) =>
+          sum + Number(q.points || 0),
+        0
+      ),
     [questions]
   );
 
   const addOptionField = () => {
-    setOptions([...options, { text: "", correct: false }]);
+    setOptions([
+      ...options,
+      {
+        text: "",
+        correct: false,
+      },
+    ]);
   };
 
-  const removeOptionField = (index: number) => {
+  const removeOptionField = (
+    index: number
+  ) => {
     if (options.length <= 2) return;
 
-    setOptions(options.filter((_, i) => i !== index));
+    setOptions(
+      options.filter(
+        (_, i) => i !== index
+      )
+    );
   };
 
-  const handleCreateQuestion = async () => {
-    const validOptions = options.filter((o) => o.text.trim());
+  const handleCreateQuestion =
+    async () => {
+      const validOptions =
+        options.filter(
+          (o) => o.text.trim()
+        );
 
-    if (!questionText.trim() || validOptions.length < 2) {
-      showToast("أضف نص السؤال وخيارين على الأقل", "error");
-      return;
-    }
+      if (
+        !questionText.trim() ||
+        validOptions.length < 2
+      ) {
+        showToast(
+          "أضف نص السؤال وخيارين على الأقل",
+          "error"
+        );
 
-    if (!options.some((o) => o.correct)) {
-      showToast("حدّد إجابة صحيحة واحدة على الأقل", "error");
-      return;
-    }
-
-    try {
-      const question = await addQuestion(
-        quiz.id,
-        questionText.trim(),
-        points,
-        questions.length
-      );
-
-      for (const opt of validOptions) {
-        await addOption(question.id, opt.text.trim(), opt.correct);
+        return;
       }
 
-      setQuestionText("");
-      setPoints(1);
-      setOptions([
-        { text: "", correct: false },
-        { text: "", correct: false },
-      ]);
-      setQuestionModalOpen(false);
+      if (
+        !options.some(
+          (o) => o.correct
+        )
+      ) {
+        showToast(
+          "حدّد إجابة صحيحة واحدة على الأقل",
+          "error"
+        );
 
-      showToast("تمت إضافة السؤال", "success");
+        return;
+      }
 
-      onRefresh();
-    } catch {
-      showToast("تعذّر إضافة السؤال", "error");
-    }
-  };
+      try {
+        const question =
+          await addQuestion(
+            quiz.id,
+            questionText.trim(),
+            Math.max(
+              1,
+              points
+            ),
+            questions.length
+          );
 
-  const handleDelete = async (id: string) => {
-    try {
-      await deleteQuestion(id);
-      showToast("تم حذف السؤال", "success");
-      onRefresh();
-    } catch {
-      showToast("تعذّر حذف السؤال", "error");
-    }
-  };
+        for (
+          const opt of validOptions
+        ) {
+          await addOption(
+            question.id,
+            opt.text.trim(),
+            opt.correct
+          );
+        }
+
+        setQuestionText("");
+
+        setPoints(1);
+
+        setOptions([
+          {
+            text: "",
+            correct: false,
+          },
+          {
+            text: "",
+            correct: false,
+          },
+        ]);
+
+        setQuestionModalOpen(
+          false
+        );
+
+        showToast(
+          "تمت إضافة السؤال",
+          "success"
+        );
+
+        onRefresh();
+      } catch {
+        showToast(
+          "تعذّر إضافة السؤال",
+          "error"
+        );
+      }
+    };
+
+  const handleDelete =
+    async (id: string) => {
+      try {
+        await deleteQuestion(id);
+
+        showToast(
+          "تم حذف السؤال",
+          "success"
+        );
+
+        onRefresh();
+      } catch {
+        showToast(
+          "تعذّر حذف السؤال",
+          "error"
+        );
+      }
+    };
 
   return (
     <div className="space-y-6">
@@ -1173,11 +1670,16 @@ function QuizEditor({
             </h1>
 
             <p className="mt-1 text-sm text-slate-400">
-              {quiz.description || "إدارة أسئلة الاختبار والدرجات"}
+              {quiz.description ||
+                "إدارة أسئلة الاختبار والدرجات"}
             </p>
           </div>
 
-          <Button onClick={() => setQuestionModalOpen(true)}>
+          <Button
+            onClick={() =>
+              setQuestionModalOpen(true)
+            }
+          >
             <Plus className="h-4 w-4" />
             سؤال جديد
           </Button>
@@ -1213,10 +1715,18 @@ function QuizEditor({
       {questions.length === 0 ? (
         <div className="rounded-3xl border border-dashed border-slate-200 bg-white p-10">
           <EmptyState
-            icon={<CircleHelp className="h-7 w-7" />}
+            icon={
+              <CircleHelp className="h-7 w-7" />
+            }
             title="لم تتم إضافة أسئلة بعد"
             action={
-              <Button onClick={() => setQuestionModalOpen(true)}>
+              <Button
+                onClick={() =>
+                  setQuestionModalOpen(
+                    true
+                  )
+                }
+              >
                 <Plus className="h-4 w-4" />
                 إضافة أول سؤال
               </Button>
@@ -1225,78 +1735,109 @@ function QuizEditor({
         </div>
       ) : (
         <div className="space-y-4">
-          {questions.map((q, idx) => (
-            <motion.div
-              key={q.id}
-              initial={{ opacity: 0, y: 10 }}
-              animate={{ opacity: 1, y: 0 }}
-            >
-              <Card className="overflow-hidden p-0">
-                <div className="border-b border-slate-100 bg-slate-50/70 px-5 py-4">
-                  <div className="flex items-start justify-between gap-4">
-                    <div className="flex gap-3">
-                      <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-brand-100 text-sm font-black text-brand-600">
-                        {idx + 1}
+          {questions.map(
+            (q, idx) => (
+              <motion.div
+                key={q.id}
+                initial={{
+                  opacity: 0,
+                  y: 10,
+                }}
+                animate={{
+                  opacity: 1,
+                  y: 0,
+                }}
+              >
+                <Card className="overflow-hidden p-0">
+                  <div className="border-b border-slate-100 bg-slate-50/70 px-5 py-4">
+                    <div className="flex items-start justify-between gap-4">
+                      <div className="flex gap-3">
+                        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-brand-100 text-sm font-black text-brand-600">
+                          {idx + 1}
+                        </div>
+
+                        <div>
+                          <p className="font-bold leading-6 text-slate-800">
+                            {q.question}
+                          </p>
+
+                          <span className="mt-1 inline-flex items-center gap-1 text-xs text-slate-400">
+                            <Target className="h-3.5 w-3.5" />
+                            {q.points}{" "}
+                            نقطة
+                          </span>
+                        </div>
                       </div>
 
-                      <div>
-                        <p className="font-bold leading-6 text-slate-800">
-                          {q.question}
-                        </p>
-
-                        <span className="mt-1 inline-flex items-center gap-1 text-xs text-slate-400">
-                          <Target className="h-3.5 w-3.5" />
-                          {q.points} نقطة
-                        </span>
-                      </div>
-                    </div>
-
-                    <button
-                      onClick={() => handleDelete(q.id)}
-                      className="rounded-xl p-2 text-red-400 transition hover:bg-red-50"
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </button>
-                  </div>
-                </div>
-
-                <div className="space-y-2 p-5">
-                  {q.options?.map((opt, optionIndex) => (
-                    <div
-                      key={opt.id}
-                      className={`flex items-center gap-3 rounded-xl border px-4 py-3 text-sm ${
-                        opt.is_correct
-                          ? "border-cyan-200 bg-cyan-50 text-cyan-700"
-                          : "border-slate-100 bg-white text-slate-500"
-                      }`}
-                    >
-                      <span
-                        className={`flex h-7 w-7 items-center justify-center rounded-lg text-xs font-bold ${
-                          opt.is_correct
-                            ? "bg-cyan-500 text-white"
-                            : "bg-slate-100 text-slate-400"
-                        }`}
+                      <button
+                        onClick={() =>
+                          handleDelete(
+                            q.id
+                          )
+                        }
+                        className="rounded-xl p-2 text-red-400 transition hover:bg-red-50"
+                        title="حذف السؤال"
                       >
-                        {String.fromCharCode(65 + optionIndex)}
-                      </span>
-
-                      <span className="flex-1">{opt.option_text}</span>
-
-                      {opt.is_correct && (
-                        <CheckCircle2 className="h-4 w-4 shrink-0" />
-                      )}
+                        <Trash2 className="h-4 w-4" />
+                      </button>
                     </div>
-                  ))}
-                </div>
-              </Card>
-            </motion.div>
-          ))}
+                  </div>
+
+                  <div className="space-y-2 p-5">
+                    {q.options?.map(
+                      (
+                        opt,
+                        optionIndex
+                      ) => (
+                        <div
+                          key={opt.id}
+                          className={`flex items-center gap-3 rounded-xl border px-4 py-3 text-sm ${
+                            opt.is_correct
+                              ? "border-cyan-200 bg-cyan-50 text-cyan-700"
+                              : "border-slate-100 bg-white text-slate-500"
+                          }`}
+                        >
+                          <span
+                            className={`flex h-7 w-7 items-center justify-center rounded-lg text-xs font-bold ${
+                              opt.is_correct
+                                ? "bg-cyan-500 text-white"
+                                : "bg-slate-100 text-slate-400"
+                            }`}
+                          >
+                            {String.fromCharCode(
+                              65 +
+                                optionIndex
+                            )}
+                          </span>
+
+                          <span className="flex-1">
+                            {
+                              opt.option_text
+                            }
+                          </span>
+
+                          {opt.is_correct && (
+                            <CheckCircle2 className="h-4 w-4 shrink-0" />
+                          )}
+                        </div>
+                      )
+                    )}
+                  </div>
+                </Card>
+              </motion.div>
+            )
+          )}
         </div>
       )}
 
+      {/* Question Modal */}
       <Modal
         open={questionModalOpen}
-        onClose={() => setQuestionModalOpen(false)}
+        onClose={() =>
+          setQuestionModalOpen(
+            false
+          )
+        }
         title="إضافة سؤال جديد"
         maxWidth="max-w-xl"
       >
@@ -1304,7 +1845,11 @@ function QuizEditor({
           <Input
             label="نص السؤال"
             value={questionText}
-            onChange={(e) => setQuestionText(e.target.value)}
+            onChange={(e) =>
+              setQuestionText(
+                e.target.value
+              )
+            }
             placeholder="اكتب السؤال هنا..."
           />
 
@@ -1313,7 +1858,16 @@ function QuizEditor({
             type="number"
             min={1}
             value={points}
-            onChange={(e) => setPoints(Number(e.target.value))}
+            onChange={(e) =>
+              setPoints(
+                Math.max(
+                  1,
+                  Number(
+                    e.target.value
+                  )
+                )
+              )
+            }
           />
 
           <div>
@@ -1323,68 +1877,114 @@ function QuizEditor({
 
             <div className="space-y-2">
               <AnimatePresence initial={false}>
-                {options.map((opt, i) => (
-                  <motion.div
-                    key={i}
-                    initial={{ opacity: 0, height: 0 }}
-                    animate={{ opacity: 1, height: "auto" }}
-                    exit={{ opacity: 0, height: 0 }}
-                    className="flex items-center gap-2"
-                  >
-                    <input
-                      type="checkbox"
-                      checked={opt.correct}
-                      onChange={() =>
-                        setOptions(
-                          options.map((o, j) =>
-                            j === i
-                              ? { ...o, correct: !o.correct }
-                              : o
+                {options.map(
+                  (opt, i) => (
+                    <motion.div
+                      key={i}
+                      initial={{
+                        opacity: 0,
+                        height: 0,
+                      }}
+                      animate={{
+                        opacity: 1,
+                        height: "auto",
+                      }}
+                      exit={{
+                        opacity: 0,
+                        height: 0,
+                      }}
+                      className="flex items-center gap-2"
+                    >
+                      <input
+                        type="checkbox"
+                        checked={
+                          opt.correct
+                        }
+                        onChange={() =>
+                          setOptions(
+                            options.map(
+                              (
+                                o,
+                                j
+                              ) =>
+                                j === i
+                                  ? {
+                                      ...o,
+                                      correct:
+                                        !o.correct,
+                                    }
+                                  : o
+                            )
                           )
-                        )
-                      }
-                      className="h-4 w-4 accent-brand-500"
-                    />
+                        }
+                        className="h-4 w-4 accent-brand-500"
+                      />
 
-                    <input
-                      value={opt.text}
-                      onChange={(e) =>
-                        setOptions(
-                          options.map((o, j) =>
-                            j === i
-                              ? { ...o, text: e.target.value }
-                              : o
+                      <input
+                        value={
+                          opt.text
+                        }
+                        onChange={(e) =>
+                          setOptions(
+                            options.map(
+                              (
+                                o,
+                                j
+                              ) =>
+                                j === i
+                                  ? {
+                                      ...o,
+                                      text: e
+                                        .target
+                                        .value,
+                                    }
+                                  : o
+                            )
                           )
-                        )
-                      }
-                      placeholder={`الخيار ${i + 1}`}
-                      className="flex-1 rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none transition focus:border-brand-500 focus:ring-2 focus:ring-brand-500/10"
-                    />
+                        }
+                        placeholder={`الخيار ${
+                          i + 1
+                        }`}
+                        className="flex-1 rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none transition focus:border-brand-500 focus:ring-2 focus:ring-brand-500/10"
+                      />
 
-                    {options.length > 2 && (
-                      <button
-                        type="button"
-                        onClick={() => removeOptionField(i)}
-                        className="rounded-lg p-2 text-slate-400 hover:bg-red-50 hover:text-red-500"
-                      >
-                        <X className="h-4 w-4" />
-                      </button>
-                    )}
-                  </motion.div>
-                ))}
+                      {options.length >
+                        2 && (
+                        <button
+                          type="button"
+                          onClick={() =>
+                            removeOptionField(
+                              i
+                            )
+                          }
+                          className="rounded-lg p-2 text-slate-400 hover:bg-red-50 hover:text-red-500"
+                        >
+                          <X className="h-4 w-4" />
+                        </button>
+                      )}
+                    </motion.div>
+                  )
+                )}
               </AnimatePresence>
             </div>
 
             <button
               type="button"
-              onClick={addOptionField}
+              onClick={
+                addOptionField
+              }
               className="mt-3 text-xs font-bold text-brand-500 hover:text-brand-600"
             >
               + إضافة خيار آخر
             </button>
           </div>
 
-          <Button className="w-full" onClick={handleCreateQuestion}>
+          <Button
+            className="w-full"
+            onClick={
+              handleCreateQuestion
+            }
+          >
             إضافة السؤال
           </Button>
         </div>
@@ -1392,6 +1992,10 @@ function QuizEditor({
     </div>
   );
 }
+
+// ============================================================
+// Components
+// ============================================================
 
 function StatCard({
   icon,
@@ -1405,16 +2009,26 @@ function StatCard({
   tone?: "brand" | "green" | "amber";
 }) {
   const tones = {
-    brand: "bg-brand-50 text-brand-500",
-    green: "bg-cyan-50 text-cyan-500",
-    amber: "bg-amber-50 text-amber-500",
+    brand:
+      "bg-brand-50 text-brand-500",
+    green:
+      "bg-cyan-50 text-cyan-500",
+    amber:
+      "bg-amber-50 text-amber-500",
   };
 
   return (
     <div className="rounded-2xl border border-slate-100 bg-white p-4 shadow-sm">
       <div className="flex items-center justify-between">
-        <div className={`rounded-xl p-2 ${tones[tone]}`}>{icon}</div>
-        <span className="text-xl font-black text-slate-800">{value}</span>
+        <div
+          className={`rounded-xl p-2 ${tones[tone]}`}
+        >
+          {icon}
+        </div>
+
+        <span className="text-xl font-black text-slate-800">
+          {value}
+        </span>
       </div>
 
       <p className="mt-3 text-xs font-medium text-slate-400">
@@ -1431,13 +2045,17 @@ function QuizScopeBadge({
   quiz: Quiz;
   sections: CourseSection[];
 }) {
-  const section = sections.find(
-    (item) => item.id === quiz.section_id
-  );
+  const section =
+    sections.find(
+      (item) =>
+        item.id === quiz.section_id
+    );
 
-  const lesson = section?.lessons?.find(
-    (item) => item.id === quiz.lesson_id
-  );
+  const lesson =
+    section?.lessons?.find(
+      (item) =>
+        item.id === quiz.lesson_id
+    );
 
   const label = lesson
     ? `درس: ${lesson.title}`
@@ -1448,7 +2066,10 @@ function QuizScopeBadge({
   return (
     <div className="mt-4 inline-flex max-w-full items-center gap-2 rounded-lg bg-brand-50 px-2.5 py-1.5 text-xs font-bold text-brand-700">
       <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-brand-500" />
-      <span className="truncate">{label}</span>
+
+      <span className="truncate">
+        {label}
+      </span>
     </div>
   );
 }
@@ -1466,7 +2087,10 @@ function MiniInfo({
     <div className="rounded-xl bg-slate-50 p-3">
       <div className="flex items-center gap-1.5 text-slate-400">
         {icon}
-        <span className="text-[10px]">{label}</span>
+
+        <span className="text-[10px]">
+          {label}
+        </span>
       </div>
 
       <p className="mt-1 text-xs font-bold text-slate-700">

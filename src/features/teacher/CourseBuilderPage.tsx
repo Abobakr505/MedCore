@@ -60,6 +60,9 @@ import type {
   Lesson,
 } from "@/types";
 
+import { useToast } from "@/contexts/ToastContext";
+import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
+
 /* -------------------------------------------------------------------------- */
 /* Types                                                                      */
 /* -------------------------------------------------------------------------- */
@@ -90,6 +93,22 @@ interface UploadState {
   error: string | null;
   fileName: string | null;
 }
+
+/** Generic confirm-dialog state shared by every component below. */
+interface ConfirmState {
+  open: boolean;
+  title: string;
+  description: string;
+  confirmLabel?: string;
+  onConfirm: () => void | Promise<void>;
+}
+
+const CLOSED_CONFIRM: ConfirmState = {
+  open: false,
+  title: "",
+  description: "",
+  onConfirm: () => {},
+};
 
 /* -------------------------------------------------------------------------- */
 /* Helpers                                                                    */
@@ -193,6 +212,7 @@ function LessonFilesManager({
   ) => void;
 }) {
   const inputRef = useRef<HTMLInputElement | null>(null);
+  const { showToast } = useToast();
 
   const [open, setOpen] = useState(false);
   const [uploading, setUploading] = useState(false);
@@ -200,13 +220,17 @@ function LessonFilesManager({
   const [uploadingName, setUploadingName] = useState<string | null>(
     null
   );
-  const [error, setError] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+
+  const [confirmState, setConfirmState] =
+    useState<ConfirmState>(CLOSED_CONFIRM);
+
+  const closeConfirm = () =>
+    setConfirmState(CLOSED_CONFIRM);
 
   const uploadFile = async (file: globalThis.File) => {
     if (!file) return;
 
-    setError(null);
     setUploading(true);
     setUploadProgress(0);
     setUploadingName(file.name);
@@ -264,13 +288,16 @@ function LessonFilesManager({
         ...files,
         data as LessonFile,
       ]);
+
+      showToast("تم رفع الملف بنجاح", "success");
     } catch (err) {
       console.error("Lesson file upload error:", err);
 
-      setError(
+      showToast(
         err instanceof Error
           ? err.message
-          : "حدث خطأ أثناء رفع الملف"
+          : "حدث خطأ أثناء رفع الملف",
+        "error"
       );
     } finally {
       setTimeout(() => {
@@ -297,53 +324,58 @@ function LessonFilesManager({
     event.target.value = "";
   };
 
-  const deleteFile = async (file: LessonFile) => {
-    const confirmed = window.confirm(
-      `هل أنت متأكد من حذف الملف "${file.file_name}"؟`
-    );
+  const deleteFile = (file: LessonFile) => {
+    setConfirmState({
+      open: true,
+      title: "حذف الملف",
+      description: `هل أنت متأكد من حذف الملف "${file.file_name}"؟ لا يمكن التراجع عن هذا الإجراء.`,
+      confirmLabel: "حذف الملف",
+      onConfirm: async () => {
+        setDeletingId(file.id);
 
-    if (!confirmed) return;
+        try {
+          const { error: storageError } =
+            await supabase.storage
+              .from(FILE_BUCKET)
+              .remove([file.file_path]);
 
-    setDeletingId(file.id);
-    setError(null);
+          if (storageError) {
+            console.warn(
+              "Storage delete warning:",
+              storageError
+            );
+          }
 
-    try {
-      const { error: storageError } =
-        await supabase.storage
-          .from(FILE_BUCKET)
-          .remove([file.file_path]);
+          const { error: dbError } = await supabase
+            .from("lesson_files")
+            .delete()
+            .eq("id", file.id);
 
-      if (storageError) {
-        console.warn(
-          "Storage delete warning:",
-          storageError
-        );
-      }
+          if (dbError) {
+            throw dbError;
+          }
 
-      const { error: dbError } = await supabase
-        .from("lesson_files")
-        .delete()
-        .eq("id", file.id);
+          onFilesChange(
+            lesson.id,
+            files.filter((item) => item.id !== file.id)
+          );
 
-      if (dbError) {
-        throw dbError;
-      }
+          showToast("تم حذف الملف بنجاح", "success");
+        } catch (err) {
+          console.error("Delete lesson file error:", err);
 
-      onFilesChange(
-        lesson.id,
-        files.filter((item) => item.id !== file.id)
-      );
-    } catch (err) {
-      console.error("Delete lesson file error:", err);
-
-      setError(
-        err instanceof Error
-          ? err.message
-          : "حدث خطأ أثناء حذف الملف"
-      );
-    } finally {
-      setDeletingId(null);
-    }
+          showToast(
+            err instanceof Error
+              ? err.message
+              : "حدث خطأ أثناء حذف الملف",
+            "error"
+          );
+        } finally {
+          setDeletingId(null);
+          closeConfirm();
+        }
+      },
+    });
   };
 
   return (
@@ -438,23 +470,6 @@ function LessonFilesManager({
             </div>
           )}
 
-          {error && (
-            <div className="mb-4 flex items-start gap-3 rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700">
-              <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
-
-              <span className="flex-1">
-                {error}
-              </span>
-
-              <button
-                type="button"
-                onClick={() => setError(null)}
-              >
-                <X className="h-4 w-4" />
-              </button>
-            </div>
-          )}
-
           {files.length === 0 ? (
             <div className="rounded-xl border border-slate-200 bg-white px-4 py-8 text-center">
               <FolderOpen className="mx-auto mb-2 h-8 w-8 text-slate-300" />
@@ -525,6 +540,16 @@ function LessonFilesManager({
           )}
         </div>
       )}
+
+      <ConfirmDialog
+        open={confirmState.open}
+        title={confirmState.title}
+        description={confirmState.description}
+        danger
+        confirmLabel={confirmState.confirmLabel ?? "حذف"}
+        onConfirm={confirmState.onConfirm}
+        onCancel={closeConfirm}
+      />
     </div>
   );
 }
@@ -563,6 +588,8 @@ function LessonCard({
   onDeleteVideo: (lesson: LessonWithFiles) => void;
   videoUploadState?: UploadState;
 }) {
+  const { showToast } = useToast();
+
   const [editing, setEditing] = useState(false);
   const [editTitle, setEditTitle] = useState(lesson.title);
   const [editDescription, setEditDescription] = useState(
@@ -604,7 +631,7 @@ function LessonCard({
     const description = editDescription.trim();
 
     if (!title) {
-      alert("اسم الدرس مطلوب");
+      showToast("اسم الدرس مطلوب", "error");
       return;
     }
 
@@ -617,6 +644,8 @@ function LessonCard({
         description
       );
 
+      showToast("تم حفظ تعديلات الدرس", "success");
+
       setEditing(false);
     } catch (error) {
       console.error(
@@ -624,10 +653,11 @@ function LessonCard({
         error
       );
 
-      alert(
+      showToast(
         error instanceof Error
           ? error.message
-          : "تعذر حفظ تعديلات الدرس"
+          : "تعذر حفظ تعديلات الدرس",
+        "error"
       );
     } finally {
       setSavingEdit(false);
@@ -1042,6 +1072,8 @@ function SectionBlock({
   index: number;
   onRefresh: () => Promise<void>;
 }) {
+  const { showToast } = useToast();
+
   const [expanded, setExpanded] = useState(true);
   const [addingLesson, setAddingLesson] = useState(false);
 
@@ -1066,6 +1098,12 @@ function SectionBlock({
 
   const [videoUploadStates, setVideoUploadStates] =
     useState<Record<string, UploadState>>({});
+
+  const [confirmState, setConfirmState] =
+    useState<ConfirmState>(CLOSED_CONFIRM);
+
+  const closeConfirm = () =>
+    setConfirmState(CLOSED_CONFIRM);
 
   const lessons = section.lessons ?? [];
 
@@ -1134,6 +1172,8 @@ function SectionBlock({
         isPreview: false,
       });
 
+      showToast("تم إنشاء الدرس بنجاح", "success");
+
       setNewLessonTitle("");
       setNewLessonDescription("");
       setAddingLesson(false);
@@ -1142,10 +1182,11 @@ function SectionBlock({
     } catch (error) {
       console.error("Create lesson error:", error);
 
-      alert(
+      showToast(
         error instanceof Error
           ? error.message
-          : "حدث خطأ أثناء إنشاء الدرس"
+          : "حدث خطأ أثناء إنشاء الدرس",
+        "error"
       );
     } finally {
       setSaving(false);
@@ -1165,46 +1206,53 @@ function SectionBlock({
     await onRefresh();
   };
 
-  const deleteLessonHandler = async (
+  const deleteLessonHandler = (
     lesson: LessonWithFiles
   ) => {
-    const confirmed = window.confirm(
-      `هل أنت متأكد من حذف "${lesson.title}"؟\nسيتم حذف الدرس وملفاته.`
-    );
+    setConfirmState({
+      open: true,
+      title: "حذف الدرس",
+      description: `هل أنت متأكد من حذف "${lesson.title}"؟ سيتم حذف الدرس وملفاته نهائيًا.`,
+      confirmLabel: "حذف الدرس",
+      onConfirm: async () => {
+        try {
+          const lessonFiles =
+            localFiles[lesson.id] ?? [];
 
-    if (!confirmed) return;
+          if (lessonFiles.length) {
+            await supabase.storage
+              .from(FILE_BUCKET)
+              .remove(
+                lessonFiles.map(
+                  (file) => file.file_path
+                )
+              );
 
-    try {
-      const lessonFiles =
-        localFiles[lesson.id] ?? [];
+            await supabase
+              .from("lesson_files")
+              .delete()
+              .eq("lesson_id", lesson.id);
+          }
 
-      if (lessonFiles.length) {
-        await supabase.storage
-          .from(FILE_BUCKET)
-          .remove(
-            lessonFiles.map(
-              (file) => file.file_path
-            )
+          await deleteLesson(lesson.id);
+
+          showToast("تم حذف الدرس بنجاح", "success");
+
+          await onRefresh();
+        } catch (error) {
+          console.error("Delete lesson error:", error);
+
+          showToast(
+            error instanceof Error
+              ? error.message
+              : "تعذر حذف الدرس",
+            "error"
           );
-
-        await supabase
-          .from("lesson_files")
-          .delete()
-          .eq("lesson_id", lesson.id);
-      }
-
-      await deleteLesson(lesson.id);
-
-      await onRefresh();
-    } catch (error) {
-      console.error("Delete lesson error:", error);
-
-      alert(
-        error instanceof Error
-          ? error.message
-          : "تعذر حذف الدرس"
-      );
-    }
+        } finally {
+          closeConfirm();
+        }
+      },
+    });
   };
 
   const togglePreview = async (
@@ -1215,6 +1263,13 @@ function SectionBlock({
         isPreview: !lesson.is_preview,
       });
 
+      showToast(
+        lesson.is_preview
+          ? "تم إلغاء المعاينة المجانية"
+          : "تم تفعيل المعاينة المجانية",
+        "success"
+      );
+
       await onRefresh();
     } catch (error) {
       console.error(
@@ -1222,10 +1277,11 @@ function SectionBlock({
         error
       );
 
-      alert(
+      showToast(
         error instanceof Error
           ? error.message
-          : "تعذر تحديث المعاينة"
+          : "تعذر تحديث المعاينة",
+        "error"
       );
     }
   };
@@ -1295,6 +1351,8 @@ function SectionBlock({
           },
         }));
 
+        showToast("تم رفع الفيديو بنجاح", "success");
+
         await onRefresh();
 
         setTimeout(() => {
@@ -1328,30 +1386,39 @@ function SectionBlock({
     input.click();
   };
 
-  const deleteVideo = async (
+  const deleteVideo = (
     lesson: LessonWithFiles
   ) => {
-    const confirmed = window.confirm(
-      "هل أنت متأكد من حذف فيديو هذا الدرس؟"
-    );
+    setConfirmState({
+      open: true,
+      title: "حذف فيديو الدرس",
+      description:
+        "هل أنت متأكد من حذف فيديو هذا الدرس؟ لا يمكن التراجع عن هذا الإجراء.",
+      confirmLabel: "حذف الفيديو",
+      onConfirm: async () => {
+        try {
+          await deleteLessonVideoBunny(lesson.id);
 
-    if (!confirmed) return;
+          showToast("تم حذف الفيديو بنجاح", "success");
 
-    try {
-      await deleteLessonVideoBunny(lesson.id);
-      await onRefresh();
-    } catch (error) {
-      console.error(
-        "Delete lesson video error:",
-        error
-      );
+          await onRefresh();
+        } catch (error) {
+          console.error(
+            "Delete lesson video error:",
+            error
+          );
 
-      alert(
-        error instanceof Error
-          ? error.message
-          : "تعذر حذف الفيديو"
-      );
-    }
+          showToast(
+            error instanceof Error
+              ? error.message
+              : "تعذر حذف الفيديو",
+            "error"
+          );
+        } finally {
+          closeConfirm();
+        }
+      },
+    });
   };
 
   const saveSectionTitle = async () => {
@@ -1366,6 +1433,8 @@ function SectionBlock({
         title,
       });
 
+      showToast("تم تعديل اسم القسم", "success");
+
       setEditingSection(false);
 
       await onRefresh();
@@ -1375,10 +1444,11 @@ function SectionBlock({
         error
       );
 
-      alert(
+      showToast(
         error instanceof Error
           ? error.message
-          : "تعذر تعديل القسم"
+          : "تعذر تعديل القسم",
+        "error"
       );
     } finally {
       setSaving(false);
@@ -1397,39 +1467,48 @@ function SectionBlock({
       await updateSection(section.id, {
         unlockMonth: value,
       });
+
+      showToast("تم حفظ شهر فتح القسم", "success");
     } catch (error) {
       console.error(
         "Update section unlock month error:",
         error
       );
 
-      alert("تعذر حفظ شهر فتح القسم");
+      showToast("تعذر حفظ شهر فتح القسم", "error");
     }
   };
 
-  const removeSection = async () => {
-    const confirmed = window.confirm(
-      `هل أنت متأكد من حذف القسم "${section.title}"؟\nسيتم حذف الدروس الموجودة بداخله أيضًا.`
-    );
+  const removeSection = () => {
+    setConfirmState({
+      open: true,
+      title: "حذف القسم",
+      description: `هل أنت متأكد من حذف القسم "${section.title}"؟ سيتم حذف الدروس الموجودة بداخله أيضًا.`,
+      confirmLabel: "حذف القسم",
+      onConfirm: async () => {
+        try {
+          await deleteSection(section.id);
 
-    if (!confirmed) return;
+          showToast("تم حذف القسم بنجاح", "success");
 
-    try {
-      await deleteSection(section.id);
+          await onRefresh();
+        } catch (error) {
+          console.error(
+            "Delete section error:",
+            error
+          );
 
-      await onRefresh();
-    } catch (error) {
-      console.error(
-        "Delete section error:",
-        error
-      );
-
-      alert(
-        error instanceof Error
-          ? error.message
-          : "تعذر حذف القسم"
-      );
-    }
+          showToast(
+            error instanceof Error
+              ? error.message
+              : "تعذر حذف القسم",
+            "error"
+          );
+        } finally {
+          closeConfirm();
+        }
+      },
+    });
   };
 
   return (
@@ -1761,6 +1840,16 @@ function SectionBlock({
           )}
         </div>
       )}
+
+      <ConfirmDialog
+        open={confirmState.open}
+        title={confirmState.title}
+        description={confirmState.description}
+        danger
+        confirmLabel={confirmState.confirmLabel ?? "حذف"}
+        onConfirm={confirmState.onConfirm}
+        onCancel={closeConfirm}
+      />
     </div>
   );
 }
@@ -1773,6 +1862,8 @@ export default function CourseBuilderPage() {
   const { courseId } = useParams<{
     courseId: string;
   }>();
+
+  const { showToast } = useToast();
 
   const [course, setCourse] =
     useState<Course | null>(null);
@@ -1863,6 +1954,7 @@ export default function CourseBuilderPage() {
 
   useEffect(() => {
     loadData(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [courseId]);
 
   const createNewSection = async () => {
@@ -1879,6 +1971,8 @@ export default function CourseBuilderPage() {
         sections.length
       );
 
+      showToast("تم إنشاء القسم بنجاح", "success");
+
       setSectionTitle("");
       setAddingSection(false);
 
@@ -1889,10 +1983,11 @@ export default function CourseBuilderPage() {
         err
       );
 
-      alert(
+      showToast(
         err instanceof Error
           ? err.message
-          : "حدث خطأ أثناء إنشاء القسم"
+          : "حدث خطأ أثناء إنشاء القسم",
+        "error"
       );
     } finally {
       setCreatingSection(false);
@@ -1907,7 +2002,7 @@ export default function CourseBuilderPage() {
       (installmentSettings.months < 2 ||
         installmentSettings.amount <= 0)
     ) {
-      alert("أدخل عدد شهور وقيمة قسط صحيحة");
+      showToast("أدخل عدد شهور وقيمة قسط صحيحة", "error");
       return;
     }
 
@@ -1943,11 +2038,14 @@ export default function CourseBuilderPage() {
             }
           : current
       );
+
+      showToast("تم حفظ إعدادات التقسيط", "success");
     } catch (err) {
-      alert(
+      showToast(
         err instanceof Error
           ? err.message
-          : "تعذر حفظ إعدادات التقسيط"
+          : "تعذر حفظ إعدادات التقسيط",
+        "error"
       );
     } finally {
       setSavingInstallmentSettings(false);
@@ -2047,7 +2145,7 @@ export default function CourseBuilderPage() {
     >
       <div className="mx-auto max-w-7xl px-4 py-5 sm:px-6 lg:px-8">
         {/* Header */}
-        <div className="overflow-hidden rounded-3xl bg-slate-950 text-white shadow-xl">
+        <div className="overflow-hidden rounded-3xl bg-gradient-to-br from-brand-900 via-brand-800 to-brand-500 text-white shadow-xl">
           <div className="relative p-5 sm:p-7 lg:p-8">
             <div className="absolute -left-20 -top-20 h-64 w-64 rounded-full bg-brand-500/10 blur-3xl" />
 
