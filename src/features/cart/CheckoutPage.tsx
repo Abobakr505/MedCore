@@ -35,18 +35,17 @@ import { formatCurrency } from "@/utils/format";
  * غيّر القيم دي براحتك.
  */
 const PAYMENT_INFO = {
-  orange: {
-    number: "01xxxxxxxxx", // TODO: ضع رقم Orange Cash الثابت
+  etisalat: {
+    number: "01xxxxxxxxx", // رقم Etisalat Cash
   },
 
   instapay: {
-    username: "yourname@instapay", // TODO: ضع عنوان InstaPay الثابت
-    link: "https://ipn.eg/",
+    number: "01276184900", // رقم InstaPay
   },
 };
 
 type PaymentMethod =
-  | "orange"
+  | "etisalat"
   | "instapay";
 
 type PurchaseMode =
@@ -81,8 +80,8 @@ export default function CheckoutPage() {
   const [submittedIds, setSubmittedIds] =
     useState<string[]>([]);
 
-  const [paymentMethod, setPaymentMethod] =
-    useState<PaymentMethod>("orange");
+const [paymentMethod, setPaymentMethod] =
+  useState<PaymentMethod>("etisalat");
 
   // =========================
   // Load Cart
@@ -431,41 +430,36 @@ export default function CheckoutPage() {
 
           <div className="grid gap-4 sm:grid-cols-2">
 
-            {/* Orange Cash */}
-            <button
-              type="button"
-              onClick={() =>
-                setPaymentMethod(
-                  "orange"
-                )
-              }
-              className={`group rounded-3xl border p-5 text-right transition ${
-                paymentMethod ===
-                "orange"
-                  ? "border-brand-500 bg-brand-50 shadow-md ring-2 ring-brand-100"
-                  : "border-slate-200 bg-white hover:border-brand-200 hover:shadow-sm"
-              }`}
-            >
-              <div className="flex items-center justify-between">
-                <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-orange-50 text-orange-500">
-                  <Smartphone className="h-6 w-6" />
-                </div>
+           {/* Etisalat Cash */}
+<button
+  type="button"
+  onClick={() =>
+    setPaymentMethod("etisalat")
+  }
+  className={`group rounded-3xl border p-5 text-right transition ${
+    paymentMethod === "etisalat"
+      ? "border-brand-500 bg-brand-50 shadow-md ring-2 ring-brand-100"
+      : "border-slate-200 bg-white hover:border-brand-200 hover:shadow-sm"
+  }`}
+>
+  <div className="flex items-center justify-between">
+    <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-emerald-50 text-emerald-500">
+      <Smartphone className="h-6 w-6" />
+    </div>
 
-                {paymentMethod ===
-                  "orange" && (
-                  <CheckCircle2 className="h-5 w-5 text-brand-500" />
-                )}
-              </div>
+    {paymentMethod === "etisalat" && (
+      <CheckCircle2 className="h-5 w-5 text-brand-500" />
+    )}
+  </div>
 
-              <h3 className="mt-4 font-black text-slate-800">
-                Orange Cash
-              </h3>
+  <h3 className="mt-4 font-black text-slate-800">
+    Etisalat Cash
+  </h3>
 
-              <p className="mt-1 text-xs text-slate-500">
-                تحويل مباشر من محفظة Orange Cash
-              </p>
-            </button>
-
+  <p className="mt-1 text-xs text-slate-500">
+    تحويل مباشر من محفظة Etisalat Cash
+  </p>
+</button>
             {/* InstaPay */}
             <button
               type="button"
@@ -509,106 +503,87 @@ export default function CheckoutPage() {
           <div className="bg-gradient-to-r from-brand-600 to-brand-800 p-5 text-white">
             <div className="flex items-center gap-3">
 
-              {paymentMethod ===
-              "orange" ? (
-                <Smartphone className="h-6 w-6" />
-              ) : (
-                <CreditCard className="h-6 w-6" />
-              )}
+{paymentMethod === "etisalat" ? (
+  <Smartphone className="h-6 w-6" />
+) : (
+  <CreditCard className="h-6 w-6" />
+)}
 
-              <div>
-                <h2 className="font-black">
-                  {paymentMethod ===
-                  "orange"
-                    ? "بيانات Orange Cash"
-                    : "بيانات InstaPay"}
-                </h2>
+<div>
+  <h2 className="font-black">
+    {paymentMethod === "etisalat"
+      ? "بيانات Etisalat Cash"
+      : "بيانات InstaPay"}
+  </h2>
 
-                <p className="mt-0.5 text-xs text-white/70">
-                  حوّل المبلغ ثم احتفظ بصورة الإيصال
-                </p>
-              </div>
+  <p className="mt-0.5 text-xs text-white/70">
+    حوّل المبلغ ثم احتفظ بصورة الإيصال
+  </p>
+</div>
             </div>
           </div>
 
           <div className="p-5 sm:p-6">
 
-            {/* Orange Cash */}
-            {paymentMethod ===
-              "orange" && (
-              <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+{paymentMethod === "etisalat" && (
+  <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+    <div>
+      <p className="text-xs text-slate-400">
+        رقم Etisalat Cash
+      </p>
 
-                <div>
-                  <p className="text-xs text-slate-400">
-                    رقم Orange Cash
-                  </p>
+      <p
+        dir="ltr"
+        className="mt-1 text-2xl font-black tracking-wide text-slate-800"
+      >
+        {PAYMENT_INFO.etisalat.number}
+      </p>
+    </div>
 
-                  <p
-                    dir="ltr"
-                    className="mt-1 text-2xl font-black tracking-wide text-slate-800"
-                  >
-                    {PAYMENT_INFO.orange.number}
-                  </p>
-                </div>
+    <Button
+      variant="secondary"
+      onClick={() =>
+        copyText(
+          PAYMENT_INFO.etisalat.number,
+          "تم نسخ رقم Etisalat Cash"
+        )
+      }
+    >
+      <Copy className="h-4 w-4" />
+      نسخ الرقم
+    </Button>
+  </div>
+)}
 
-                <Button
-                  variant="secondary"
-                  onClick={() =>
-                    copyText(
-                      PAYMENT_INFO.orange.number,
-                      "تم نسخ رقم Orange Cash"
-                    )
-                  }
-                >
-                  <Copy className="h-4 w-4" />
-                  نسخ الرقم
-                </Button>
-              </div>
-            )}
+{paymentMethod === "instapay" && (
+  <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+    <div>
+      <p className="text-xs text-slate-400">
+        رقم InstaPay
+      </p>
 
-            {/* InstaPay */}
-            {paymentMethod === "instapay" && (
-              <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-                <div>
-                  <p className="text-xs text-slate-400">
-                    InstaPay Address
-                  </p>
+      <p
+        dir="ltr"
+        className="mt-1 text-2xl font-black tracking-wide text-slate-800"
+      >
+        {PAYMENT_INFO.instapay.number}
+      </p>
+    </div>
 
-                  <p
-                    dir="ltr"
-                    className="mt-1 text-xl font-black text-slate-800"
-                  >
-                    {PAYMENT_INFO.instapay.username}
-                  </p>
-                </div>
-
-                <div className="flex gap-2">
-                  <Button
-                    variant="secondary"
-                    onClick={() =>
-                      copyText(
-                        PAYMENT_INFO.instapay.username,
-                        "تم نسخ عنوان InstaPay"
-                      )
-                    }
-                  >
-                    <Copy className="h-4 w-4" />
-                    نسخ
-                  </Button>
-
-                  <a
-                    href={PAYMENT_INFO.instapay.link}
-                    target="_blank"
-                    rel="noreferrer"
-                  >
-                    <Button variant="secondary">
-                      فتح InstaPay
-                      <ExternalLink className="h-4 w-4" />
-                    </Button>
-                  </a>
-                </div>
-              </div>
-            )}
+    <Button
+      variant="secondary"
+      onClick={() =>
+        copyText(
+          PAYMENT_INFO.instapay.number,
+          "تم نسخ رقم InstaPay"
+        )
+      }
+    >
+      <Copy className="h-4 w-4" />
+      نسخ الرقم
+    </Button>
+  </div>
+)}
 
           </div>
         </section>
@@ -858,10 +833,9 @@ export default function CheckoutPage() {
               </div>
 
               <p className="mt-1 text-sm text-brand-700">
-                {paymentMethod ===
-                "orange"
-                  ? "Orange Cash"
-                  : "InstaPay"}
+{paymentMethod === "etisalat"
+  ? "Etisalat Cash"
+  : "InstaPay"}
               </p>
 
               <p className="mt-2 text-xs font-bold text-brand-800">
