@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
 import {
@@ -14,6 +14,9 @@ import { Button } from "@/components/ui/Button";
 import { useToast } from "@/contexts/ToastContext";
 import { supabase } from "@/lib/supabase";
 
+// نفس رابط الـ Edge Function المستخدم في تسجيل دخول الطلاب/المعلمين
+const LOGIN_FUNCTION_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/login-with-rate-limit`;
+
 export default function AdminLoginPage() {
   const navigate = useNavigate();
   const { showToast } = useToast();
@@ -24,8 +27,28 @@ export default function AdminLoginPage() {
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
 
+  // قفل مؤقت لما يتحظر بسبب محاولات كتير فاشلة
+  const [lockedUntil, setLockedUntil] = useState<number | null>(null);
+  const [remainingSeconds, setRemainingSeconds] = useState(0);
+
+  useEffect(() => {
+    if (!lockedUntil) return;
+
+    const tick = () => {
+      const secondsLeft = Math.max(0, Math.ceil((lockedUntil - Date.now()) / 1000));
+      setRemainingSeconds(secondsLeft);
+      if (secondsLeft <= 0) setLockedUntil(null);
+    };
+
+    tick();
+    const interval = setInterval(tick, 1000);
+    return () => clearInterval(interval);
+  }, [lockedUntil]);
+
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
+
+    if (loading || lockedUntil) return;
 
     const normalizedEmail = email.trim().toLowerCase();
 
@@ -38,31 +61,57 @@ export default function AdminLoginPage() {
 
     try {
       /*
-       * 1) تسجيل الدخول في Supabase Auth
+       * 1) تسجيل الدخول عن طريق الـ Edge Function المحمية بـ Rate Limiting
+       *    (بدل ما ننادي supabase.auth.signInWithPassword مباشرة)
        */
-      const { data, error } = await supabase.auth.signInWithPassword({
-        email: normalizedEmail,
-        password,
-      });
-
-      /*
-       * بيانات الدخول غير صحيحة
-       */
-      if (error) {
-        console.error("ADMIN LOGIN AUTH ERROR:", error);
-
-        showToast(
-          "البريد الإلكتروني أو كلمة المرور غير صحيحة",
-          "error"
-        );
-
+      let response: Response;
+      try {
+        response = await fetch(LOGIN_FUNCTION_URL, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            apikey: import.meta.env.VITE_SUPABASE_ANON_KEY,
+            Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`,
+          },
+          body: JSON.stringify({ email: normalizedEmail, password }),
+        });
+      } catch (networkError) {
+        console.error("ADMIN LOGIN NETWORK ERROR:", networkError);
+        showToast("تعذر الاتصال بالخادم، تحقق من اتصالك بالإنترنت", "error");
         return;
       }
 
-      if (!data.user) {
+      const result = await response.json();
+
+      if (!response.ok) {
+        if (result.error === "rate_limited") {
+          const seconds = result.retry_after_seconds || 60;
+          setLockedUntil(Date.now() + seconds * 1000);
+          showToast(result.message, "error");
+          return;
+        }
+
+        console.error("ADMIN LOGIN AUTH ERROR:", result);
+        showToast(
+          result.message || "البريد الإلكتروني أو كلمة المرور غير صحيحة",
+          "error"
+        );
+        return;
+      }
+
+      // نحط الـ session اللي رجعت من الفنكشن في عميل Supabase المحلي
+      const { error: setSessionError } = await supabase.auth.setSession({
+        access_token: result.session.access_token,
+        refresh_token: result.session.refresh_token,
+      });
+
+      if (setSessionError || !result.user) {
+        console.error("ADMIN SET SESSION ERROR:", setSessionError);
         showToast("تعذر تسجيل الدخول", "error");
         return;
       }
+
+      const userId: string = result.user.id;
 
       /*
        * 2) جلب Role المستخدم من profiles
@@ -70,7 +119,7 @@ export default function AdminLoginPage() {
       const { data: profile, error: profileError } = await supabase
         .from("profiles")
         .select("id, full_name, email, role, status")
-        .eq("id", data.user.id)
+        .eq("id", userId)
         .maybeSingle();
 
       /*
@@ -224,6 +273,23 @@ export default function AdminLoginPage() {
               </p>
             </div>
 
+            {/* Rate-limit lock notice */}
+            {lockedUntil && (
+              <motion.div
+                initial={{ opacity: 0, y: -5 }}
+                animate={{ opacity: 1, y: 0 }}
+                className="mb-6 rounded-xl border border-red-100 bg-red-50 p-4 text-center"
+              >
+                <p className="text-xs font-extrabold text-red-700">
+                  تم تقييد المحاولات مؤقتًا
+                </p>
+                <p className="mt-1 text-[11px] text-red-600/80">
+                  حاول مرة أخرى بعد {Math.floor(remainingSeconds / 60)}:
+                  {String(remainingSeconds % 60).padStart(2, "0")}
+                </p>
+              </motion.div>
+            )}
+
             {/* Form */}
             <form onSubmit={handleSubmit} className="space-y-5">
 
@@ -247,7 +313,7 @@ export default function AdminLoginPage() {
                     onChange={(e) => setEmail(e.target.value)}
                     placeholder="admin@medcore.app"
                     autoComplete="username"
-                    disabled={loading}
+                    disabled={loading || !!lockedUntil}
                     className="h-12 w-full rounded-xl border border-slate-200 bg-slate-50 pr-11 pl-4 text-sm text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-blue-500 focus:bg-white focus:ring-4 focus:ring-blue-500/10 disabled:cursor-not-allowed disabled:opacity-60"
                   />
 
@@ -274,7 +340,7 @@ export default function AdminLoginPage() {
                     onChange={(e) => setPassword(e.target.value)}
                     placeholder="••••••••"
                     autoComplete="current-password"
-                    disabled={loading}
+                    disabled={loading || !!lockedUntil}
                     className="h-12 w-full rounded-xl border border-slate-200 bg-slate-50 pr-11 pl-12 text-sm text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-blue-500 focus:bg-white focus:ring-4 focus:ring-blue-500/10 disabled:cursor-not-allowed disabled:opacity-60"
                   />
 
@@ -283,7 +349,7 @@ export default function AdminLoginPage() {
                     onClick={() =>
                       setShowPassword((prev) => !prev)
                     }
-                    disabled={loading}
+                    disabled={loading || !!lockedUntil}
                     aria-label={
                       showPassword
                         ? "إخفاء كلمة المرور"
@@ -307,6 +373,7 @@ export default function AdminLoginPage() {
                 className="!mt-6 h-12 w-full rounded-xl bg-blue-600 font-bold text-white shadow-lg shadow-blue-600/20 transition hover:bg-blue-700 hover:shadow-blue-600/30"
                 size="lg"
                 isLoading={loading}
+                disabled={!!lockedUntil}
               >
                 <Lock className="h-4 w-4" />
                 دخول لوحة الإدارة
