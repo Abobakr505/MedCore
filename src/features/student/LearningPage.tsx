@@ -90,6 +90,8 @@ interface LessonFile {
 }
 
 interface LessonWithFiles extends Lesson {
+  order_index: number;
+  created_at?: string;
   files?: LessonFile[];
 }
 
