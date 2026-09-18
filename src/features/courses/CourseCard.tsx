@@ -117,7 +117,7 @@ export function CourseCard({ course, index = 0 }: CourseCardProps) {
           </div>
 
           {/* Title */}
-          <h3 className="line-clamp-2 min-h-[56px] text-[19px] font-black leading-7 text-slate-900 transition-colors duration-300 group-hover:text-brand-700">
+          <h3 className="line-clamp-2 min-h-[40px] text-2xl font-black leading-7 text-slate-900 transition-colors duration-300 group-hover:text-brand-700">
             {course.title}
           </h3>
 
