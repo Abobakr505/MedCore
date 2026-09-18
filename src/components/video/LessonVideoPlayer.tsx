@@ -1,10 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Loader2, AlertCircle } from "lucide-react";
 
-/* -------------------------------------------------------------------------- */
-/* Types                                                                      */
-/* -------------------------------------------------------------------------- */
-
 interface LessonVideoPlayerProps {
   src: string; // رابط الـ embed اللي راجع من الـ edge function
   onTimeUpdate?: (currentTime: number, duration: number) => void;
@@ -12,10 +8,6 @@ interface LessonVideoPlayerProps {
   disableRightClick?: boolean;
   className?: string;
 }
-
-/* -------------------------------------------------------------------------- */
-/* Component                                                                  */
-/* -------------------------------------------------------------------------- */
 
 export default function LessonVideoPlayer({
   src,
@@ -29,17 +21,14 @@ export default function LessonVideoPlayer({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  /* إعادة ضبط الحالة كل مرة يتغيّر فيها مصدر الفيديو */
   useEffect(() => {
     setLoading(true);
     setError(null);
     durationRef.current = 0;
   }, [src]);
 
-  /* استقبال أحداث اللاعب عن طريق postMessage (بروتوكول Player.js بتاع Bunny) */
   useEffect(() => {
     const handleMessage = (event: MessageEvent) => {
-      // تأكد إن الرسالة جاية من Bunny فعلاً
       if (
         typeof event.origin !== "string" ||
         !event.origin.includes("mediadelivery.net")
@@ -67,11 +56,17 @@ export default function LessonVideoPlayer({
 
         case "timeupdate":
           if (typeof data.currentTime === "number") {
-            if (typeof data.duration === "number" && data.duration > 0) {
+            if (
+              typeof data.duration === "number" &&
+              data.duration > 0
+            ) {
               durationRef.current = data.duration;
             }
 
-            onTimeUpdate?.(data.currentTime, durationRef.current);
+            onTimeUpdate?.(
+              data.currentTime,
+              durationRef.current
+            );
           }
           break;
 
@@ -96,7 +91,6 @@ export default function LessonVideoPlayer({
     };
   }, [onTimeUpdate, onEnded]);
 
-  /* احتياطي: لو حدث "ready" متجاش خلال 8 ثواني، شيل اللودينج برضه */
   useEffect(() => {
     const timeout = setTimeout(() => {
       setLoading(false);
@@ -118,7 +112,10 @@ export default function LessonVideoPlayer({
       {error && (
         <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-3 bg-black/90 px-5 text-center">
           <AlertCircle className="h-10 w-10 text-red-400" />
-          <p className="text-sm font-bold text-white">{error}</p>
+
+          <p className="text-sm font-bold text-white">
+            {error}
+          </p>
         </div>
       )}
 
@@ -130,7 +127,6 @@ export default function LessonVideoPlayer({
         allow="accelerometer;gyroscope;autoplay;encrypted-media;picture-in-picture;"
         allowFullScreen
         onLoad={() => {
-          // بعض المتصفحات مابتبعتش "ready" فورًا، فده احتياطي إضافي
           setLoading(false);
         }}
       />

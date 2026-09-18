@@ -1,28 +1,42 @@
-import { useEffect, useRef, useCallback } from "react";
+import { useEffect, useRef, useCallback, useState } from "react";
 
 interface Options {
   onSuspiciousActivity: (reason: string) => void;
-  /** عدد مرات فقدان التركيز خلال نافذة زمنية قبل اعتباره مشبوهًا */
+  onCoverChange?: (covered: boolean) => void;
+  /** عدد مرات فقدان التركيز خلال نافذة زمنية قبل اعتباره مشبوهًا (مؤشر ثانوي فقط) */
   focusLossThreshold?: number;
   focusLossWindowMs?: number;
 }
 
 /**
- * كشف إشارات (وليس إثباتات) لتسجيل/مشاركة الشاشة.
+ * كشف إشارات (وليس إثباتات) لتسجيل/مشاركة الشاشة، مع تغطية فورية للفيديو.
  *
- * ⚠️ حدود حقيقية غير قابلة للتجاوز:
+ * ⚠️ حدود حقيقية غير قابلة للتجاوز (اقرأها قبل الاعتماد على هذا الهوك):
  * - لا يمكن كشف QuickTime / أدوات نظام التشغيل / كاميرا خارجية تصوّر الشاشة.
+ * - لا يمكن كشف أو منع لقطة شاشة (PrintScreen / iOS / Android) في أغلب المتصفحات إطلاقًا،
+ *   لأن نظام التشغيل ياخد اللقطة قبل ما الصفحة تاخد أي فرصة للتصرف.
  * - كل ما هنا "مؤشرات احتمالية" يمكن أن تعطي false positive (مستخدم بدّل تبويب فقط)
  *   أو false negative (تسجيل عبر أداة نظام لا يترك أي أثر في المتصفح).
- * - هذا الملف مكمّل للعلامة المائية أدناه، وليس بديلاً عنها.
+ * - الحل الوحيد الحقيقي لمنع السكرين شوت هو DRM هاردوير (Widevine L1 / FairPlay)،
+ *   وحتى هو غير مضمون على كل الأجهزة (لا يعمل على Widevine L3).
+ * - هذا الهوك مكمّل للعلامة المائية، وليس بديلاً عنها.
  */
 export function useScreenRecordingGuard({
   onSuspiciousActivity,
+  onCoverChange,
   focusLossThreshold = 4,
   focusLossWindowMs = 30_000,
 }: Options) {
-  const triggeredRef = useRef(false);
+  const [isCovered, setIsCovered] = useState(false);
   const focusLossTimestamps = useRef<number[]>([]);
+
+  const setCovered = useCallback(
+    (covered: boolean) => {
+      setIsCovered(covered);
+      onCoverChange?.(covered);
+    },
+    [onCoverChange]
+  );
 
   const reportFocusLoss = useCallback(() => {
     const now = Date.now();
@@ -38,21 +52,19 @@ export function useScreenRecordingGuard({
   }, [onSuspiciousActivity, focusLossThreshold, focusLossWindowMs]);
 
   useEffect(() => {
-    triggeredRef.current = false;
-
-    // 1) getDisplayMedia (تسجيل/مشاركة شاشة عبر المتصفح نفسه)
+    // 1) getDisplayMedia (تسجيل/مشاركة شاشة عبر المتصفح نفسه) — هذا فعليًا قابل للمنع
     const originalGetDisplayMedia =
       navigator.mediaDevices?.getDisplayMedia?.bind(navigator.mediaDevices);
 
     if (typeof originalGetDisplayMedia === "function") {
-      navigator.mediaDevices.getDisplayMedia = async (...args) => {
+      navigator.mediaDevices.getDisplayMedia = async () => {
         onSuspiciousActivity("getDisplayMedia_called");
+        setCovered(true);
         throw new DOMException("Screen recording is not allowed", "NotAllowedError");
       };
     }
 
-    // 2) getUserMedia بكاميرا — بعض تطبيقات "تصوير الشاشة بكاميرا خارجية"
-    //    لا تظهر هنا أصلاً، لكن نسجل محاولات وصول الكاميرا كسياق إضافي
+    // 2) getUserMedia بكاميرا — سياق إضافي فقط، ليس دليل تسجيل
     const originalGetUserMedia =
       navigator.mediaDevices?.getUserMedia?.bind(navigator.mediaDevices);
 
@@ -65,11 +77,30 @@ export function useScreenRecordingGuard({
       };
     }
 
-    // 3) فقدان تركيز متكرر خلال فترة قصيرة (مؤشر ضعيف جدًا، استخدمه بحذر)
-    const handleBlur = () => reportFocusLoss();
-    window.addEventListener("blur", handleBlur);
+    // 3) تغطية فورية عند فقدان تركيز النافذة أو التبويب (يغطي "ألت-تاب" ونوافذ تسجيل كثيرة،
+    //    لكن لا يوقف تصوير الشاشة بموبايل تاني أو أداة نظام لا تسحب التركيز)
+    const handleBlur = () => {
+      setCovered(true);
+      reportFocusLoss();
+    };
 
-    // 4) DevTools مفتوحة بشكل غير طبيعي (مؤشر إضافي ضعيف أيضًا)
+    const handleFocus = () => {
+      setCovered(false);
+    };
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === "hidden") {
+        setCovered(true);
+      } else {
+        setCovered(false);
+      }
+    };
+
+    window.addEventListener("blur", handleBlur);
+    window.addEventListener("focus", handleFocus);
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+
+    // 4) DevTools مفتوحة (مؤشر ضعيف، ممكن يعطي false positive مع بعض إعدادات المتصفح)
     let devtoolsOpen = false;
     const threshold = 160;
     const checkDevTools = () => {
@@ -92,7 +123,11 @@ export function useScreenRecordingGuard({
         navigator.mediaDevices.getUserMedia = originalGetUserMedia;
       }
       window.removeEventListener("blur", handleBlur);
+      window.removeEventListener("focus", handleFocus);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
       clearInterval(interval);
     };
-  }, [onSuspiciousActivity, reportFocusLoss]);
+  }, [onSuspiciousActivity, reportFocusLoss, setCovered]);
+
+  return { isCovered };
 }

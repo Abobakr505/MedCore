@@ -895,7 +895,140 @@ function getVideoDuration(file: File): Promise<number> {
     video.src = objectUrl;
   });
 }
+/* -------------------------------------------------------------------------- */
+/* Mobile Number Stepper                                                      */
+/* -------------------------------------------------------------------------- */
 
+function NumberStepper({
+  value,
+  onChange,
+  min = 0,
+  max,
+  step = 1,
+  label,
+  suffix,
+}: {
+  value: number;
+  onChange: (value: number) => void;
+  min?: number;
+  max?: number;
+  step?: number;
+  label?: string;
+  suffix?: string;
+}) {
+  const safeValue = Number.isFinite(value) ? value : min;
+
+  const decrease = () => {
+    const next = safeValue - step;
+
+    if (next < min) {
+      onChange(min);
+      return;
+    }
+
+    onChange(next);
+  };
+
+  const increase = () => {
+    const next = safeValue + step;
+
+    if (max !== undefined && next > max) {
+      onChange(max);
+      return;
+    }
+
+    onChange(next);
+  };
+
+  const handleInputChange = (
+    event: ChangeEvent<HTMLInputElement>
+  ) => {
+    const raw = event.target.value;
+
+    // السماح للمستخدم بمسح الحقل مؤقتًا
+    if (raw === "") {
+      onChange(min);
+      return;
+    }
+
+    const parsed = Number(raw);
+
+    if (!Number.isFinite(parsed)) {
+      return;
+    }
+
+    let next = Math.floor(parsed);
+
+    if (next < min) {
+      next = min;
+    }
+
+    if (max !== undefined && next > max) {
+      next = max;
+    }
+
+    onChange(next);
+  };
+
+  return (
+    <div>
+      {label && (
+        <label className="mb-2 block text-sm font-bold text-slate-700">
+          {label}
+        </label>
+      )}
+
+      <div className="flex min-h-[56px] items-stretch overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+        {/* Decrease */}
+        <button
+          type="button"
+          onClick={decrease}
+          disabled={safeValue <= min}
+          aria-label={`تقليل ${label ?? "القيمة"}`}
+          className="flex w-14 shrink-0 items-center justify-center bg-slate-50 text-xl font-black text-slate-700 transition active:scale-95 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-30 sm:w-16"
+        >
+          −
+        </button>
+
+        {/* Value */}
+        <div className="flex min-w-0 flex-1 items-center justify-center px-2">
+          <input
+            type="text"
+            inputMode="numeric"
+            pattern="[0-9]*"
+            value={safeValue}
+            onChange={handleInputChange}
+            onFocus={(event) => {
+              event.currentTarget.select();
+            }}
+            className="w-full min-w-0 border-0 bg-transparent px-2 py-2 text-center text-lg font-black text-slate-900 outline-none focus:ring-0"
+            aria-label={label}
+          />
+
+          {suffix && (
+            <span className="shrink-0 text-xs font-bold text-slate-400">
+              {suffix}
+            </span>
+          )}
+        </div>
+
+        {/* Increase */}
+        <button
+          type="button"
+          onClick={increase}
+          disabled={
+            max !== undefined &&
+            safeValue >= max
+          }
+          aria-label={`زيادة ${label ?? "القيمة"}`}
+          className="flex w-14 shrink-0 items-center justify-center bg-slate-50 text-xl font-black text-slate-700 transition active:scale-95 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-30 sm:w-16"
+        >
+          +
+        </button>
+      </div>
+    </div>
+  );
+}
 /* -------------------------------------------------------------------------- */
 /* Section Block                                                              */
 /* -------------------------------------------------------------------------- */
@@ -1380,22 +1513,27 @@ function SectionBlock({
                   <p className="mt-1 text-xs text-slate-500">
                     {lessons.length} درس
                   </p>
+<div className="mt-3 max-w-sm">
+  <NumberStepper
+    label="يفتح من الشهر"
+    value={unlockMonth}
+    min={1}
+    step={1}
+    suffix="شهر"
+    onChange={(value) => {
+      setUnlockMonth(value);
+    }}
+  />
 
-                  <label className="mt-2 inline-flex items-center gap-2 text-xs font-semibold text-slate-500">
-                    يفتح من الشهر
-                    <input
-                      type="number"
-                      min={1}
-                      value={unlockMonth}
-                      onChange={(event) =>
-                        setUnlockMonth(
-                          Number(event.target.value)
-                        )
-                      }
-                      onBlur={saveUnlockMonth}
-                      className="w-16 rounded-lg border border-slate-200 bg-white px-2 py-1 text-center text-xs font-bold text-slate-700 outline-none focus:border-brand-500"
-                    />
-                  </label>
+  <button
+    type="button"
+    onClick={saveUnlockMonth}
+    className="mt-2 inline-flex items-center gap-2 rounded-xl bg-brand-50 px-3 py-2 text-xs font-bold text-brand-700 transition hover:bg-brand-100"
+  >
+    <CheckCircle2 className="h-3.5 w-3.5" />
+    حفظ شهر الفتح
+  </button>
+</div>
                 </>
               )}
             </div>
@@ -2075,51 +2213,40 @@ export default function CourseBuilderPage() {
             </div>
 
             {installmentSettings.enabled && (
-              <div className="mt-4 grid gap-3 sm:grid-cols-2">
-                <label className="text-sm font-bold text-slate-700">
-                  عدد الشهور
-                  <input
-                    type="number"
-                    min={2}
-                    value={
-                      installmentSettings.months
-                    }
-                    onChange={(event) =>
-                      setInstallmentSettings(
-                        (current) => ({
-                          ...current,
-                          months: Number(
-                            event.target.value
-                          ),
-                        })
-                      )
-                    }
-                    className="mt-2 w-full rounded-xl border border-slate-200 px-3 py-2.5 outline-none focus:border-brand-500"
-                  />
-                </label>
+              <div className="mt-4 grid gap-4 sm:grid-cols-2">
+  <NumberStepper
+    label="عدد الشهور"
+    value={installmentSettings.months}
+    min={2}
+    max={36}
+    step={1}
+    suffix="شهر"
+    onChange={(value) =>
+      setInstallmentSettings(
+        (current) => ({
+          ...current,
+          months: value,
+        })
+      )
+    }
+  />
 
-                <label className="text-sm font-bold text-slate-700">
-                  قيمة القسط الشهري
-                  <input
-                    type="number"
-                    min={1}
-                    value={
-                      installmentSettings.amount
-                    }
-                    onChange={(event) =>
-                      setInstallmentSettings(
-                        (current) => ({
-                          ...current,
-                          amount: Number(
-                            event.target.value
-                          ),
-                        })
-                      )
-                    }
-                    className="mt-2 w-full rounded-xl border border-slate-200 px-3 py-2.5 outline-none focus:border-brand-500"
-                  />
-                </label>
-              </div>
+  <NumberStepper
+    label="قيمة القسط الشهري"
+    value={installmentSettings.amount}
+    min={1}
+    step={50}
+    suffix="ج.م"
+    onChange={(value) =>
+      setInstallmentSettings(
+        (current) => ({
+          ...current,
+          amount: value,
+        })
+      )
+    }
+  />
+</div>
             )}
 
             <button

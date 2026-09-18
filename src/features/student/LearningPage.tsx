@@ -904,7 +904,7 @@ const [videoDownloadPct, setVideoDownloadPct] =
     []
   );
 
-  useScreenRecordingGuard({
+  const { isCovered } = useScreenRecordingGuard({
     onSuspiciousActivity: handleSuspiciousActivity,
   });
 
@@ -932,14 +932,41 @@ const [videoDownloadPct, setVideoDownloadPct] =
 
         setCourse(loadedCourse);
 
-        const loadedSections =
-          await fetchCourseSections(
-            loadedCourse.id
-          );
+const loadedSections =
+  await fetchCourseSections(
+    loadedCourse.id
+  );
 
-        const normalizedSections =
-          (loadedSections ?? []) as SectionWithLessons[];
+const normalizedSections =
+  ((loadedSections ?? []) as SectionWithLessons[]).map(
+    (section) => ({
+      ...section,
+      lessons: [...(section.lessons ?? [])].sort(
+        (a, b) => {
+          // الترتيب الأساسي حسب order_index
+          const orderA = Number(a.order_index ?? 0);
+          const orderB = Number(b.order_index ?? 0);
 
+          if (orderA !== orderB) {
+            return orderA - orderB;
+          }
+
+          // لو order_index متساوي، الأقدم يظهر أولًا
+          const dateA = a.created_at
+            ? new Date(a.created_at).getTime()
+            : 0;
+
+          const dateB = b.created_at
+            ? new Date(b.created_at).getTime()
+            : 0;
+
+          return dateA - dateB;
+        }
+      ),
+    })
+  );
+
+setSections(normalizedSections);
         setSections(
           normalizedSections
         );
@@ -1278,7 +1305,7 @@ const loadLessonVideo = useCallback(
   /* ---------------------------------------------------------------------- */
   const [completingLesson, setCompletingLesson] =
   useState(false);
-  
+
 const markLessonCompleted = useCallback(
   async (durationSeconds?: number) => {
     if (!activeLesson || !course) return;
@@ -1556,30 +1583,73 @@ const markLessonCompleted = useCallback(
   /* ---------------------------------------------------------------------- */
   /* Keyboard protection                                                     */
   /* ---------------------------------------------------------------------- */
-
+  /*
+   * ⚠️ ملاحظة صريحة: preventDefault هنا لن يمنع نظام التشغيل من التقاط
+   * PrintScreen أو Win+Shift+S أو Cmd+Shift+3/4/5 فعليًا في معظم الحالات،
+   * لأن هذه الاختصارات يعالجها نظام التشغيل مباشرة (على مستوى أدنى من
+   * المتصفح) قبل أن يصل أي حدث لصفحة الويب. ما يفعله هذا الكود هو: (أ)
+   * محاولة اعتراض الحدث إن كان المتصفح فعليًا هو من يستقبله، و(ب) تسجيل
+   * الحدث كمؤشر مشبوه وتغطية الفيديو فورًا كأفضل رد فعل ممكن.
+   */
   useEffect(() => {
-    const handleKeyDown = (
-      event: KeyboardEvent
-    ) => {
+    const handleKeyDown = (event: KeyboardEvent) => {
       const key = event.key.toLowerCase();
+      const code = event.code;
 
-      if (
+      const isWindowsScreenshotShortcut =
+        // PrintScreen وحدها (نسخ الشاشة كاملة للحافظة)
         event.key === "PrintScreen" ||
+        code === "PrintScreen" ||
+        // Alt + PrintScreen (النافذة النشطة فقط)
+        (event.altKey &&
+          (event.key === "PrintScreen" || code === "PrintScreen")) ||
+        // Win + PrintScreen (حفظ تلقائي في مجلد Screenshots)
         (event.metaKey &&
-          event.shiftKey &&
-          ["3", "4", "5"].includes(event.key)) ||
-        (event.ctrlKey &&
-          event.shiftKey &&
-          key === "s")
-      ) {
+          (event.key === "PrintScreen" || code === "PrintScreen")) ||
+        // Win + Shift + S (أداة القص Snipping Tool)
+        (event.metaKey && event.shiftKey && key === "s") ||
+        // Ctrl + Shift + S (بعض التطبيقات، ومتصفحات كروميوم قد تستقبلها)
+        (event.ctrlKey && event.shiftKey && key === "s") ||
+        // Win + G (فتح Xbox Game Bar لتسجيل الشاشة)
+        (event.metaKey && key === "g") ||
+        // Win + Alt + R (بدء/إيقاف تسجيل شاشة عبر Game Bar مباشرة)
+        (event.metaKey && event.altKey && key === "r");
+
+      const isMacScreenshotShortcut =
+        event.metaKey &&
+        event.shiftKey &&
+        // Cmd+Shift+3 (الشاشة كاملة)
+        // Cmd+Shift+4 (منطقة محددة)
+        // Cmd+Shift+5 (قائمة التقاط الشاشة وتسجيل الفيديو الموحدة)
+        // Cmd+Shift+6 (Touch Bar على الأجهزة القديمة)
+        ["3", "4", "5", "6"].includes(event.key);
+
+      const isMacScreenshotToClipboard =
+        // Cmd+Ctrl+Shift+3/4 (نسخ اللقطة للحافظة بدل حفظها كملف)
+        event.metaKey &&
+        event.ctrlKey &&
+        event.shiftKey &&
+        ["3", "4"].includes(event.key);
+
+      const isSuspicious =
+        isWindowsScreenshotShortcut ||
+        isMacScreenshotShortcut ||
+        isMacScreenshotToClipboard;
+
+      if (isSuspicious) {
+        // شكلي في أغلب الأحيان (راجع الملاحظة أعلاه)، لكن مجاني ولا يضر
+        event.preventDefault();
         handleSuspiciousActivity("screenshot_shortcut");
       }
     };
 
-    window.addEventListener("keydown", handleKeyDown);
+    // capture: true لمحاولة اعتراض الحدث بأسرع ما يمكن قبل أي معالج آخر في الصفحة
+    window.addEventListener("keydown", handleKeyDown, { capture: true });
 
     return () => {
-      window.removeEventListener("keydown", handleKeyDown);
+      window.removeEventListener("keydown", handleKeyDown, {
+        capture: true,
+      });
     };
   }, [handleSuspiciousActivity]);
 
@@ -1995,6 +2065,18 @@ const markLessonCompleted = useCallback(
                       containerRef={watermarkRef}
                     />
 
+                    {/* تغطية فورية سوداء عند فقدان التركيز/التبويب أو getDisplayMedia */}
+                    <AnimatePresence>
+                      {isCovered && !screenRecordingDetected && (
+                        <motion.div
+                          initial={{ opacity: 0 }}
+                          animate={{ opacity: 1 }}
+                          exit={{ opacity: 0 }}
+                          className="absolute inset-0 z-30 bg-black"
+                        />
+                      )}
+                    </AnimatePresence>
+
                     {/* Recording warning */}
                     <AnimatePresence>
                       {screenRecordingDetected && (
@@ -2010,7 +2092,7 @@ const markLessonCompleted = useCallback(
                           exit={{
                             opacity: 0,
                           }}
-                          className="absolute inset-0 z-20 flex items-center justify-center bg-black/80 p-5 text-center backdrop-blur-sm"
+                          className="absolute inset-0 z-40 flex items-center justify-center bg-black p-5 text-center"
                         >
                           <div>
                             <Lock className="mx-auto h-10 w-10 text-red-400" />

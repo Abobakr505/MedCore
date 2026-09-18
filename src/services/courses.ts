@@ -231,6 +231,11 @@ export async function fetchCourseBySlug(slug: string) {
    Fetch Course Sections
    Includes Lessons + Lesson Files
 ========================================================= */
+/* =========================================================
+   Fetch Course Sections
+   Includes Lessons + Lesson Files
+   Lessons: oldest -> newest
+========================================================= */
 export async function fetchCourseSections(
   courseId: string
 ) {
@@ -258,6 +263,7 @@ export async function fetchCourseSections(
           video_chunk_count,
           bunny_video_id,
           bunny_video_status,
+          created_at,
           lesson_files (
             id,
             lesson_id,
@@ -288,20 +294,53 @@ export async function fetchCourseSections(
 
   const sections = (data ?? []).map(
     (section: any) => {
-      const lessons = (section.lessons ?? [])
-        .sort(
-          (a: any, b: any) =>
-            (a.order_index ?? 0) -
-            (b.order_index ?? 0)
-        )
+      const lessons = [...(section.lessons ?? [])]
+        .sort((a: any, b: any) => {
+          const orderA = Number(a.order_index ?? 0);
+          const orderB = Number(b.order_index ?? 0);
+
+          // أولًا: ترتيب الدروس حسب order_index
+          if (orderA !== orderB) {
+            return orderA - orderB;
+          }
+
+          // ثانيًا: لو نفس order_index
+          // الأقدم created_at يظهر أولًا
+          const dateA = a.created_at
+            ? new Date(a.created_at).getTime()
+            : 0;
+
+          const dateB = b.created_at
+            ? new Date(b.created_at).getTime()
+            : 0;
+
+          return dateA - dateB;
+        })
         .map((lesson: any) => {
-          const files = (
-            lesson.lesson_files ?? []
-          ).sort(
-            (a: any, b: any) =>
-              (a.order_index ?? 0) -
-              (b.order_index ?? 0)
-          );
+          const files = [...(lesson.lesson_files ?? [])]
+            .sort((a: any, b: any) => {
+              const orderA = Number(
+                a.order_index ?? 0
+              );
+
+              const orderB = Number(
+                b.order_index ?? 0
+              );
+
+              if (orderA !== orderB) {
+                return orderA - orderB;
+              }
+
+              const dateA = a.created_at
+                ? new Date(a.created_at).getTime()
+                : 0;
+
+              const dateB = b.created_at
+                ? new Date(b.created_at).getTime()
+                : 0;
+
+              return dateA - dateB;
+            });
 
           return {
             ...lesson,

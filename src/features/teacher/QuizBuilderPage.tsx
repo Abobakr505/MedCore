@@ -16,6 +16,8 @@ import {
   BarChart3,
   Sparkles,
   X,
+  Pencil,
+  Save,
 } from "lucide-react";
 
 import { Button } from "@/components/ui/Button";
@@ -28,6 +30,7 @@ import { useToast } from "@/contexts/ToastContext";
 import {
   fetchCourseQuizzes,
   createQuiz,
+  updateQuiz,
   fetchQuizForEditing,
   addQuestion,
   addOption,
@@ -48,7 +51,22 @@ export default function QuizBuilderPage() {
   const [questions, setQuestions] = useState<QuizQuestion[]>([]);
   const [loading, setLoading] = useState(true);
   const [createModalOpen, setCreateModalOpen] = useState(false);
+
+  const [editModalOpen, setEditModalOpen] = useState(false);
+  const [editingQuiz, setEditingQuiz] = useState<Quiz | null>(null);
+  const [editLoading, setEditLoading] = useState(false);
+
   const [quizForm, setQuizForm] = useState({
+    title: "",
+    description: "",
+    scope: "course" as QuizScope,
+    sectionId: "",
+    lessonId: "",
+    durationMinutes: 30,
+    passingScore: 60,
+  });
+
+  const [editQuizForm, setEditQuizForm] = useState({
     title: "",
     description: "",
     scope: "course" as QuizScope,
@@ -88,6 +106,30 @@ export default function QuizBuilderPage() {
     }
   };
 
+  const openEditQuiz = (quiz: Quiz) => {
+    let scope: QuizScope = "course";
+
+    if (quiz.lesson_id) {
+      scope = "lesson";
+    } else if (quiz.section_id) {
+      scope = "section";
+    }
+
+    setEditingQuiz(quiz);
+
+    setEditQuizForm({
+      title: quiz.title ?? "",
+      description: quiz.description ?? "",
+      scope,
+      sectionId: quiz.section_id ?? "",
+      lessonId: quiz.lesson_id ?? "",
+      durationMinutes: quiz.duration_minutes ?? 30,
+      passingScore: quiz.passing_score ?? 60,
+    });
+
+    setEditModalOpen(true);
+  };
+
   const handleCreateQuiz = async () => {
     if (!courseId || !quizForm.title.trim()) {
       showToast("أدخل عنوان الاختبار", "error");
@@ -118,7 +160,8 @@ export default function QuizBuilderPage() {
           quizForm.scope === "section" || quizForm.scope === "lesson"
             ? quizForm.sectionId || null
             : null,
-        lessonId: quizForm.scope === "lesson" ? quizForm.lessonId || null : null,
+        lessonId:
+          quizForm.scope === "lesson" ? quizForm.lessonId || null : null,
       });
 
       showToast("تم إنشاء الاختبار بنجاح", "success");
@@ -138,6 +181,71 @@ export default function QuizBuilderPage() {
       load();
     } catch {
       showToast("تعذّر إنشاء الاختبار", "error");
+    }
+  };
+
+  const handleUpdateQuiz = async () => {
+    if (!editingQuiz) return;
+
+    if (!editQuizForm.title.trim()) {
+      showToast("أدخل عنوان الاختبار", "error");
+      return;
+    }
+
+    if (
+      (editQuizForm.scope === "section" ||
+        editQuizForm.scope === "lesson") &&
+      !editQuizForm.sectionId
+    ) {
+      showToast("اختر القسم المرتبط بالاختبار", "error");
+      return;
+    }
+
+    if (editQuizForm.scope === "lesson" && !editQuizForm.lessonId) {
+      showToast("اختر الدرس المرتبط بالاختبار", "error");
+      return;
+    }
+
+    try {
+      setEditLoading(true);
+
+      const updatedQuiz = await updateQuiz({
+        quizId: editingQuiz.id,
+        title: editQuizForm.title.trim(),
+        description: editQuizForm.description.trim(),
+        durationMinutes: Math.max(
+          1,
+          editQuizForm.durationMinutes
+        ),
+        passingScore: Math.min(
+          100,
+          Math.max(1, editQuizForm.passingScore)
+        ),
+        sectionId:
+          editQuizForm.scope === "section" ||
+          editQuizForm.scope === "lesson"
+            ? editQuizForm.sectionId || null
+            : null,
+        lessonId:
+          editQuizForm.scope === "lesson"
+            ? editQuizForm.lessonId || null
+            : null,
+      });
+
+      setQuizzes((current) =>
+        current.map((quiz) =>
+          quiz.id === updatedQuiz.id ? updatedQuiz : quiz
+        )
+      );
+
+      setEditModalOpen(false);
+      setEditingQuiz(null);
+
+      showToast("تم تعديل الاختبار بنجاح", "success");
+    } catch {
+      showToast("تعذّر تعديل الاختبار", "error");
+    } finally {
+      setEditLoading(false);
     }
   };
 
@@ -224,8 +332,10 @@ export default function QuizBuilderPage() {
           value={
             quizzes.length
               ? `${Math.round(
-                  quizzes.reduce((sum, q) => sum + q.duration_minutes, 0) /
-                    quizzes.length
+                  quizzes.reduce(
+                    (sum, q) => sum + q.duration_minutes,
+                    0
+                  ) / quizzes.length
                 )} د`
               : "0 د"
           }
@@ -237,8 +347,10 @@ export default function QuizBuilderPage() {
           value={
             quizzes.length
               ? `${Math.round(
-                  quizzes.reduce((sum, q) => sum + q.passing_score, 0) /
-                    quizzes.length
+                  quizzes.reduce(
+                    (sum, q) => sum + q.passing_score,
+                    0
+                  ) / quizzes.length
                 )}%`
               : "0%"
           }
@@ -282,8 +394,12 @@ export default function QuizBuilderPage() {
                     </div>
 
                     <button
-                      onClick={(e) => e.stopPropagation()}
-                      className="rounded-lg p-2 text-slate-400 hover:bg-slate-100"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        openEditQuiz(quiz);
+                      }}
+                      className="rounded-lg p-2 text-slate-400 hover:bg-slate-100 hover:text-brand-600"
+                      title="تعديل الاختبار"
                     >
                       <MoreVertical className="h-4 w-4" />
                     </button>
@@ -334,143 +450,613 @@ export default function QuizBuilderPage() {
         open={createModalOpen}
         onClose={() => setCreateModalOpen(false)}
         title="إنشاء اختبار جديد"
+        maxWidth="max-w-2xl"
       >
-        <div className="space-y-4">
-          <Input
-            label="عنوان الاختبار"
-            value={quizForm.title}
-            onChange={(e) =>
-              setQuizForm({
-                ...quizForm,
-                title: e.target.value,
-              })
-            }
-          />
-
-          <Input
-            label="الوصف"
-            value={quizForm.description}
-            onChange={(e) =>
-              setQuizForm({
-                ...quizForm,
-                description: e.target.value,
-              })
-            }
-          />
-
-          <div className="grid grid-cols-2 gap-3">
+        <div className="max-h-[75vh] overflow-y-auto px-1 pb-2">
+          <div className="space-y-5">
             <Input
-              label="المدة (دقيقة)"
-              type="number"
-              min={1}
-              value={quizForm.durationMinutes}
+              label="عنوان الاختبار"
+              value={quizForm.title}
               onChange={(e) =>
                 setQuizForm({
                   ...quizForm,
-                  durationMinutes: Number(e.target.value),
+                  title: e.target.value,
                 })
               }
+              placeholder="مثال: اختبار المحاضرة الأولى"
             />
 
             <Input
-              label="درجة النجاح (%)"
-              type="number"
-              min={1}
-              max={100}
-              value={quizForm.passingScore}
+              label="الوصف"
+              value={quizForm.description}
               onChange={(e) =>
                 setQuizForm({
                   ...quizForm,
-                  passingScore: Number(e.target.value),
+                  description: e.target.value,
                 })
               }
+              placeholder="وصف مختصر للاختبار..."
             />
-          </div>
 
-          <div className="rounded-2xl border border-slate-100 bg-slate-50/80 p-4">
-            <div className="mb-3 flex items-center justify-between gap-3">
-              <div>
-                <p className="text-sm font-black text-slate-800">نطاق الاختبار</p>
-                <p className="mt-1 text-xs text-slate-500">
-                  حدّد أين يظهر الاختبار للطلاب
-                </p>
+            {/* الأرقام */}
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+              {/* مدة الاختبار */}
+              <div className="rounded-2xl border border-slate-200 bg-white p-4">
+                <label className="mb-3 block text-sm font-bold text-slate-700">
+                  مدة الاختبار
+                </label>
+
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setQuizForm((prev) => ({
+                        ...prev,
+                        durationMinutes: Math.max(
+                          1,
+                          prev.durationMinutes - 5
+                        ),
+                      }))
+                    }
+                    className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-slate-100 text-xl font-black text-slate-600 transition active:scale-95 hover:bg-slate-200"
+                  >
+                    −
+                  </button>
+
+                  <div className="relative flex-1">
+                    <input
+                      type="number"
+                      min={1}
+                      inputMode="numeric"
+                      value={quizForm.durationMinutes}
+                      onChange={(e) => {
+                        const value = Number(e.target.value);
+
+                        setQuizForm((prev) => ({
+                          ...prev,
+                          durationMinutes:
+                            e.target.value === ""
+                              ? 1
+                              : Math.max(
+                                  1,
+                                  Number.isFinite(value)
+                                    ? value
+                                    : 1
+                                ),
+                        }));
+                      }}
+                      className="h-12 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 text-center text-lg font-black text-slate-800 outline-none transition focus:border-brand-500 focus:bg-white focus:ring-2 focus:ring-brand-500/10"
+                    />
+
+                    <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[10px] font-bold text-slate-400">
+                      دقيقة
+                    </span>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setQuizForm((prev) => ({
+                        ...prev,
+                        durationMinutes:
+                          prev.durationMinutes + 5,
+                      }))
+                    }
+                    className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-brand-50 text-xl font-black text-brand-600 transition active:scale-95 hover:bg-brand-100"
+                  >
+                    +
+                  </button>
+                </div>
               </div>
 
-              <select
-                value={quizForm.scope}
-                onChange={(e) =>
-                  setQuizForm({
-                    ...quizForm,
-                    scope: e.target.value as QuizScope,
-                    sectionId: "",
-                    lessonId: "",
-                  })
-                }
-                className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-bold text-slate-700 outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-500/10"
-              >
-                <option value="course">كل الكورس</option>
-                <option value="section">قسم محدد</option>
-                <option value="lesson">درس محدد</option>
-              </select>
+              {/* درجة النجاح */}
+              <div className="rounded-2xl border border-slate-200 bg-white p-4">
+                <label className="mb-3 block text-sm font-bold text-slate-700">
+                  درجة النجاح
+                </label>
+
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setQuizForm((prev) => ({
+                        ...prev,
+                        passingScore: Math.max(
+                          1,
+                          prev.passingScore - 5
+                        ),
+                      }))
+                    }
+                    className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-slate-100 text-xl font-black text-slate-600 transition active:scale-95 hover:bg-slate-200"
+                  >
+                    −
+                  </button>
+
+                  <div className="relative flex-1">
+                    <input
+                      type="number"
+                      min={1}
+                      max={100}
+                      inputMode="numeric"
+                      value={quizForm.passingScore}
+                      onChange={(e) => {
+                        const value = Number(e.target.value);
+
+                        setQuizForm((prev) => ({
+                          ...prev,
+                          passingScore:
+                            e.target.value === ""
+                              ? 1
+                              : Math.min(
+                                  100,
+                                  Math.max(
+                                    1,
+                                    Number.isFinite(value)
+                                      ? value
+                                      : 1
+                                  )
+                                ),
+                        }));
+                      }}
+                      className="h-12 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 text-center text-lg font-black text-slate-800 outline-none transition focus:border-brand-500 focus:bg-white focus:ring-2 focus:ring-brand-500/10"
+                    />
+
+                    <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-sm font-black text-slate-400">
+                      %
+                    </span>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setQuizForm((prev) => ({
+                        ...prev,
+                        passingScore: Math.min(
+                          100,
+                          prev.passingScore + 5
+                        ),
+                      }))
+                    }
+                    className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-brand-50 text-xl font-black text-brand-600 transition active:scale-95 hover:bg-brand-100"
+                  >
+                    +
+                  </button>
+                </div>
+              </div>
             </div>
 
-            {quizForm.scope !== "course" && (
-              <select
-                value={quizForm.sectionId}
-                onChange={(e) =>
-                  setQuizForm({
-                    ...quizForm,
-                    sectionId: e.target.value,
-                    lessonId: "",
-                  })
-                }
-                className="w-full rounded-xl border border-slate-200 bg-white px-3 py-3 text-sm text-slate-700 outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-500/10"
-              >
-                <option value="">اختر القسم</option>
-                {sections.map((section) => (
-                  <option key={section.id} value={section.id}>
-                    {section.title}
-                  </option>
-                ))}
-              </select>
-            )}
+            {/* نطاق الاختبار */}
+            <div className="rounded-2xl border border-slate-100 bg-slate-50/80 p-4">
+              <div className="mb-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                  <p className="text-sm font-black text-slate-800">
+                    نطاق الاختبار
+                  </p>
 
-            {quizForm.scope === "lesson" && quizForm.sectionId && (
-              <select
-                value={quizForm.lessonId}
-                onChange={(e) =>
-                  setQuizForm({
-                    ...quizForm,
-                    lessonId: e.target.value,
-                  })
-                }
-                className="mt-3 w-full rounded-xl border border-slate-200 bg-white px-3 py-3 text-sm text-slate-700 outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-500/10"
-              >
-                <option value="">اختر الدرس</option>
-                {sections
-                  .find((section) => section.id === quizForm.sectionId)
-                  ?.lessons?.map((lesson) => (
-                    <option key={lesson.id} value={lesson.id}>
-                      {lesson.title}
+                  <p className="mt-1 text-xs text-slate-500">
+                    حدّد أين يظهر الاختبار للطلاب
+                  </p>
+                </div>
+
+                <select
+                  value={quizForm.scope}
+                  onChange={(e) =>
+                    setQuizForm({
+                      ...quizForm,
+                      scope: e.target.value as QuizScope,
+                      sectionId: "",
+                      lessonId: "",
+                    })
+                  }
+                  className="w-full rounded-xl border border-slate-200 bg-white px-3 py-3 text-sm font-bold text-slate-700 outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-500/10 sm:w-auto"
+                >
+                  <option value="course">كل الكورس</option>
+                  <option value="section">قسم محدد</option>
+                  <option value="lesson">درس محدد</option>
+                </select>
+              </div>
+
+              {quizForm.scope !== "course" && (
+                <select
+                  value={quizForm.sectionId}
+                  onChange={(e) =>
+                    setQuizForm({
+                      ...quizForm,
+                      sectionId: e.target.value,
+                      lessonId: "",
+                    })
+                  }
+                  className="w-full rounded-xl border border-slate-200 bg-white px-3 py-3 text-sm text-slate-700 outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-500/10"
+                >
+                  <option value="">اختر القسم</option>
+
+                  {sections.map((section) => (
+                    <option key={section.id} value={section.id}>
+                      {section.title}
                     </option>
                   ))}
-              </select>
-            )}
-          </div>
+                </select>
+              )}
 
-          <div className="rounded-2xl bg-brand-50 p-4 text-sm text-brand-700">
-            <div className="flex items-center gap-2 font-bold">
-              <Sparkles className="h-4 w-4" />
-              نصيحة
+              {quizForm.scope === "lesson" &&
+                quizForm.sectionId && (
+                  <select
+                    value={quizForm.lessonId}
+                    onChange={(e) =>
+                      setQuizForm({
+                        ...quizForm,
+                        lessonId: e.target.value,
+                      })
+                    }
+                    className="mt-3 w-full rounded-xl border border-slate-200 bg-white px-3 py-3 text-sm text-slate-700 outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-500/10"
+                  >
+                    <option value="">اختر الدرس</option>
+
+                    {sections
+                      .find(
+                        (section) =>
+                          section.id === quizForm.sectionId
+                      )
+                      ?.lessons?.map((lesson) => (
+                        <option
+                          key={lesson.id}
+                          value={lesson.id}
+                        >
+                          {lesson.title}
+                        </option>
+                      ))}
+                  </select>
+                )}
             </div>
-            <p className="mt-1 text-xs leading-5 text-brand-600/80">
-              اجعل الأسئلة متنوعة وواضحة، وحدد درجة نجاح مناسبة لمستوى الكورس.
-            </p>
-          </div>
 
-          <Button className="w-full" onClick={handleCreateQuiz}>
-            إنشاء الاختبار
-          </Button>
+            {/* النصيحة */}
+            <div className="rounded-2xl bg-brand-50 p-4 text-sm text-brand-700">
+              <div className="flex items-center gap-2 font-bold">
+                <Sparkles className="h-4 w-4" />
+                نصيحة
+              </div>
+
+              <p className="mt-1 text-xs leading-5 text-brand-600/80">
+                اجعل الأسئلة متنوعة وواضحة، وحدد درجة نجاح مناسبة
+                لمستوى الكورس.
+              </p>
+            </div>
+
+            {/* زر الإنشاء */}
+            <div className="sticky bottom-0 bg-white/95 pt-2 backdrop-blur-sm">
+              <Button
+                className="w-full py-3.5 text-base"
+                onClick={handleCreateQuiz}
+              >
+                إنشاء الاختبار
+              </Button>
+            </div>
+          </div>
+        </div>
+      </Modal>
+
+      {/* Edit modal */}
+      <Modal
+        open={editModalOpen}
+        onClose={() => {
+          if (!editLoading) {
+            setEditModalOpen(false);
+            setEditingQuiz(null);
+          }
+        }}
+        title="تعديل الاختبار"
+        maxWidth="max-w-2xl"
+      >
+        <div className="max-h-[75vh] overflow-y-auto px-1 pb-2">
+          <div className="space-y-5">
+            <div className="rounded-2xl border border-brand-100 bg-brand-50/60 p-4">
+              <div className="flex items-start gap-3">
+                <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-brand-100 text-brand-600">
+                  <Pencil className="h-5 w-5" />
+                </div>
+
+                <div>
+                  <h3 className="font-bold text-slate-900">
+                    تعديل بيانات الاختبار
+                  </h3>
+
+                  <p className="mt-1 text-sm leading-6 text-slate-500">
+                    يمكنك تعديل معلومات الاختبار ومكان ظهوره داخل
+                    الكورس.
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <Input
+              label="عنوان الاختبار"
+              value={editQuizForm.title}
+              onChange={(e) =>
+                setEditQuizForm({
+                  ...editQuizForm,
+                  title: e.target.value,
+                })
+              }
+              placeholder="مثال: اختبار المحاضرة الأولى"
+            />
+
+            <Input
+              label="الوصف"
+              value={editQuizForm.description}
+              onChange={(e) =>
+                setEditQuizForm({
+                  ...editQuizForm,
+                  description: e.target.value,
+                })
+              }
+              placeholder="وصف مختصر للاختبار..."
+            />
+
+            {/* الأرقام */}
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+              {/* مدة الاختبار */}
+              <div className="rounded-2xl border border-slate-200 bg-white p-4">
+                <label className="mb-3 block text-sm font-bold text-slate-700">
+                  مدة الاختبار
+                </label>
+
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setEditQuizForm((prev) => ({
+                        ...prev,
+                        durationMinutes: Math.max(
+                          1,
+                          prev.durationMinutes - 5
+                        ),
+                      }))
+                    }
+                    className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-slate-100 text-xl font-black text-slate-600 transition active:scale-95 hover:bg-slate-200"
+                  >
+                    −
+                  </button>
+
+                  <div className="relative flex-1">
+                    <input
+                      type="number"
+                      min={1}
+                      inputMode="numeric"
+                      value={editQuizForm.durationMinutes}
+                      onChange={(e) => {
+                        const value = Number(e.target.value);
+
+                        setEditQuizForm((prev) => ({
+                          ...prev,
+                          durationMinutes:
+                            e.target.value === ""
+                              ? 1
+                              : Math.max(
+                                  1,
+                                  Number.isFinite(value)
+                                    ? value
+                                    : 1
+                                ),
+                        }));
+                      }}
+                      className="h-12 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 text-center text-lg font-black text-slate-800 outline-none transition focus:border-brand-500 focus:bg-white focus:ring-2 focus:ring-brand-500/10"
+                    />
+
+                    <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[10px] font-bold text-slate-400">
+                      دقيقة
+                    </span>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setEditQuizForm((prev) => ({
+                        ...prev,
+                        durationMinutes:
+                          prev.durationMinutes + 5,
+                      }))
+                    }
+                    className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-brand-50 text-xl font-black text-brand-600 transition active:scale-95 hover:bg-brand-100"
+                  >
+                    +
+                  </button>
+                </div>
+              </div>
+
+              {/* درجة النجاح */}
+              <div className="rounded-2xl border border-slate-200 bg-white p-4">
+                <label className="mb-3 block text-sm font-bold text-slate-700">
+                  درجة النجاح
+                </label>
+
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setEditQuizForm((prev) => ({
+                        ...prev,
+                        passingScore: Math.max(
+                          1,
+                          prev.passingScore - 5
+                        ),
+                      }))
+                    }
+                    className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-slate-100 text-xl font-black text-slate-600 transition active:scale-95 hover:bg-slate-200"
+                  >
+                    −
+                  </button>
+
+                  <div className="relative flex-1">
+                    <input
+                      type="number"
+                      min={1}
+                      max={100}
+                      inputMode="numeric"
+                      value={editQuizForm.passingScore}
+                      onChange={(e) => {
+                        const value = Number(e.target.value);
+
+                        setEditQuizForm((prev) => ({
+                          ...prev,
+                          passingScore:
+                            e.target.value === ""
+                              ? 1
+                              : Math.min(
+                                  100,
+                                  Math.max(
+                                    1,
+                                    Number.isFinite(value)
+                                      ? value
+                                      : 1
+                                  )
+                                ),
+                        }));
+                      }}
+                      className="h-12 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 text-center text-lg font-black text-slate-800 outline-none transition focus:border-brand-500 focus:bg-white focus:ring-2 focus:ring-brand-500/10"
+                    />
+
+                    <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-sm font-black text-slate-400">
+                      %
+                    </span>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setEditQuizForm((prev) => ({
+                        ...prev,
+                        passingScore: Math.min(
+                          100,
+                          prev.passingScore + 5
+                        ),
+                      }))
+                    }
+                    className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-brand-50 text-xl font-black text-brand-600 transition active:scale-95 hover:bg-brand-100"
+                  >
+                    +
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            {/* نطاق الاختبار */}
+            <div className="rounded-2xl border border-slate-100 bg-slate-50/80 p-4">
+              <div className="mb-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                  <p className="text-sm font-black text-slate-800">
+                    نطاق الاختبار
+                  </p>
+
+                  <p className="mt-1 text-xs text-slate-500">
+                    حدّد أين يظهر الاختبار للطلاب
+                  </p>
+                </div>
+
+                <select
+                  value={editQuizForm.scope}
+                  onChange={(e) =>
+                    setEditQuizForm({
+                      ...editQuizForm,
+                      scope: e.target.value as QuizScope,
+                      sectionId: "",
+                      lessonId: "",
+                    })
+                  }
+                  className="w-full rounded-xl border border-slate-200 bg-white px-3 py-3 text-sm font-bold text-slate-700 outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-500/10 sm:w-auto"
+                >
+                  <option value="course">كل الكورس</option>
+                  <option value="section">قسم محدد</option>
+                  <option value="lesson">درس محدد</option>
+                </select>
+              </div>
+
+              {editQuizForm.scope !== "course" && (
+                <select
+                  value={editQuizForm.sectionId}
+                  onChange={(e) =>
+                    setEditQuizForm({
+                      ...editQuizForm,
+                      sectionId: e.target.value,
+                      lessonId: "",
+                    })
+                  }
+                  className="w-full rounded-xl border border-slate-200 bg-white px-3 py-3 text-sm text-slate-700 outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-500/10"
+                >
+                  <option value="">اختر القسم</option>
+
+                  {sections.map((section) => (
+                    <option key={section.id} value={section.id}>
+                      {section.title}
+                    </option>
+                  ))}
+                </select>
+              )}
+
+              {editQuizForm.scope === "lesson" &&
+                editQuizForm.sectionId && (
+                  <select
+                    value={editQuizForm.lessonId}
+                    onChange={(e) =>
+                      setEditQuizForm({
+                        ...editQuizForm,
+                        lessonId: e.target.value,
+                      })
+                    }
+                    className="mt-3 w-full rounded-xl border border-slate-200 bg-white px-3 py-3 text-sm text-slate-700 outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-500/10"
+                  >
+                    <option value="">اختر الدرس</option>
+
+                    {sections
+                      .find(
+                        (section) =>
+                          section.id === editQuizForm.sectionId
+                      )
+                      ?.lessons?.map((lesson) => (
+                        <option
+                          key={lesson.id}
+                          value={lesson.id}
+                        >
+                          {lesson.title}
+                        </option>
+                      ))}
+                  </select>
+                )}
+            </div>
+
+            {/* النصيحة */}
+            <div className="rounded-2xl bg-brand-50 p-4 text-sm text-brand-700">
+              <div className="flex items-center gap-2 font-bold">
+                <Sparkles className="h-4 w-4" />
+                نصيحة
+              </div>
+
+              <p className="mt-1 text-xs leading-5 text-brand-600/80">
+                يمكنك تغيير نطاق الاختبار أو مدته ودرجة النجاح دون
+                التأثير على الأسئلة الموجودة.
+              </p>
+            </div>
+
+            {/* زر الحفظ */}
+            <div className="sticky bottom-0 bg-white/95 pt-2 backdrop-blur-sm">
+              <Button
+                className="w-full py-3.5 text-base"
+                onClick={handleUpdateQuiz}
+                disabled={editLoading}
+              >
+                {editLoading ? (
+                  <>
+                    <span className="mr-2 inline-block h-4 w-4 animate-spin rounded-full border-2 border-white/30 border-t-white" />
+                    جاري حفظ التعديلات...
+                  </>
+                ) : (
+                  <>
+                    <Save className="ml-2 h-5 w-5" />
+                    حفظ التعديلات
+                  </>
+                )}
+              </Button>
+            </div>
+          </div>
         </div>
       </Modal>
     </div>
@@ -603,16 +1189,19 @@ function QuizEditor({
             value={questions.length}
             label="سؤال"
           />
+
           <EditorStat
             icon={<Target />}
             value={totalPoints}
             label="إجمالي النقاط"
           />
+
           <EditorStat
             icon={<Clock3 />}
             value={`${quiz.duration_minutes} د`}
             label="المدة"
           />
+
           <EditorStat
             icon={<Trophy />}
             value={`${quiz.passing_score}%`}
@@ -828,7 +1417,9 @@ function StatCard({
         <span className="text-xl font-black text-slate-800">{value}</span>
       </div>
 
-      <p className="mt-3 text-xs font-medium text-slate-400">{label}</p>
+      <p className="mt-3 text-xs font-medium text-slate-400">
+        {label}
+      </p>
     </div>
   );
 }
@@ -840,8 +1431,13 @@ function QuizScopeBadge({
   quiz: Quiz;
   sections: CourseSection[];
 }) {
-  const section = sections.find((item) => item.id === quiz.section_id);
-  const lesson = section?.lessons?.find((item) => item.id === quiz.lesson_id);
+  const section = sections.find(
+    (item) => item.id === quiz.section_id
+  );
+
+  const lesson = section?.lessons?.find(
+    (item) => item.id === quiz.lesson_id
+  );
 
   const label = lesson
     ? `درس: ${lesson.title}`
@@ -872,7 +1468,10 @@ function MiniInfo({
         {icon}
         <span className="text-[10px]">{label}</span>
       </div>
-      <p className="mt-1 text-xs font-bold text-slate-700">{value}</p>
+
+      <p className="mt-1 text-xs font-bold text-slate-700">
+        {value}
+      </p>
     </div>
   );
 }
@@ -888,9 +1487,17 @@ function EditorStat({
 }) {
   return (
     <div className="rounded-2xl bg-slate-50 p-3">
-      <div className="flex items-center gap-2 text-brand-500">{icon}</div>
-      <p className="mt-2 font-black text-slate-800">{value}</p>
-      <p className="text-[11px] text-slate-400">{label}</p>
+      <div className="flex items-center gap-2 text-brand-500">
+        {icon}
+      </div>
+
+      <p className="mt-2 font-black text-slate-800">
+        {value}
+      </p>
+
+      <p className="text-[11px] text-slate-400">
+        {label}
+      </p>
     </div>
   );
 }

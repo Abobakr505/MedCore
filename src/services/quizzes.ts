@@ -118,3 +118,31 @@ export async function deleteQuestion(questionId: string) {
   const { error } = await supabase.from("quiz_questions").delete().eq("id", questionId);
   if (error) throw error;
 }
+
+export async function updateQuiz(params: {
+  quizId: string;
+  sectionId?: string | null;
+  lessonId?: string | null;
+  title: string;
+  description: string;
+  durationMinutes: number;
+  passingScore: number;
+}) {
+  const { data, error } = await supabase
+    .from("quizzes")
+    .update({
+      section_id: params.sectionId ?? null,
+      lesson_id: params.lessonId ?? null,
+      title: params.title,
+      description: params.description,
+      duration_minutes: params.durationMinutes,
+      passing_score: params.passingScore,
+    })
+    .eq("id", params.quizId)
+    .select()
+    .single();
+
+  if (error) throw error;
+
+  return data as Quiz;
+}
