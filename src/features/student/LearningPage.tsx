@@ -945,7 +945,6 @@ const normalizedSections =
       ...section,
       lessons: [...(section.lessons ?? [])].sort(
         (a, b) => {
-          // الترتيب الأساسي حسب order_index
           const orderA = Number(a.order_index ?? 0);
           const orderB = Number(b.order_index ?? 0);
 

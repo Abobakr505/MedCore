@@ -29,6 +29,23 @@ import {
 
 type Role = "student" | "teacher";
 
+// رقم مصري صحيح: يبدأ بـ 010 أو 011 أو 012 أو 015 ثم 8 أرقام (11 رقم إجمالاً)
+const EGYPTIAN_PHONE_REGEX = /^01[0125][0-9]{8}$/;
+
+function isPasswordValid(password: string) {
+  return (
+    password.length >= 8 &&
+    /[A-Z]/.test(password) &&
+    /[a-z]/.test(password) &&
+    /\d/.test(password) &&
+    /[^A-Za-z0-9]/.test(password)
+  );
+}
+
+function isPhoneValid(phone: string) {
+  return EGYPTIAN_PHONE_REGEX.test(phone.trim());
+}
+
 function getPasswordStrength(password: string) {
   let score = 0;
 
@@ -79,16 +96,17 @@ export default function RegisterPage() {
   const [showConfirmPassword, setShowConfirmPassword] =
     useState(false);
 
-const [values, setValues] = useState<Partial<RegisterFormValues>>({
-  role: "student",
-  college: "medicine",
-});
+  const [values, setValues] = useState<Partial<RegisterFormValues>>({
+    role: "student",
+    college: "medicine",
+  });
 
-const [errors, setErrors] = useState<Partial<Record<keyof RegisterFormValues, string>>>(
-  {}
-);
+  const [errors, setErrors] = useState<Partial<Record<keyof RegisterFormValues, string>>>(
+    {}
+  );
   const password = values.password ?? "";
   const confirmPassword = values.confirmPassword ?? "";
+  const phone = values.phone ?? "";
 
   const passwordStrength = useMemo(
     () => getPasswordStrength(password),
@@ -150,6 +168,24 @@ const [errors, setErrors] = useState<Partial<Record<keyof RegisterFormValues, st
       setErrors((prev) => ({
         ...prev,
         confirmPassword: "كلمتا المرور غير متطابقتين",
+      }));
+
+      return;
+    }
+
+    if (!isPasswordValid(password)) {
+      setErrors((prev) => ({
+        ...prev,
+        password: "كلمة المرور لا تحقق كل الشروط المطلوبة",
+      }));
+
+      return;
+    }
+
+    if (!isPhoneValid(phone)) {
+      setErrors((prev) => ({
+        ...prev,
+        phone: "رقم الهاتف غير صحيح، يجب أن يكون رقم مصري (01xxxxxxxxx)",
       }));
 
       return;
@@ -350,19 +386,46 @@ const [errors, setErrors] = useState<Partial<Record<keyof RegisterFormValues, st
             />
 
             {/* Phone */}
-            <Input
-              label="رقم الهاتف"
-              className="bg-white"
-              type="tel"
-              inputMode="tel"
-              autoComplete="tel"
-              placeholder="01xxxxxxxxx"
-              value={values.phone ?? ""}
-              error={errors.phone}
-              onChange={(event) =>
-                updateValue("phone", event.target.value)
-              }
-            />
+            <div>
+              <Input
+                label="رقم الهاتف"
+                className="bg-white"
+                type="tel"
+                inputMode="numeric"
+                autoComplete="tel"
+                maxLength={11}
+                placeholder="01xxxxxxxxx"
+                value={phone}
+                error={errors.phone}
+                onChange={(event) => {
+                  const digitsOnly = event.target.value
+                    .replace(/\D/g, "")
+                    .slice(0, 11);
+                  updateValue("phone", digitsOnly);
+                }}
+              />
+
+              {phone.length > 0 && (
+                <div
+                  className={`mt-1.5 flex items-center gap-1.5 text-[10px] font-bold ${
+                    isPhoneValid(phone)
+                      ? "text-emerald-600"
+                      : "text-slate-400"
+                  }`}
+                >
+                  <span
+                    className={`flex h-4 w-4 shrink-0 items-center justify-center rounded-full ${
+                      isPhoneValid(phone)
+                        ? "bg-emerald-500 text-white"
+                        : "bg-slate-200 text-transparent"
+                    }`}
+                  >
+                    <Check className="h-2.5 w-2.5" />
+                  </span>
+                  رقم مصري صحيح (01 + 9 أرقام)
+                </div>
+              )}
+            </div>
 
             {/* College */}
             <Select
@@ -538,6 +601,12 @@ const [errors, setErrors] = useState<Partial<Record<keyof RegisterFormValues, st
               className="group h-13 w-full rounded-2xl shadow-lg shadow-brand-500/15"
               size="lg"
               isLoading={loading}
+              disabled={
+                loading ||
+                !isPasswordValid(password) ||
+                password !== confirmPassword ||
+                !isPhoneValid(phone)
+              }
             >
               <UserPlus className="h-4 w-4" />
 
