@@ -39,9 +39,27 @@ export default function LoginPage() {
     password?: string;
   }>({});
 
+  // لما نتحظر مؤقتًا، بنقفل الفورم ونعرض عداد تنازلي
+  const [lockedUntil, setLockedUntil] = useState<number | null>(null);
+  const [remainingSeconds, setRemainingSeconds] = useState(0);
+
   useEffect(() => {
     document.title = "تسجيل الدخول | Med Core";
   }, []);
+
+  useEffect(() => {
+    if (!lockedUntil) return;
+
+    const tick = () => {
+      const secondsLeft = Math.max(0, Math.ceil((lockedUntil - Date.now()) / 1000));
+      setRemainingSeconds(secondsLeft);
+      if (secondsLeft <= 0) setLockedUntil(null);
+    };
+
+    tick();
+    const interval = setInterval(tick, 1000);
+    return () => clearInterval(interval);
+  }, [lockedUntil]);
 
   const validate = () => {
     const result = loginSchema.safeParse({
@@ -69,14 +87,14 @@ export default function LoginPage() {
   ) => {
     event.preventDefault();
 
-    if (loading) return;
+    if (loading || lockedUntil) return;
 
     if (!validate()) return;
 
     setLoading(true);
 
     try {
-      const { error, reason } = await signIn(
+      const { error, reason, retryAfterSeconds } = await signIn(
         email.trim().toLowerCase(),
         password
       );
@@ -85,6 +103,11 @@ export default function LoginPage() {
         if (reason === "pending_verification") {
           navigate("/auth/pending-approval", { replace: true });
           return;
+        }
+
+        if (reason === "rate_limited") {
+          const seconds = retryAfterSeconds || 60;
+          setLockedUntil(Date.now() + seconds * 1000);
         }
 
         showToast(error, "error");
@@ -210,6 +233,23 @@ export default function LoginPage() {
             </div>
           </div>
 
+          {/* Rate-limit lock notice */}
+          {lockedUntil && (
+            <motion.div
+              initial={{ opacity: 0, y: -5 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="mb-6 rounded-2xl border border-red-100 bg-red-50 px-4 py-3 text-center"
+            >
+              <p className="text-xs font-extrabold text-red-700">
+                تم تقييد المحاولات مؤقتًا
+              </p>
+              <p className="mt-1 text-[11px] text-red-600/80">
+                حاول مرة أخرى بعد {Math.floor(remainingSeconds / 60)}:
+                {String(remainingSeconds % 60).padStart(2, "0")}
+              </p>
+            </motion.div>
+          )}
+
           <form
             onSubmit={onSubmit}
             className="space-y-5"
@@ -226,6 +266,7 @@ export default function LoginPage() {
                 placeholder="example@medcore.app"
                 value={email}
                 error={errors.email}
+                disabled={!!lockedUntil}
                 onChange={(event) => {
                   setEmail(event.target.value);
 
@@ -250,6 +291,7 @@ export default function LoginPage() {
                   placeholder="••••••••"
                   value={password}
                   error={errors.password}
+                  disabled={!!lockedUntil}
                   onChange={(event) => {
                     setPassword(event.target.value);
 
@@ -316,6 +358,7 @@ export default function LoginPage() {
               className="group h-13 w-full rounded-2xl shadow-lg shadow-brand-500/15"
               size="lg"
               isLoading={loading}
+              disabled={!!lockedUntil}
             >
               <span>تسجيل الدخول</span>
 
@@ -349,4 +392,4 @@ export default function LoginPage() {
       </motion.div>
     </main>
   );
-}
+}Bakr5335

@@ -9,7 +9,7 @@ interface DeviceCheckResult {
   reason: string;
 }
 
-type SignInBlockReason = "pending_verification" | "suspended";
+type SignInBlockReason = "pending_verification" | "suspended" | "rate_limited";
 
 interface AuthContextValue {
   session: Session | null;
@@ -27,12 +27,15 @@ interface AuthContextValue {
   signIn: (
     email: string,
     password: string
-  ) => Promise<{ error: string | null; reason?: SignInBlockReason }>;
+  ) => Promise<{ error: string | null; reason?: SignInBlockReason; retryAfterSeconds?: number }>;
   signOut: () => Promise<void>;
   refreshProfile: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextValue | undefined>(undefined);
+
+// رابط الـ Edge Function الخاص بتسجيل الدخول المحمي بـ Rate Limiting
+const LOGIN_FUNCTION_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/login-with-rate-limit`;
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [session, setSession] = useState<Session | null>(null);
@@ -103,15 +106,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     role,
   }) => {
     try {
-      console.log("SIGNUP DEBUG:", {
-        fullName,
-        email,
-        passwordLength: password.length,
-        phone,
-        college,
-        role,
-      });
-
       if (!fullName.trim()) {
         return { error: "من فضلك أدخل الاسم الثلاثي" };
       }
@@ -145,16 +139,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         },
       });
 
-      console.log("SIGNUP RESPONSE:", data);
-      console.log("SIGNUP ERROR:", error);
-
       if (error) {
-        console.error("SUPABASE SIGNUP ERROR:", {
-          message: error.message,
-          status: error.status,
-          name: error.name,
-        });
-
         return {
           error: translateAuthError(error.message),
         };
@@ -171,18 +156,49 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   const signIn: AuthContextValue["signIn"] = async (email, password) => {
-    const { data, error } = await supabase.auth.signInWithPassword({ email, password });
-
-    if (error) {
-      return { error: translateAuthError(error.message) };
+    // بدل ما ننادي supabase.auth.signInWithPassword مباشرة، بننادي الـ Edge Function
+    // اللي بتتحقق من عدد المحاولات الفاشلة (بالـ IP وبالإيميل) قبل ما تسمح بمحاولة جديدة
+    let response: Response;
+    try {
+      response = await fetch(LOGIN_FUNCTION_URL, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          apikey: import.meta.env.VITE_SUPABASE_ANON_KEY,
+        },
+        body: JSON.stringify({ email: email.trim().toLowerCase(), password }),
+      });
+    } catch (err) {
+      console.error("LOGIN NETWORK ERROR:", err);
+      return { error: "تعذر الاتصال بالخادم، تحقق من اتصالك بالإنترنت" };
     }
 
-    if (!data.session?.user) {
+    const result = await response.json();
+
+    if (!response.ok) {
+      if (result.error === "rate_limited") {
+        return {
+          error: result.message,
+          reason: "rate_limited",
+          retryAfterSeconds: result.retry_after_seconds,
+        };
+      }
+      return { error: result.message || "حدث خطأ غير متوقع، يرجى المحاولة مرة أخرى" };
+    }
+
+    // الدخول نجح على مستوى الـ Edge Function، دلوقتي نحط الـ session في عميل Supabase المحلي
+    const { error: setSessionError } = await supabase.auth.setSession({
+      access_token: result.session.access_token,
+      refresh_token: result.session.refresh_token,
+    });
+
+    if (setSessionError) {
+      console.error("SET SESSION ERROR:", setSessionError);
       return { error: "حدث خطأ غير متوقع، يرجى المحاولة مرة أخرى" };
     }
 
     // نجيب البروفايل عشان نتأكد من حالة الحساب قبل ما نسمح بالدخول
-    const userProfile = await loadProfile(data.session.user.id);
+    const userProfile = await loadProfile(result.user.id);
 
     if (userProfile?.status === "pending_verification") {
       await supabase.auth.signOut();
