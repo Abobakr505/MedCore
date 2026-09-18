@@ -12,8 +12,6 @@ import LoginPage from "@/features/auth/LoginPage";
 import AdminLoginPage from "@/features/auth/AdminLoginPage";
 
 import RegisterPage from "@/features/auth/RegisterPage";
-import ForgotPasswordPage from "@/features/auth/ForgotPasswordPage";
-import ResetPasswordPage from "@/features/auth/ResetPasswordPage";
 
 import CoursesListPage from "@/features/courses/CoursesListPage";
 import CourseDetailsPage from "@/features/courses/CourseDetailsPage";
@@ -69,8 +67,6 @@ export const router = createBrowserRouter([
   { path: "/auth/login", element: <LoginPage /> },
   { path: "/auth/admin-login", element: <AdminLoginPage /> },
   { path: "/auth/register", element: <RegisterPage /> },
-  { path: "/auth/forgot-password", element: <ForgotPasswordPage /> },
-  { path: "/auth/reset-password", element: <ResetPasswordPage /> },
 { path:"/auth/pending-approval" , element: <PendingApprovalPage /> },
 
   // صفحة التعلّم بدون Sidebar عادي (تخطيط خاص بمشغّل الفيديو)

@@ -344,12 +344,6 @@ export default function LoginPage() {
                 اتصال آمن
               </div>
 
-              <Link
-                to="/auth/forgot-password"
-                className="text-xs font-bold text-brand-600 transition hover:text-brand-700 hover:underline"
-              >
-                نسيت كلمة المرور؟
-              </Link>
             </div>
 
             {/* Submit */}
