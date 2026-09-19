@@ -36,7 +36,7 @@ import { formatCurrency } from "@/utils/format";
  */
 const PAYMENT_INFO = {
   etisalat: {
-    number: "01xxxxxxxxx", // رقم Etisalat Cash
+    number: "01120262955", // رقم Etisalat Cash
   },
 
   instapay: {

@@ -77,12 +77,12 @@ const PAYMENT_METHODS: {
   {
     id: "instapay",
     label: "InstaPay",
-    number: "01276184900", // ضع رقم أو @username الخاص بانستاباي
+    number: "01276184900",
   },
   {
     id: "etisalat",
     label: "اتصالات كاش",
-    number: "01100000000",
+    number: "01120262955",
   },
 ];
 
@@ -302,50 +302,100 @@ export default function PaymentsHistoryPage() {
         </div>{" "}
       </motion.div>{" "}
       {/* Installment due banner */}{" "}
-      {!installmentsLoading && nextDueInstallment && bannerTone && (
-        <motion.div
-          initial={{ opacity: 0, y: 10 }}
-          animate={{ opacity: 1, y: 0 }}
-          className={`mt-5 flex flex-col gap-3 rounded-2xl border p-4 sm:flex-row sm:items-center sm:justify-between ${BANNER_STYLES[bannerTone]}`}
-        >
-          {" "}
-          <div className="flex items-start gap-3">
-            {" "}
-            <div
-              className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl ${BANNER_ICON_BG[bannerTone]}`}
-            >
-              {" "}
-              {bannerTone === "overdue" ? (
-                <AlertTriangle className="h-5 w-5" />
-              ) : (
-                <Wallet2 className="h-5 w-5" />
-              )}{" "}
-            </div>{" "}
-            <div>
-              {" "}
-              <p className="font-bold">{bannerMessage}</p>{" "}
-              <p className="mt-1 text-xs opacity-80">
-                {" "}
-                {nextDueInstallment.course?.title ?? "كورس"} —{" "}
-                {formatCurrency(nextDueInstallment.amount)}{" "}
-              </p>{" "}
-              {nextDueCourseProgress && (
-                <p className="mt-1 text-xs font-semibold opacity-90">
-                  متبقي {nextDueCourseProgress.remaining} من أصل{" "}
-                  {nextDueCourseProgress.total} أقساط
-                </p>
-              )}{" "}
-            </div>{" "}
-          </div>{" "}
-          <Button
-            onClick={() => setPayTarget(nextDueInstallment)}
-            className="shrink-0"
-          >
-            {" "}
-            ادفع القسط الآن{" "}
-          </Button>{" "}
-        </motion.div>
-      )}{" "}
+{/* Installments grouped by course (only if the student has any installment courses) */}
+{!installmentsLoading && installments.length > 0 && (
+  <div className="mt-8">
+    <h2 className="mb-3 text-lg font-black text-slate-800">خطة الأقساط</h2>
+    <div className="space-y-5">
+      {Object.entries(
+        installments.reduce<Record<string, StudentInstallment[]>>((groups, installment) => {
+          const key = installment.course_id ?? "بدون-كورس";
+          if (!groups[key]) groups[key] = [];
+          groups[key].push(installment);
+          return groups;
+        }, {}),
+      )
+        .sort(([, a], [, b]) =>
+          (a[0]?.course?.title ?? "").localeCompare(b[0]?.course?.title ?? ""),
+        )
+        .map(([courseId, courseInstallments]) => {
+          const sorted = courseInstallments.slice().sort((a, b) => a.month_number - b.month_number);
+          const courseTitle = sorted[0]?.course?.title ?? "كورس";
+          const totalForCourse = (sorted[0]?.course as any)?.total_installments as number | undefined;
+          const paidCount = sorted.filter((i) => i.status === "approved").length;
+          const totalCount = totalForCourse ?? sorted.length;
+          const progressPct = totalCount ? Math.min(100, Math.round((paidCount / totalCount) * 100)) : 0;
+          const nextForCourse = sorted.find((i) => i.status === "scheduled" || i.status === "rejected");
+
+          return (
+            <div key={courseId} className="overflow-hidden rounded-2xl border border-slate-200 bg-white">
+              {/* Course header */}
+              <div className="flex flex-col gap-2 border-b border-slate-100 bg-slate-50/70 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+                <div className="min-w-0">
+                  <p className="truncate text-sm font-black text-slate-800">{courseTitle}</p>
+                  <p className="mt-0.5 text-xs text-slate-400">
+                    {paidCount} من {totalCount} أقساط مدفوعة
+                    {nextForCourse && (
+                      <> · القسط القادم: {new Date(nextForCourse.due_date).toLocaleDateString("ar-EG")}</>
+                    )}
+                  </p>
+                </div>
+                <div className="flex w-full items-center gap-2 sm:w-40">
+                  <div className="h-1.5 w-full overflow-hidden rounded-full bg-slate-200">
+                    <div className="h-full rounded-full bg-brand-500 transition-all" style={{ width: `${progressPct}%` }} />
+                  </div>
+                  <span className="shrink-0 text-[10px] font-bold text-slate-400">{progressPct}%</span>
+                </div>
+              </div>
+
+              {/* Course installments */}
+              <div className="divide-y divide-slate-100">
+                {sorted.map((installment) => {
+                  const color: "amber" | "green" | "red" =
+                    installment.status === "approved" ? "green"
+                    : installment.status === "pending" ? "amber"
+                    : installment.status === "rejected" ? "red"
+                    : "amber";
+                  const isPayable = installment.status === "scheduled" || installment.status === "rejected";
+
+                  return (
+                    <div key={installment.id} className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between">
+                      <div className="min-w-0">
+                        <p className="truncate text-sm font-bold text-slate-800">
+                          {formatInstallmentLabel(installment.month_number, totalForCourse)}
+                        </p>
+                        <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-slate-400">
+                          <span className="flex items-center gap-1">
+                            <CalendarDays className="h-3.5 w-3.5" />
+                            {new Date(installment.due_date).toLocaleDateString("ar-EG")}
+                          </span>
+                          <span className="hidden h-1 w-1 rounded-full bg-slate-300 sm:block" />
+                          <span>{formatCurrency(installment.amount)}</span>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-3">
+                        <Badge color={color}>
+                          {installment.status === "scheduled" ? "لم يحن موعده"
+                            : installment.status === "pending" ? "قيد المراجعة"
+                            : installment.status === "approved" ? "مدفوع"
+                            : "مرفوض"}
+                        </Badge>
+                        {isPayable && (
+                          <Button size="sm" variant="secondary" onClick={() => setPayTarget(installment)}>
+                            <UploadCloud className="h-4 w-4" /> ادفع
+                          </Button>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          );
+        })}
+    </div>
+  </div>
+)}
       {/* Statistics */}{" "}
       {loading ? (
         <div className="mt-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">

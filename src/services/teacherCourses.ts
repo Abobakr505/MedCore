@@ -4,16 +4,39 @@ import type { Course, CourseSection, Lesson } from "@/types";
 import * as tus from "tus-js-client";
 
 import { splitFileIntoChunks, getChunkPath } from "@/utils/videoChunking";
+// services/teacherCourses.ts
 export async function fetchTeacherCourses(teacherId: string) {
-  const { data, error } = await supabase
+  const { data: courses, error } = await supabase
     .from("courses")
     .select("*")
     .eq("teacher_id", teacherId)
     .order("created_at", { ascending: false });
   if (error) throw error;
-  return (data ?? []) as Course[];
-}
 
+  const list = (courses ?? []) as Course[];
+  if (list.length === 0) return list;
+
+  const courseIds = list.map((c) => c.id);
+
+  // نعد كل الاشتراكات الفعّالة (كاملة الدفع أو مقسّطة) من enrollments
+  const { data: enrollments, error: enrollError } = await supabase
+    .from("enrollments")
+    .select("course_id")
+    .in("course_id", courseIds)
+    .eq("status", "active");
+
+  if (enrollError) throw enrollError;
+
+  const countsMap = new Map<string, number>();
+  for (const row of enrollments ?? []) {
+    countsMap.set(row.course_id, (countsMap.get(row.course_id) ?? 0) + 1);
+  }
+
+  return list.map((course) => ({
+    ...course,
+    students_count: countsMap.get(course.id) ?? 0,
+  })) as Course[];
+}
 export async function createCourse(params: { teacherId: string; title: string; description: string; college: string; price: number }) {
   const slug = `${slugify(params.title)}-${Date.now().toString(36)}`;
   const { data, error } = await supabase

@@ -1,14 +1,15 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import { motion } from "framer-motion";
+import { motion, AnimatePresence } from "framer-motion";
 import {
   BookOpen,
   PlayCircle,
   GraduationCap,
   ArrowLeft,
   Sparkles,
-  Clock3,
-  CheckCircle2,
+  Bell,
+  X,
+  Compass,
 } from "lucide-react";
 
 import { Card } from "@/components/ui/Card";
@@ -25,13 +26,22 @@ import {
 import { fetchCourseSections } from "@/services/courses";
 
 import type { Enrollment } from "@/types";
-import { getPublicUrl } from "@/lib/supabase";
+import { getPublicUrl, supabase } from "@/lib/supabase";
 
 type CourseProgress = {
   completedLessons: number;
   totalLessons: number;
   percentage: number;
 };
+
+type NewCourseAlert = {
+  id: string;
+  title: string;
+  slug: string;
+  college: string;
+};
+
+const NEW_COURSE_SEEN_KEY = "last_seen_course_id";
 
 export default function MyCoursesPage() {
   const { session } = useAuth();
@@ -42,6 +52,12 @@ export default function MyCoursesPage() {
     Record<string, CourseProgress>
   >({});
 
+  const [newCourseAlert, setNewCourseAlert] =
+    useState<NewCourseAlert | null>(null);
+
+  /* =========================================================
+     Load enrollments + progress
+  ========================================================= */
   useEffect(() => {
     if (!session?.user) return;
 
@@ -86,6 +102,68 @@ export default function MyCoursesPage() {
     };
   }, [session?.user?.id]);
 
+  /* =========================================================
+     Check for a new course matching the student's college
+     (or a course available to "all" colleges)
+  ========================================================= */
+  useEffect(() => {
+    if (!session?.user) return;
+
+    let active = true;
+
+    (async () => {
+      try {
+        // 1) هات كلية الطالب
+        const { data: profile, error: profileError } = await supabase
+          .from("profiles")
+          .select("college")
+          .eq("id", session.user.id)
+          .maybeSingle();
+
+        if (profileError) throw profileError;
+        if (!profile?.college) return;
+
+        // 2) هات آخر كورس منشور يخص كليته أو "all"
+        const { data: latestCourse, error: courseError } = await supabase
+          .from("courses")
+          .select("id, title, slug, college")
+          .eq("is_published", true)
+          .or(`college.eq.${profile.college},college.eq.all`)
+          .order("created_at", { ascending: false })
+          .limit(1)
+          .maybeSingle();
+
+        if (courseError) throw courseError;
+        if (!latestCourse) return;
+
+        // 3) قارن مع آخر كورس شافه الطالب (محفوظ في localStorage)
+        const lastSeenId = localStorage.getItem(
+          NEW_COURSE_SEEN_KEY + "_" + session.user.id
+        );
+
+        if (active && latestCourse.id !== lastSeenId) {
+          setNewCourseAlert(latestCourse as NewCourseAlert);
+        }
+      } catch (err) {
+        console.error("[MyCoursesPage] new course alert error:", err);
+      }
+    })();
+
+    return () => {
+      active = false;
+    };
+  }, [session?.user?.id]);
+
+  function dismissNewCourseAlert() {
+    if (session?.user && newCourseAlert) {
+      localStorage.setItem(
+        NEW_COURSE_SEEN_KEY + "_" + session.user.id,
+        newCourseAlert.id
+      );
+    }
+    setNewCourseAlert(null);
+  }
+
   return (
     <div className="min-h-full space-y-8 pb-10">
       {/* Hero */}
@@ -119,6 +197,55 @@ export default function MyCoursesPage() {
           </div>
         </div>
       </motion.div>
+
+      {/* New Course Alert Banner */}
+      <AnimatePresence>
+        {newCourseAlert && (
+          <motion.div
+            initial={{ opacity: 0, y: -10, height: 0 }}
+            animate={{ opacity: 1, y: 0, height: "auto" }}
+            exit={{ opacity: 0, y: -10, height: 0 }}
+            className="overflow-hidden rounded-2xl border border-brand-100 bg-brand-50 p-4 shadow-sm"
+          >
+            <div className="flex items-center justify-between gap-3">
+              <div className="flex min-w-0 items-center gap-3">
+                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-brand-500 text-white">
+                  <Bell className="h-5 w-5" />
+                </div>
+
+                <div className="min-w-0">
+                  <p className="truncate text-sm font-black text-slate-900">
+                    كورس جديد: {newCourseAlert.title}
+                  </p>
+                  <p className="text-xs text-slate-500">
+                    {newCourseAlert.college === "all"
+                      ? "متاح لجميع الكليات"
+                      : "متاح لكليتك"}
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex shrink-0 items-center gap-2">
+                <Link
+                  to="/courses"
+                  onClick={dismissNewCourseAlert}
+                  className="whitespace-nowrap rounded-full bg-brand-600 px-4 py-2 text-xs font-bold text-white transition hover:bg-brand-700"
+                >
+                  شوف آخر الكورسات
+                </Link>
+
+                <button
+                  onClick={dismissNewCourseAlert}
+                  className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-slate-400 transition hover:bg-white hover:text-slate-600"
+                  aria-label="إغلاق"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* Count */}
       {!loading && enrollments.length > 0 && (
@@ -272,6 +399,19 @@ export default function MyCoursesPage() {
           })}
         </div>
       )}
+
+{/* Browse more courses button */}
+{!loading && (
+  <div className="flex justify-center pt-4">
+    <Link to="/courses" className="group">
+      <div className="flex items-center gap-2.5 rounded-full border-2 border-brand-100 bg-white px-6 py-3.5 font-bold text-brand-700 shadow-sm transition-all duration-300 hover:border-brand-500 hover:bg-brand-500 hover:text-white hover:shadow-lg hover:shadow-brand-500/20">
+        <Compass className="h-5 w-5 transition-transform duration-500 group-hover:rotate-180" />
+        <span>تصفّح المزيد من الكورسات</span>
+        <ArrowLeft className="h-4 w-4 transition-transform duration-300 group-hover:-translate-x-1" />
+      </div>
+    </Link>
+  </div>
+)}
     </div>
   );
 }

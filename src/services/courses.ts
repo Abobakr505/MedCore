@@ -559,3 +559,27 @@ export async function fetchUnlockedMonth(studentId: string, courseId: string) {
   // كورس غير تقسيط أو لسه مفيش أقساط approved = يعتبر مفتوح لو فيه enrollment عادي (بيتحقق بمكان تاني)
   return data?.month_number ?? 0;
 }
+
+/* =========================================================
+   Fetch Latest Course For Student's College (Simple Alert)
+========================================================= */
+
+export async function fetchLatestCourseForCollege(college: string) {
+  if (!college) return null;
+
+  const { data, error } = await supabase
+    .from("courses")
+    .select("id, title, slug, college")
+    .eq("is_published", true)
+    .or(`college.eq.${college},college.eq.all`)
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (error) {
+    console.error("fetchLatestCourseForCollege error:", error);
+    throw error;
+  }
+
+  return data;
+}
