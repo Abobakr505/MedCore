@@ -43,9 +43,7 @@ export default function LoginPage() {
   const [lockedUntil, setLockedUntil] = useState<number | null>(null);
   const [remainingSeconds, setRemainingSeconds] = useState(0);
 
-  useEffect(() => {
-    document.title = "تسجيل الدخول | Med Core";
-  }, []);
+
 
   useEffect(() => {
     if (!lockedUntil) return;
