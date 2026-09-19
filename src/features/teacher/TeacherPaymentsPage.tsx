@@ -15,6 +15,7 @@ import {
   BookOpen,
   CalendarDays,
   ShieldCheck,
+  Layers,
 } from "lucide-react";
 
 import { Card } from "@/components/ui/Card";
@@ -35,23 +36,51 @@ import {
 } from "@/services/payments";
 
 import type { Payment } from "@/types";
-import {
-  PAYMENT_STATUS_LABELS,
-} from "@/types";
+import { PAYMENT_STATUS_LABELS } from "@/types";
 
-import {
-  formatCurrency,
-  formatDateTime,
-} from "@/utils/format";
+import { formatCurrency, formatDateTime } from "@/utils/format";
 
-const STATUS_COLORS: Record<
-  string,
-  "amber" | "green" | "red"
-> = {
+const STATUS_COLORS: Record<string, "amber" | "green" | "red"> = {
   pending: "amber",
   approved: "green",
   rejected: "red",
 };
+
+/**
+ * معلومات تقدّم القسط لدفعة معيّنة، محسوبة من قائمة كاملة (غير مفلترة
+ * حسب الحالة) لكل دفعات نفس الطالب في نفس الكورس. لازم نستخدم قائمة
+ * كاملة هنا وليس القائمة المعروضة على الشاشة، عشان لو القسط الأول
+ * "approved" هيختفي من فلتر "pending" وبالتالي الحساب هيغلط.
+ */
+function getInstallmentProgress(
+  payment: Payment,
+  allPaymentsUnfiltered: Payment[]
+): { index: number; total: number | null; remaining: number | null } | null {
+  if (!payment.installment_id) return null;
+
+  const sameGroup = allPaymentsUnfiltered
+    .filter(
+      (p) =>
+        p.installment_id &&
+        p.student?.id === payment.student?.id &&
+        p.course?.id === payment.course?.id
+    )
+    .sort(
+      (a, b) =>
+        new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
+    );
+
+  const index = sameGroup.findIndex((p) => p.id === payment.id) + 1;
+
+  // عدّل اسم الحقل ده لو مختلف عندك في جدول الكورسات
+  const total = (payment.course as any)?.total_installments ?? null;
+
+  return {
+    index: index > 0 ? index : 1,
+    total,
+    remaining: total ? Math.max(total - index, 0) : null,
+  };
+}
 
 export default function TeacherPaymentsPage() {
   const { session } = useAuth();
@@ -62,14 +91,13 @@ export default function TeacherPaymentsPage() {
   const [filter, setFilter] = useState<string>("pending");
   const [search, setSearch] = useState("");
 
-  const [rejectTarget, setRejectTarget] =
-    useState<Payment | null>(null);
+  // قائمة كاملة بكل الدفعات (بدون فلتر status) نستخدمها فقط لحساب
+  // ترتيب الأقساط بشكل صحيح، مستقلة عن فلتر العرض الحالي
+const [allPaymentsForProgress, setAllPaymentsForProgress] = useState<Payment[]>([]); 
 
-  const [rejectReason, setRejectReason] =
-    useState("");
-
-  const [processingId, setProcessingId] =
-    useState<string | null>(null);
+  const [rejectTarget, setRejectTarget] = useState<Payment | null>(null);
+  const [rejectReason, setRejectReason] = useState("");
+  const [processingId, setProcessingId] = useState<string | null>(null);
 
   const load = async () => {
     if (!session?.user) return;
@@ -77,56 +105,62 @@ export default function TeacherPaymentsPage() {
     setLoading(true);
 
     try {
-      setPayments(
-        await fetchTeacherPayments(
-          session.user.id,
-          filter || undefined
-        )
+      const result = await fetchTeacherPayments(
+        session.user.id,
+        filter || undefined
       );
-const result = await fetchTeacherPayments(
-  session.user.id,
-  filter || undefined
-);
-
-console.log("PAYMENTS RESULT:", result);
-
-setPayments(result);
-
+      setPayments(result);
     } catch {
       showToast("تعذّر تحميل المدفوعات", "error");
     } finally {
       setLoading(false);
     }
   };
-  
+
+  // تحميل منفصل لكل الدفعات (بدون فلتر) عشان حساب ترتيب الأقساط يكون صحيح
+  // دايمًا مهما كان الفلتر المعروض على الشاشة
+  const loadAllForProgress = async () => {
+    if (!session?.user) return;
+
+    try {
+      const result = await fetchTeacherPayments(session.user.id, undefined);
+      setAllPaymentsForProgress(result);
+    } catch {
+      // تجاهل صامت، الشاشة الأساسية هتشتغل عادي حتى لو فشل ده
+    }
+  };
 
   useEffect(() => {
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session?.user?.id, filter]);
 
+  useEffect(() => {
+    loadAllForProgress();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [session?.user?.id]);
+
   const stats = useMemo(() => {
-    const pending = payments.filter(
-      (p) => p.status === "pending"
-    );
-
-    const approved = payments.filter(
-      (p) => p.status === "approved"
-    );
-
-    const rejected = payments.filter(
-      (p) => p.status === "rejected"
-    );
+    const pending = payments.filter((p) => p.status === "pending");
+    const approved = payments.filter((p) => p.status === "approved");
+    const rejected = payments.filter((p) => p.status === "rejected");
 
     const approvedAmount = approved.reduce(
       (sum, p) => sum + Number(p.amount || 0),
       0
     );
-
     const pendingAmount = pending.reduce(
       (sum, p) => sum + Number(p.amount || 0),
       0
     );
+
+    // عدد الطلاب اللي بيدفعوا بالتقسيط (على الأقل دفعة واحدة مرتبطة بقسط)
+    const installmentStudentsCount = new Set(
+      payments
+        .filter((p) => p.installment_id)
+        .map((p) => p.student?.id)
+        .filter(Boolean)
+    ).size;
 
     return {
       pending: pending.length,
@@ -134,6 +168,7 @@ setPayments(result);
       rejected: rejected.length,
       approvedAmount,
       pendingAmount,
+      installmentStudentsCount,
     };
   }, [payments]);
 
@@ -144,15 +179,9 @@ setPayments(result);
 
     return payments.filter((payment) => {
       return (
-        payment.student?.full_name
-          ?.toLowerCase()
-          .includes(query) ||
-        payment.student?.email
-          ?.toLowerCase()
-          .includes(query) ||
-        payment.course?.title
-          ?.toLowerCase()
-          .includes(query)
+        payment.student?.full_name?.toLowerCase().includes(query) ||
+        payment.student?.email?.toLowerCase().includes(query) ||
+        payment.course?.title?.toLowerCase().includes(query)
       );
     });
   }, [payments, search]);
@@ -162,18 +191,11 @@ setPayments(result);
 
     try {
       await approvePaymentByType(payment);
-
-      showToast(
-        "تم قبول الدفع وتفعيل اشتراك الطالب",
-        "success"
-      );
-
+      showToast("تم قبول الدفع وتفعيل اشتراك الطالب", "success");
       load();
+      loadAllForProgress();
     } catch {
-      showToast(
-        "تعذّرت عملية قبول الدفع",
-        "error"
-      );
+      showToast("تعذّرت عملية قبول الدفع", "error");
     } finally {
       setProcessingId(null);
     }
@@ -187,8 +209,7 @@ setPayments(result);
     try {
       await rejectPaymentByType(
         rejectTarget,
-        rejectReason ||
-          "الإيصال غير واضح أو غير مطابق"
+        rejectReason || "الإيصال غير واضح أو غير مطابق"
       );
 
       showToast("تم رفض طلب الدفع", "success");
@@ -197,6 +218,7 @@ setPayments(result);
       setRejectReason("");
 
       load();
+      loadAllForProgress();
     } catch {
       showToast("تعذّرت عملية الرفض", "error");
     } finally {
@@ -205,8 +227,7 @@ setPayments(result);
   };
 
   const viewReceipt = async (path: string) => {
-    const { data, error } =
-      await getReceiptSignedUrlAsync(path);
+    const { data, error } = await getReceiptSignedUrlAsync(path);
 
     if (error || !data) {
       showToast("تعذّر فتح الإيصال", "error");
@@ -219,7 +240,7 @@ setPayments(result);
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div className="relative overflow-hidden rounded-3xl  bg-gradient-to-br from-slate-950 via-brand-950 to-brand-700 p-6 text-white shadow-xl">
+      <div className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-slate-950 via-brand-950 to-brand-700 p-6 text-white shadow-xl">
         <div className="absolute -left-16 -top-16 h-48 w-48 rounded-full bg-white/10 blur-3xl" />
         <div className="absolute -bottom-20 right-10 h-52 w-52 rounded-full bg-white/10 blur-3xl" />
 
@@ -229,19 +250,17 @@ setPayments(result);
             الإدارة المالية
           </div>
 
-          <h1 className="mt-2 text-3xl font-black">
-           مراجعة المدفوعات
-          </h1>
+          <h1 className="mt-2 text-3xl font-black">مراجعة المدفوعات</h1>
 
           <p className="mt-2 max-w-2xl text-sm leading-6 text-white/75">
-            راجع طلبات الدفع، تحقق من الإيصالات، وقم بتفعيل
-            اشتراكات الطلاب أو رفض العمليات غير المطابقة.
+            راجع طلبات الدفع، تحقق من الإيصالات، وقم بتفعيل اشتراكات الطلاب أو
+            رفض العمليات غير المطابقة.
           </p>
         </div>
       </div>
 
       {/* Stats */}
-      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-5">
         <PaymentStat
           icon={<Clock3 />}
           label="قيد المراجعة"
@@ -266,6 +285,13 @@ setPayments(result);
         />
 
         <PaymentStat
+          icon={<Layers />}
+          label="طلاب بالتقسيط"
+          value={stats.installmentStudentsCount}
+          tone="brand"
+        />
+
+        <PaymentStat
           icon={<TrendingUp />}
           label="إجمالي المعروض"
           value={payments.length}
@@ -282,9 +308,7 @@ setPayments(result);
 
             <input
               value={search}
-              onChange={(e) =>
-                setSearch(e.target.value)
-              }
+              onChange={(e) => setSearch(e.target.value)}
               placeholder="ابحث باسم الطالب أو الكورس أو البريد..."
               className="h-11 w-full rounded-xl border border-slate-200 bg-slate-50 pr-10 pl-4 text-sm outline-none transition focus:border-brand-400 focus:bg-white focus:ring-4 focus:ring-brand-500/10"
             />
@@ -317,10 +341,7 @@ setPayments(result);
       <div className="space-y-3">
         {loading ? (
           Array.from({ length: 4 }).map((_, i) => (
-            <Skeleton
-              key={i}
-              className="h-36 rounded-3xl"
-            />
+            <Skeleton key={i} className="h-36 rounded-3xl" />
           ))
         ) : filteredPayments.length === 0 ? (
           <div className="rounded-3xl border border-dashed border-slate-200 bg-white p-10">
@@ -335,12 +356,14 @@ setPayments(result);
               key={payment.id}
               initial={{ opacity: 0, y: 10 }}
               animate={{ opacity: 1, y: 0 }}
-              transition={{
-                delay: index * 0.03,
-              }}
+              transition={{ delay: index * 0.03 }}
             >
               <PaymentCard
                 payment={payment}
+                progress={getInstallmentProgress(
+                  payment,
+                  allPaymentsForProgress
+                )}
                 processingId={processingId}
                 onApprove={handleApprove}
                 onReject={setRejectTarget}
@@ -374,9 +397,7 @@ setPayments(result);
             className="w-full rounded-xl border border-slate-300 px-4 py-3 text-sm outline-none transition focus:border-red-400 focus:ring-2 focus:ring-red-500/10"
             placeholder="اكتب سبب الرفض..."
             value={rejectReason}
-            onChange={(e) =>
-              setRejectReason(e.target.value)
-            }
+            onChange={(e) => setRejectReason(e.target.value)}
           />
 
           <Button
@@ -395,12 +416,14 @@ setPayments(result);
 
 function PaymentCard({
   payment,
+  progress,
   processingId,
   onApprove,
   onReject,
   onViewReceipt,
 }: {
   payment: Payment;
+  progress: { index: number; total: number | null; remaining: number | null } | null;
   processingId: string | null;
   onApprove: (payment: Payment) => void;
   onReject: (payment: Payment) => void;
@@ -418,15 +441,22 @@ function PaymentCard({
             <div className="min-w-0">
               <div className="flex flex-wrap items-center gap-2">
                 <h3 className="font-black text-slate-800">
-                  {payment.student?.full_name ||
-                    "طالب غير معروف"}
+                  {payment.student?.full_name || "طالب غير معروف"}
                 </h3>
 
-                <Badge
-                  color={STATUS_COLORS[payment.status]}
-                >
+                <Badge color={STATUS_COLORS[payment.status]}>
                   {PAYMENT_STATUS_LABELS[payment.status]}
                 </Badge>
+
+                {progress && (
+                  <Badge color={progress.index === 1 ? "green" : "amber"}>
+                    {progress.index === 1
+                      ? "القسط الأول"
+                      : progress.total
+                      ? `القسط ${progress.index} من ${progress.total}`
+                      : `القسط رقم ${progress.index}`}
+                  </Badge>
+                )}
               </div>
 
               <p className="mt-1 truncate text-xs text-slate-400">
@@ -443,16 +473,24 @@ function PaymentCard({
                   <CalendarDays className="h-3.5 w-3.5 text-slate-400" />
                   {formatDateTime(payment.created_at)}
                 </span>
+
+                {progress?.remaining !== null && progress?.remaining !== undefined && (
+                  <span className="flex items-center gap-1.5 font-semibold text-brand-600">
+                    <Layers className="h-3.5 w-3.5" />
+                    {progress.remaining === 0
+                      ? "آخر قسط"
+                      : `متبقي ${progress.remaining} ${
+                          progress.remaining === 1 ? "قسط" : "أقساط"
+                        }`}
+                  </span>
+                )}
               </div>
             </div>
           </div>
 
           <div className="flex flex-wrap items-center gap-3">
             <div className="rounded-xl bg-brand-50 px-4 py-2.5 text-center">
-              <p className="text-[10px] text-brand-500">
-                المبلغ
-              </p>
-
+              <p className="text-[10px] text-brand-500">المبلغ</p>
               <p className="mt-0.5 font-black text-brand-800">
                 {formatCurrency(payment.amount)}
               </p>
@@ -461,9 +499,7 @@ function PaymentCard({
             <Button
               size="sm"
               variant="outline"
-              onClick={() =>
-                onViewReceipt(payment.receipt_path)
-              }
+              onClick={() => onViewReceipt(payment.receipt_path)}
             >
               <ExternalLink className="h-3.5 w-3.5" />
               الإيصال
@@ -473,12 +509,8 @@ function PaymentCard({
               <>
                 <Button
                   size="sm"
-                  isLoading={
-                    processingId === payment.id
-                  }
-                  onClick={() =>
-                    onApprove(payment)
-                  }
+                  isLoading={processingId === payment.id}
+                  onClick={() => onApprove(payment)}
                 >
                   <Check className="h-3.5 w-3.5" />
                   قبول
@@ -487,9 +519,7 @@ function PaymentCard({
                 <Button
                   size="sm"
                   variant="danger"
-                  onClick={() =>
-                    onReject(payment)
-                  }
+                  onClick={() => onReject(payment)}
                 >
                   <X className="h-3.5 w-3.5" />
                   رفض
@@ -502,9 +532,7 @@ function PaymentCard({
 
       <div className="border-t border-slate-100 bg-slate-50/60 px-5 py-3">
         <div className="flex flex-wrap items-center justify-between gap-2 text-[11px] text-slate-400">
-          <span>
-            Payment ID: {payment.id.slice(0, 12)}...
-          </span>
+          <span>Payment ID: {payment.id.slice(0, 12)}...</span>
 
           <span>
             {payment.status === "approved"
@@ -542,24 +570,13 @@ function PaymentStat({
   return (
     <div className="rounded-2xl border border-slate-100 bg-white p-4 shadow-sm">
       <div className="flex items-center justify-between">
-        <div className={`rounded-xl p-2.5 ${colors[tone]}`}>
-          {icon}
-        </div>
-
-        <span className="text-xl font-black text-slate-800">
-          {value}
-        </span>
+        <div className={`rounded-xl p-2.5 ${colors[tone]}`}>{icon}</div>
+        <span className="text-xl font-black text-slate-800">{value}</span>
       </div>
 
-      <p className="mt-3 text-xs font-bold text-slate-500">
-        {label}
-      </p>
+      <p className="mt-3 text-xs font-bold text-slate-500">{label}</p>
 
-      {sub && (
-        <p className="mt-1 text-[11px] text-slate-400">
-          {sub}
-        </p>
-      )}
+      {sub && <p className="mt-1 text-[11px] text-slate-400">{sub}</p>}
     </div>
   );
 }

@@ -12,6 +12,9 @@ import {
   TrendingUp,
   CalendarDays,
   UploadCloud,
+  Copy,
+  Check as CheckIcon,
+  Smartphone,
 } from "lucide-react";
 import { motion } from "framer-motion";
 import { Card } from "@/components/ui/Card";
@@ -61,6 +64,42 @@ const BANNER_ICON_BG: Record<BannerTone, string> = {
   overdue: "bg-red-100 text-red-600",
 };
 
+/**
+ * بيانات طرق الدفع المعروضة للطالب في مودال رفع الإيصال.
+ * غيّر الأرقام والأسماء هنا لتطابق حساباتك الفعلية.
+ */
+const PAYMENT_METHODS: {
+  id: string;
+  label: string;
+  number: string;
+  note?: string;
+}[] = [
+  {
+    id: "instapay",
+    label: "InstaPay",
+    number: "01276184900", // ضع رقم أو @username الخاص بانستاباي
+  },
+  {
+    id: "etisalat",
+    label: "اتصالات كاش",
+    number: "01100000000",
+  },
+];
+
+/**
+ * تنسيق تسمية القسط: "قسط X من Y" لو معروف إجمالي عدد الأقساط،
+ * وإلا "الشهر X" كافتراضي.
+ * ملاحظة: عدّل اسم الحقل `total_installments` هنا لو مختلف عندك في جدول الكورسات.
+ */
+function formatInstallmentLabel(
+  monthNumber: number,
+  totalInstallments?: number | null
+) {
+  return totalInstallments
+    ? `قسط ${monthNumber} من ${totalInstallments}`
+    : `الشهر ${monthNumber}`;
+}
+
 export default function PaymentsHistoryPage() {
   const { session } = useAuth();
   const { showToast } = useToast();
@@ -74,6 +113,8 @@ export default function PaymentsHistoryPage() {
   const [payTarget, setPayTarget] = useState<StudentInstallment | null>(null);
   const [payFile, setPayFile] = useState<File | null>(null);
   const [paying, setPaying] = useState(false);
+
+  const [copiedMethodId, setCopiedMethodId] = useState<string | null>(null);
 
   useEffect(() => {
     if (!session?.user) return;
@@ -148,20 +189,45 @@ export default function PaymentsHistoryPage() {
   const bannerMessage = useMemo(() => {
     if (!nextDueInstallment || daysUntilDue === null) return null;
 
+    const total =
+      (nextDueInstallment.course as any)?.total_installments ?? null;
+    const label = formatInstallmentLabel(
+      nextDueInstallment.month_number,
+      total,
+    );
+
     if (nextDueInstallment.status === "rejected") {
-      return `تم رفض إيصال قسط الشهر ${nextDueInstallment.month_number}، برجاء إعادة الرفع`;
+      return `تم رفض إيصال ${label}، برجاء إعادة الرفع`;
     }
 
     if (daysUntilDue < 0) {
-      return `فات معاد قسط الشهر ${nextDueInstallment.month_number} منذ ${Math.abs(daysUntilDue)} يوم`;
+      return `فات معاد ${label} منذ ${Math.abs(daysUntilDue)} يوم`;
     }
 
     if (daysUntilDue === 0) {
-      return `قسط الشهر ${nextDueInstallment.month_number} مستحق اليوم`;
+      return `${label} مستحق اليوم`;
     }
 
-    return `قسط الشهر ${nextDueInstallment.month_number} مستحق خلال ${daysUntilDue} يوم`;
+    return `${label} مستحق خلال ${daysUntilDue} يوم`;
   }, [nextDueInstallment, daysUntilDue]);
+
+  /* عدد أقساط نفس كورس القسط القادم: كام متبقي من كام إجمالي */
+  const nextDueCourseProgress = useMemo(() => {
+    if (!nextDueInstallment) return null;
+
+    const sameCourse = installments.filter(
+      (i) => i.course_id === nextDueInstallment.course_id,
+    );
+
+    const remaining = sameCourse.filter(
+      (i) => i.status === "scheduled" || i.status === "rejected",
+    ).length;
+
+    return {
+      remaining,
+      total: sameCourse.length,
+    };
+  }, [installments, nextDueInstallment]);
 
   const handlePayInstallment = async () => {
     if (!payTarget || !payFile || !session?.user) return;
@@ -187,6 +253,16 @@ export default function PaymentsHistoryPage() {
       showToast("تعذّر رفع إيصال القسط، حاول مرة أخرى", "error");
     } finally {
       setPaying(false);
+    }
+  };
+
+  const handleCopyNumber = async (id: string, number: string) => {
+    try {
+      await navigator.clipboard.writeText(number);
+      setCopiedMethodId(id);
+      setTimeout(() => setCopiedMethodId(null), 2000);
+    } catch {
+      showToast("تعذّر نسخ الرقم", "error");
     }
   };
 
@@ -253,6 +329,12 @@ export default function PaymentsHistoryPage() {
                 {nextDueInstallment.course?.title ?? "كورس"} —{" "}
                 {formatCurrency(nextDueInstallment.amount)}{" "}
               </p>{" "}
+              {nextDueCourseProgress && (
+                <p className="mt-1 text-xs font-semibold opacity-90">
+                  متبقي {nextDueCourseProgress.remaining} من أصل{" "}
+                  {nextDueCourseProgress.total} أقساط
+                </p>
+              )}{" "}
             </div>{" "}
           </div>{" "}
           <Button
@@ -406,6 +488,9 @@ export default function PaymentsHistoryPage() {
                   installment.status === "scheduled" ||
                   installment.status === "rejected";
 
+                const totalForCourse = (installment.course as any)
+                  ?.total_installments as number | undefined;
+
                 return (
                   <div
                     key={installment.id}
@@ -416,8 +501,11 @@ export default function PaymentsHistoryPage() {
                       {" "}
                       <p className="truncate text-sm font-bold text-slate-800">
                         {" "}
-                        {installment.course?.title ?? "كورس"} — الشهر{" "}
-                        {installment.month_number}{" "}
+                        {installment.course?.title ?? "كورس"} —{" "}
+                        {formatInstallmentLabel(
+                          installment.month_number,
+                          totalForCourse,
+                        )}{" "}
                       </p>{" "}
                       <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-slate-400">
                         {" "}
@@ -486,6 +574,15 @@ export default function PaymentsHistoryPage() {
             {" "}
             {payments.map((payment, index) => {
               const StatusIcon = STATUS_ICONS[payment.status] ?? Wallet;
+
+              // نجيب بيانات القسط المرتبط بهذه الدفعة (لو موجود) عشان نعرض ترتيبه
+              const relatedInstallment = payment.installment_id
+                ? installments.find((i) => i.id === payment.installment_id)
+                : undefined;
+
+              const installmentTotal = (payment.course as any)
+                ?.total_installments as number | undefined;
+
               return (
                 <motion.div
                   key={payment.id}
@@ -521,7 +618,14 @@ export default function PaymentsHistoryPage() {
                                   {payment.course?.title ?? "اشتراك في كورس"}{" "}
                                 </p>{" "}
                                 {payment.installment_id && (
-                                  <Badge color="amber">قسط</Badge>
+                                  <Badge color="amber">
+                                    {relatedInstallment
+                                      ? formatInstallmentLabel(
+                                          relatedInstallment.month_number,
+                                          installmentTotal,
+                                        )
+                                      : "قسط"}
+                                  </Badge>
                                 )}{" "}
                               </div>{" "}
                               <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-slate-400">
@@ -618,7 +722,14 @@ export default function PaymentsHistoryPage() {
             setPayFile(null);
           }
         }}
-        title={`دفع قسط الشهر ${payTarget?.month_number ?? ""}`}
+        title={
+          payTarget
+            ? `دفع ${formatInstallmentLabel(
+                payTarget.month_number,
+                (payTarget.course as any)?.total_installments,
+              )}`
+            : ""
+        }
       >
         <div dir="rtl">
           <div className="rounded-2xl bg-slate-50 p-4">
@@ -644,6 +755,59 @@ export default function PaymentsHistoryPage() {
               </div>
             </div>
           )}
+
+          {/* بيانات طرق الدفع */}
+          <div className="mt-5">
+            <p className="mb-2 flex items-center gap-1.5 text-xs font-bold text-slate-500">
+              <Smartphone className="h-3.5 w-3.5" />
+              حوّل المبلغ على أحد الأرقام التالية ثم ارفع صورة الإيصال
+            </p>
+
+            <div className="space-y-2">
+              {PAYMENT_METHODS.map((method) => (
+                <div
+                  key={method.id}
+                  className="flex items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white px-3 py-2.5"
+                >
+                  <div className="min-w-0">
+                    <p className="text-xs font-bold text-slate-500">
+                      {method.label}
+                    </p>
+                    <p
+                      dir="ltr"
+                      className="mt-0.5 truncate text-sm font-black text-brand-800"
+                    >
+                      {method.number}
+                    </p>
+                    {method.note && (
+                      <p className="mt-0.5 text-[11px] text-slate-400">
+                        {method.note}
+                      </p>
+                    )}
+                  </div>
+
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="shrink-0"
+                    onClick={() => handleCopyNumber(method.id, method.number)}
+                  >
+                    {copiedMethodId === method.id ? (
+                      <>
+                        <CheckIcon className="h-3.5 w-3.5" />
+                        تم النسخ
+                      </>
+                    ) : (
+                      <>
+                        <Copy className="h-3.5 w-3.5" />
+                        نسخ
+                      </>
+                    )}
+                  </Button>
+                </div>
+              ))}
+            </div>
+          </div>
 
           <label className="mt-5 flex cursor-pointer flex-col items-center justify-center gap-3 rounded-2xl border-2 border-dashed border-slate-200 bg-slate-50 p-8 text-center transition hover:border-brand-300 hover:bg-brand-50/30">
             <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-brand-100 text-brand-600">
