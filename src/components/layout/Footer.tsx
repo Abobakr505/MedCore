@@ -148,33 +148,39 @@ export function Footer() {
 
         {/* ================= BOTTOM ================= */}
 
-        <div className="flex flex-col gap-5 border-t border-white/10 py-6 text-xs sm:flex-row sm:items-center sm:justify-between">
-          <p className="text-slate-500">
-            © {new Date().getFullYear()} Med Core. جميع الحقوق محفوظة.
-          </p>
+<div className="flex flex-col gap-5 border-t border-white/10 py-6 text-xs sm:flex-row sm:items-center sm:justify-between">
+  <p className="text-slate-500">
+    © {new Date().getFullYear()} Med Core. جميع الحقوق محفوظة.
+  </p>
 
-          <div className="flex flex-wrap items-center gap-5 text-slate-500">
-            <Link
-              to="/about"
-              className="transition-colors hover:text-white"
-            >
-              عن المنصة
-            </Link>
+  <div className="flex flex-wrap items-center gap-5 text-slate-500">
+    <Link to="/about" className="transition-colors hover:text-white">
+      عن المنصة
+    </Link>
 
-            <Link
-              to="/contact"
-              className="transition-colors hover:text-white"
-            >
-              الدعم
-            </Link>
+    <Link to="/contact" className="transition-colors hover:text-white">
+      الدعم
+    </Link>
 
-            <span className="flex items-center gap-1.5 text-slate-600">
-              صُنع بـ
-              <HeartPulse className="h-3.5 w-3.5 text-brand-500" />
-              للتعليم الطبي
-            </span>
-          </div>
-        </div>
+    <span className="flex items-center gap-1.5 text-slate-600">
+      صُنع بـ
+      <HeartPulse className="h-3.5 w-3.5 text-brand-500" />
+      للتعليم الطبي
+    </span>
+  </div>
+            
+            <a
+    href="https://bakrhasan.vercel.app/"
+    target="_blank"
+    rel="noopener noreferrer"
+    className="group inline-flex items-center gap-2 rounded-full border border-white/10 bg-gradient-to-r from-brand-500/10 to-cyan-500/10 px-4 py-2 text-[11px] font-bold text-slate-400 transition-all hover:border-brand-400/30 hover:from-brand-500/20 hover:to-cyan-500/20 hover:text-white"
+  >
+    <Sparkles className="h-3.5 w-3.5 text-brand-400 transition-transform group-hover:rotate-12" />
+    <span>
+      تطوير <span className="text-brand-400">أبوبكر</span>
+    </span>
+  </a>
+</div>
       </div>
     </footer>
   );
