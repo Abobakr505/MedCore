@@ -1,6 +1,14 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+@font-face {
+  font-family: "Zain";
+  src: url("/alfont_com_zainmobileswashes-VF.ttf") format("opentype");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
 
 html, body, #root {
   height: 100%;
@@ -28,7 +36,9 @@ body {
 .skeleton {
   @apply bg-gradient-to-l from-slate-100 via-slate-200 to-slate-100 bg-[length:1000px_100%] animate-shimmer rounded-md;
 }
-
+h1 , h2 ,h3,h4 , h5 , h6 {
+  font-family: Zain , sans-serif;
+}
 @layer utilities {
   .text-balance {
     text-wrap: balance;
