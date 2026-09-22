@@ -279,7 +279,7 @@ export default function RegisterPage() {
               <div className="absolute inset-0 rounded-[22px] bg-brand-500/30 blur-xl" />
 
               <div className="relative grid h-16 w-16 place-items-center rounded-[22px] bg-gradient-to-br from-brand-500 to-cyan-500 text-white shadow-xl">
-                <Stethoscope className="h-8 w-8" />
+                < img src="/logo.png" alt="logo image 404" className="relative h-16 w-16 object-cover" />
               </div>
             </div>
 
