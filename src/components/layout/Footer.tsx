@@ -58,8 +58,8 @@ export function Footer() {
               to="/"
               className="group inline-flex items-center gap-3"
             >
-              <div className="grid h-12 w-12 place-items-center rounded-2xl bg-gradient-to-br from-brand-500 to-cyan-500 text-white shadow-lg shadow-brand-900/20 transition-transform group-hover:scale-105">
-                <Stethoscope className="h-6 w-6" />
+              <div className="grid h-12 w-12 place-items-center rounded-2xl bg-brand-500 text-white shadow-lg shadow-brand-900/20 transition-transform group-hover:scale-105">
+                < img src="/logo.png" alt="logo image 404" className="relative h-12 w-12 object-cover" />
               </div>
 
               <div>

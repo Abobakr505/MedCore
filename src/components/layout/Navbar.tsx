@@ -135,7 +135,7 @@ export function Navbar() {
           >
             <div className="absolute inset-0 bg-white/10 opacity-0 transition-opacity group-hover:opacity-100" />
 
-            <Stethoscope className="relative h-5 w-5" />
+            < img src="/logo.png" alt="logo image 404" className="relative h-11 w-11 object-cover" />
           </motion.div>
 
           <div className="leading-none">
