@@ -15,6 +15,13 @@
   font-style: normal;
   font-display: swap;
 }
+@font-face {
+  font-family: "Ping";
+  src: url("/ping-ar-lt-bold.otf") format("opentype");
+  font-weight: 800 , 900 , bold;
+  font-style: normal;
+  font-display: swap;
+}
 
 
 html, body, #root {
