@@ -8,20 +8,7 @@
   font-style: normal;
   font-display: swap;
 }
-@font-face {
-  font-family: "Ping";
-  src: url("/ping-ar-lt-regular.otf") format("opentype");
-  font-weight: 400;
-  font-style: normal;
-  font-display: swap;
-}
-@font-face {
-  font-family: "Ping";
-  src: url("/ping-ar-lt-bold.otf") format("opentype");
-  font-weight: 800 , 900 , bold;
-  font-style: normal;
-  font-display: swap;
-}
+
 
 
 html, body, #root {
@@ -29,7 +16,7 @@ html, body, #root {
 }
 
 body {
-  font-family: Ping, system-ui, sans-serif;
+  font-family: "IBM Plex Sans Arabic", system-ui, sans-serif;
   @apply bg-slate-50 text-slate-800 antialiased;
   background-image:
     radial-gradient(circle at top right, rgba(59, 130, 246, 0.08), transparent 22%),
