@@ -66,7 +66,7 @@ export default function PendingApprovalPage() {
 
         <div className="font-body mt-4 flex items-center justify-center gap-2 text-[11px] text-[#6B87B3]">
           <Mail className="h-3.5 w-3.5" />
-          support@medcore.app
+          ibrahimrezk1552006@gmail.com
         </div>
       </div>
     </main>

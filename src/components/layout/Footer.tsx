@@ -128,13 +128,13 @@ export function Footer() {
               <ContactItem
                 icon={Mail}
                 label="البريد الإلكتروني"
-                value="support@medcore.app"
+                value="ibrahimrezk1552006@gmail.com"
               />
 
               <ContactItem
                 icon={Phone}
                 label="الهاتف"
-                value="+966 xxx xxx xxx"
+                value="+201040181269"
               />
 
               <ContactItem

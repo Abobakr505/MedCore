@@ -21,12 +21,12 @@ const contactInfo = [
   {
     icon: Mail,
     label: "البريد الإلكتروني",
-    value: "support@medcore.app",
+    value: "ibrahimrezk1552006@gmail.com",
   },
   {
     icon: Phone,
     label: "الهاتف",
-    value: "+966 5XX XXX XXX",
+    value: "+201040181269",
   },
   {
     icon: MapPin,
