@@ -19,7 +19,7 @@ export function VideoWatermark({ phone, name, containerRef }: VideoWatermarkProp
         top: Math.random() * 80 + 5, // % من الارتفاع
         left: Math.random() * 70 + 5, // % من العرض
       });
-    }, 15000);
+    }, 30000);
 
     return () => clearInterval(moveInterval);
   }, []);

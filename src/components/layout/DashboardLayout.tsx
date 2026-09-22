@@ -490,7 +490,7 @@ function LogoMark() {
     <div className="relative grid h-10 w-10 shrink-0 place-items-center overflow-hidden rounded-xl bg-gradient-to-br from-brand-500 to-brand-700 text-white shadow-[0_7px_20px_rgba(20,184,166,0.25)]">
       <div className="absolute -right-2 -top-2 h-6 w-6 rounded-full bg-white/15" />
 
-      < img src="/logo.png" alt="logo image 404" className="relative h-12 w-12 object-contain" />
+      < img src="/logo.png" alt="logo image 404" className="relative h-10 w-10 object-cover" />
     </div>
   );
 }

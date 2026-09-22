@@ -11,6 +11,8 @@ import {
   ShoppingCart,
   CheckCircle2,
   Stethoscope,
+  ToothbrushSparkles,
+  Pill,
   ChevronDown,
   ArrowRight,
   GraduationCap,
@@ -53,6 +55,36 @@ import {
 
 import { getPublicUrl } from "@/lib/supabase";
 import { getLessonPlaybackUrl } from "@/services/videoPlayback";
+
+/* =========================================================
+   College visual identity (icon + gradient)
+   نفس الفكرة المستخدمة في FeaturedCoursesSection / CourseCard
+========================================================= */
+
+type CollegeMeta = {
+  icon: typeof Stethoscope;
+  gradient: string;
+};
+
+const COLLEGE_META: Record<string, CollegeMeta> = {
+  medicine: {
+    icon: Stethoscope,
+    gradient: "from-brand-600 to-brand-900",
+  },
+  dentistry: {
+    icon: ToothbrushSparkles,
+    gradient: "from-violet-600 to-brand-800",
+  },
+  pharmacy: {
+    icon: Pill,
+    gradient: "from-emerald-600 to-teal-800",
+  },
+};
+
+const DEFAULT_COLLEGE_META: CollegeMeta = {
+  icon: Stethoscope,
+  gradient: "from-brand-600 to-brand-900",
+};
 
 export default function CourseDetailsPage() {
   const { slug } =
@@ -446,6 +478,11 @@ const handleLessonClick = async (
       course.students_count ?? 0
     );
 
+  const collegeMeta =
+    COLLEGE_META[course.college as string] ?? DEFAULT_COLLEGE_META;
+
+  const CollegeIcon = collegeMeta.icon;
+
   /*
    * Preview video فقط.
    *
@@ -586,7 +623,9 @@ const playingVideoUrl =
             >
               <div className="overflow-hidden rounded-[30px] border border-white/10 bg-white text-slate-800 shadow-2xl shadow-black/30">
                 {/* Thumbnail */}
-                <div className="relative h-52 overflow-hidden bg-gradient-to-br from-brand-600 to-brand-900">
+                <div
+                  className={`relative h-52 overflow-hidden bg-gradient-to-br ${collegeMeta.gradient}`}
+                >
                   {thumbnail ? (
                     <img
                       src={thumbnail}
@@ -595,7 +634,7 @@ const playingVideoUrl =
                     />
                   ) : (
                     <div className="flex h-full items-center justify-center">
-                      <Stethoscope className="h-16 w-16 text-white/80" />
+                      <CollegeIcon className="h-16 w-16 text-white/80" />
                     </div>
                   )}
 

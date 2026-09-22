@@ -10,6 +10,9 @@ import {
   Bell,
   X,
   Compass,
+  Clock,
+  CheckCircle2,
+  Flame,
 } from "lucide-react";
 
 import { Card } from "@/components/ui/Card";
@@ -48,9 +51,7 @@ export default function MyCoursesPage() {
 
   const [enrollments, setEnrollments] = useState<Enrollment[]>([]);
   const [loading, setLoading] = useState(true);
-  const [courseProgress, setCourseProgress] = useState<
-    Record<string, CourseProgress>
-  >({});
+  const [courseProgress, setCourseProgress] = useState<Record<string, CourseProgress>>({});
 
   const [newCourseAlert, setNewCourseAlert] =
     useState<NewCourseAlert | null>(null);
@@ -307,6 +308,9 @@ export default function MyCoursesPage() {
               enrollment.course?.thumbnail_path ?? null
             );
 
+            const isCompleted = progress.percentage >= 100;
+            const isStarted = progress.completedLessons > 0 && !isCompleted;
+
             return (
               <motion.div
                 key={enrollment.id}
@@ -317,14 +321,14 @@ export default function MyCoursesPage() {
                   delay: index * 0.05,
                 }}
               >
-                <Card className="group h-full overflow-hidden rounded-3xl border-slate-100 p-0 shadow-sm transition-all duration-300 hover:-translate-y-1 hover:border-brand-100 hover:shadow-xl">
+                <Card className="group h-full overflow-hidden rounded-3xl border-slate-100 p-0 shadow-sm transition-all duration-300 hover:-translate-y-1.5 hover:border-brand-200 hover:shadow-2xl hover:shadow-brand-900/10">
                   {/* Image */}
                   <div className="relative h-48 overflow-hidden bg-gradient-to-br from-brand-500 via-brand-700 to-brand-900">
                     {thumb ? (
                       <img
                         src={thumb}
                         alt={enrollment.course?.title ?? "Course"}
-                        className="h-full w-full object-cover transition duration-700 group-hover:scale-105"
+                        className="h-full w-full object-cover transition duration-700 group-hover:scale-110"
                       />
                     ) : (
                       <div className="flex h-full items-center justify-center">
@@ -332,10 +336,54 @@ export default function MyCoursesPage() {
                       </div>
                     )}
 
-                    <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-black/10 to-transparent" />
+                    <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/10 to-transparent" />
 
-                    <div className="absolute right-4 top-4 rounded-full bg-white/90 px-3 py-1.5 text-[10px] font-black text-brand-700 shadow-sm backdrop-blur">
-                      مسجل حاليًا
+                    {/* Status badge (completed / in progress) */}
+                    <div className="absolute right-4 top-4">
+                      {isCompleted ? (
+                        <div className="flex items-center gap-1.5 rounded-full bg-emerald-500/95 px-3 py-1.5 text-[10px] font-black text-white shadow-sm backdrop-blur">
+                          <CheckCircle2 className="h-3.5 w-3.5" />
+                          مكتمل
+                        </div>
+                      ) : (
+                        <div className="flex items-center gap-1.5 rounded-full bg-white/90 px-3 py-1.5 text-[10px] font-black text-brand-700 shadow-sm backdrop-blur">
+                          <PlayCircle className="h-3.5 w-3.5" />
+                          مسجل حاليًا
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Circular progress badge */}
+                    <div className="absolute left-4 top-4">
+                      <div className="relative flex h-11 w-11 items-center justify-center">
+                        <svg className="h-11 w-11 -rotate-90" viewBox="0 0 40 40">
+                          <circle
+                            cx="20"
+                            cy="20"
+                            r="16"
+                            fill="none"
+                            stroke="rgba(255,255,255,0.25)"
+                            strokeWidth="4"
+                          />
+                          <circle
+                            cx="20"
+                            cy="20"
+                            r="16"
+                            fill="none"
+                            stroke={isCompleted ? "#10b981" : "#ffffff"}
+                            strokeWidth="4"
+                            strokeLinecap="round"
+                            strokeDasharray={`${2 * Math.PI * 16}`}
+                            strokeDashoffset={`${
+                              2 * Math.PI * 16 * (1 - progress.percentage / 100)
+                            }`}
+                            className="transition-all duration-700"
+                          />
+                        </svg>
+                        <span className="absolute text-[9px] font-black text-white">
+                          {progress.percentage}%
+                        </span>
+                      </div>
                     </div>
 
                     <div className="absolute bottom-4 right-4 left-4">
@@ -352,43 +400,85 @@ export default function MyCoursesPage() {
                   {/* Content */}
                   <div className="p-5">
                     <div className="flex items-center gap-2 text-xs text-slate-400">
-                      <GraduationCap className="h-4 w-4" />
-
+                      <GraduationCap className="h-4 w-4 shrink-0" />
                       <span className="truncate">
-                        {enrollment.course?.teacher?.full_name ??
-                          "المعلم"}
+                        {enrollment.course?.teacher?.full_name ?? "المعلم"}
                       </span>
                     </div>
 
-                    <div className="mt-5">
-                      <div className="flex items-center justify-between text-xs">
-                        <span className="font-bold text-slate-500">
-                          تقدمك
+                    {/* Stats row */}
+                    <div className="mt-4 grid grid-cols-2 gap-2">
+                      <div className="flex items-center gap-2 rounded-xl bg-slate-50 px-3 py-2">
+                        <BookOpen className="h-3.5 w-3.5 text-brand-500" />
+                        <span className="text-[11px] font-bold text-slate-600">
+                          {progress.completedLessons}/{progress.totalLessons} درس
                         </span>
+                      </div>
 
-                        <span className="font-black text-brand-600">
+                      <div className="flex items-center gap-2 rounded-xl bg-slate-50 px-3 py-2">
+                        {isCompleted ? (
+                          <>
+                            <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500" />
+                            <span className="text-[11px] font-bold text-emerald-600">
+                              تم الإنجاز
+                            </span>
+                          </>
+                        ) : isStarted ? (
+                          <>
+                            <Flame className="h-3.5 w-3.5 text-orange-500" />
+                            <span className="text-[11px] font-bold text-slate-600">
+                              مستمر
+                            </span>
+                          </>
+                        ) : (
+                          <>
+                            <Clock className="h-3.5 w-3.5 text-slate-400" />
+                            <span className="text-[11px] font-bold text-slate-500">
+                              لم يبدأ بعد
+                            </span>
+                          </>
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="mt-4">
+                      <div className="flex items-center justify-between text-xs">
+                        <span className="font-bold text-slate-500">تقدمك</span>
+                        <span
+                          className={`font-black ${
+                            isCompleted ? "text-emerald-600" : "text-brand-600"
+                          }`}
+                        >
                           {progress.percentage}%
                         </span>
                       </div>
 
-                      <div className="mt-2 h-2 overflow-hidden rounded-full bg-slate-100">
-                        <div
-                          className="h-full rounded-full bg-brand-500 transition-all duration-500"
-                          style={{ width: `${progress.percentage}%` }}
+                      <div className="mt-2 h-2.5 overflow-hidden rounded-full bg-slate-100">
+                        <motion.div
+                          initial={{ width: 0 }}
+                          animate={{ width: `${progress.percentage}%` }}
+                          transition={{ duration: 0.8, ease: "easeOut" }}
+                          className={`h-full rounded-full ${
+                            isCompleted
+                              ? "bg-gradient-to-r from-emerald-400 to-emerald-600"
+                              : "bg-gradient-to-r from-brand-400 to-brand-600"
+                          }`}
                         />
                       </div>
-
-                      <p className="mt-2 text-[11px] text-slate-400">
-                        {progress.completedLessons} / {progress.totalLessons} درس مكتمل
-                      </p>
                     </div>
 
                     <Link
                       to={`/app/student/courses/${enrollment.course_id}/learn`}
                     >
-                      <Button className="mt-5 w-full">
+                      <Button
+                        className={`mt-5 w-full ${
+                          isCompleted
+                            ? "bg-emerald-600 hover:bg-emerald-700"
+                            : ""
+                        }`}
+                      >
                         <PlayCircle className="h-4 w-4" />
-                        متابعة التعلّم
+                        {isCompleted ? "مراجعة الكورس" : "متابعة التعلّم"}
                         <ArrowLeft className="mr-auto h-4 w-4" />
                       </Button>
                     </Link>
@@ -400,18 +490,18 @@ export default function MyCoursesPage() {
         </div>
       )}
 
-{/* Browse more courses button */}
-{!loading && (
-  <div className="flex justify-center pt-4">
-    <Link to="/courses" className="group">
-      <div className="flex items-center gap-2.5 rounded-full border-2 border-brand-100 bg-white px-6 py-3.5 font-bold text-brand-700 shadow-sm transition-all duration-300 hover:border-brand-500 hover:bg-brand-500 hover:text-white hover:shadow-lg hover:shadow-brand-500/20">
-        <Compass className="h-5 w-5 transition-transform duration-500 group-hover:rotate-180" />
-        <span>تصفّح المزيد من الكورسات</span>
-        <ArrowLeft className="h-4 w-4 transition-transform duration-300 group-hover:-translate-x-1" />
-      </div>
-    </Link>
-  </div>
-)}
+      {/* Browse more courses button */}
+      {!loading && (
+        <div className="flex justify-center pt-4">
+          <Link to="/courses" className="group">
+            <div className="flex items-center gap-2.5 rounded-full border-2 border-brand-100 bg-white px-6 py-3.5 font-bold text-brand-700 shadow-sm transition-all duration-300 hover:border-brand-500 hover:bg-brand-500 hover:text-white hover:shadow-lg hover:shadow-brand-500/20">
+              <Compass className="h-5 w-5 transition-transform duration-500 group-hover:rotate-180" />
+              <span>تصفّح المزيد من الكورسات</span>
+              <ArrowLeft className="h-4 w-4 transition-transform duration-300 group-hover:-translate-x-1" />
+            </div>
+          </Link>
+        </div>
+      )}
     </div>
   );
 }

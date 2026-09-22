@@ -48,6 +48,8 @@ import {
   AlertCircle,
   Trophy,
   Clock3,
+  Minimize,
+  Maximize,
 } from "lucide-react";
 
 import { supabase } from "@/lib/supabase";
@@ -1716,7 +1718,29 @@ const markLessonCompleted = useCallback(
       ),
     [visibleQuizzes]
   );
+const videoContainerRef = useRef<HTMLDivElement | null>(null);
 
+const [isFullscreen, setIsFullscreen] = useState(false);
+
+useEffect(() => {
+  const handleFullscreenChange = () => {
+    setIsFullscreen(
+      document.fullscreenElement === videoContainerRef.current
+    );
+  };
+
+  document.addEventListener(
+    "fullscreenchange",
+    handleFullscreenChange
+  );
+
+  return () => {
+    document.removeEventListener(
+      "fullscreenchange",
+      handleFullscreenChange
+    );
+  };
+}, []);
   /* ---------------------------------------------------------------------- */
   /* Loading                                                                 */
   /* ---------------------------------------------------------------------- */
@@ -2009,107 +2033,154 @@ const markLessonCompleted = useCallback(
                 </div>
 
                 {/* Video */}
-                <div className="relative overflow-hidden rounded-3xl bg-black shadow-2xl">
-{videoLoading ? (
-  <div className="absolute inset-0 flex flex-col items-center justify-center gap-3">
-    <Loader2 className="h-10 w-10 animate-spin text-white" />
-    {videoDownloadPct > 0 && (
-      <span className="text-sm font-bold text-white/80">
-        {videoDownloadPct}%
-      </span>
-    )}
+                {/* Video */}
+<div
+  ref={videoContainerRef}
+  className={`relative overflow-hidden bg-black shadow-2xl ${
+    isFullscreen
+      ? "h-screen w-screen rounded-none"
+      : "rounded-3xl"
+  }`}
+>
+  {videoLoading ? (
+    <div className="absolute inset-0 flex flex-col items-center justify-center gap-3">
+      <Loader2 className="h-10 w-10 animate-spin text-white" />
+
+      {videoDownloadPct > 0 && (
+        <span className="text-sm font-bold text-white/80">
+          {videoDownloadPct}%
+        </span>
+      )}
+    </div>
+  ) : activeVideoUrl ? (
+    <LessonVideoPlayer
+      key={activeVideoUrl}
+      src={activeVideoUrl}
+      onTimeUpdate={(currentTime, duration) => {
+        if (!duration) return;
+
+        const percentage = Math.round(
+          (currentTime / duration) * 100
+        );
+
+        if (percentage >= 90) {
+          markLessonCompleted();
+        }
+      }}
+      onEnded={markLessonCompleted}
+      className="h-full w-full"
+    />
+  ) : (
+    <div className="absolute inset-0 flex flex-col items-center justify-center px-5 text-center">
+      <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-white/10 text-white">
+        <VideoIcon />
+      </div>
+
+      <h3 className="mt-4 font-bold text-white">
+        لا يوجد فيديو لهذا الدرس
+      </h3>
+
+      <p className="mt-2 text-xs text-white/50">
+        يمكنك الاطلاع على الملفات والوصف بالأسفل.
+      </p>
+    </div>
+  )}
+
+  {/* Fixed brand watermark */}
+  <div className="pointer-events-none absolute left-4 top-4 z-20 rounded-lg bg-black/30 px-3 py-1.5 text-[10px] font-bold text-white/60 backdrop-blur">
+    MedCore
   </div>
-) : activeVideoUrl ? (
-  <LessonVideoPlayer
-    key={activeVideoUrl}
-    src={activeVideoUrl}
-    onTimeUpdate={(currentTime, duration) => {
-      if (!duration) return;
-      const percentage = Math.round((currentTime / duration) * 100);
-      if (percentage >= 90) markLessonCompleted();
-    }}
-    onEnded={markLessonCompleted}
-    className="h-full w-full"
+
+  {/* User Watermark */}
+  <VideoWatermark
+    phone={
+      profile?.phone ??
+      session?.user.phone ??
+      "عضو MedCore"
+    }
+    name={
+      profile?.full_name ??
+      session?.user.user_metadata?.full_name ??
+      "مستخدم MedCore"
+    }
+    containerRef={watermarkRef}
   />
-) : (
-                      <div className="absolute inset-0 flex flex-col items-center justify-center px-5 text-center">
-                        <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-white/10 text-white">
-                          <VideoIcon />
-                        </div>
 
-                        <h3 className="mt-4 font-bold text-white">
-                          لا يوجد فيديو لهذا الدرس
-                        </h3>
+  {/* Fullscreen Button */}
+  <button
+    type="button"
+    onClick={async () => {
+      try {
+        if (!document.fullscreenElement) {
+          await videoContainerRef.current?.requestFullscreen();
+        } else {
+          await document.exitFullscreen();
+        }
+      } catch (error) {
+        console.error(
+          "Fullscreen error:",
+          error
+        );
+      }
+    }}
+    className="absolute bottom-4 right-4 z-50 flex h-10 w-10 items-center justify-center rounded-lg bg-black/60 text-white backdrop-blur transition hover:bg-black/80"
+    aria-label={
+      isFullscreen
+        ? "الخروج من ملء الشاشة"
+        : "ملء الشاشة"
+    }
+  >
+    {isFullscreen ? (
+      <Minimize className="h-5 w-5" />
+    ) : (
+      <Maximize className="h-5 w-5" />
+    )}
+  </button>
 
-                        <p className="mt-2 text-xs text-white/50">
-                          يمكنك الاطلاع على الملفات والوصف بالأسفل.
-                        </p>
-                      </div>
-                    )}
+  {/* تغطية فورية سوداء عند فقدان التركيز/التبويب */}
+  <AnimatePresence>
+    {isCovered && !screenRecordingDetected && (
+      <motion.div
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        exit={{ opacity: 0 }}
+        className="absolute inset-0 z-30 bg-black"
+      />
+    )}
+  </AnimatePresence>
 
-                    {/* Fixed brand watermark */}
-                    <div className="pointer-events-none absolute left-4 top-4 rounded-lg bg-black/30 px-3 py-1.5 text-[10px] font-bold text-white/60 backdrop-blur">
-                      MedCore
-                    </div>
+  {/* Recording warning */}
+  <AnimatePresence>
+    {screenRecordingDetected && (
+      <motion.div
+        initial={{
+          opacity: 0,
+          scale: 0.95,
+        }}
+        animate={{
+          opacity: 1,
+          scale: 1,
+        }}
+        exit={{
+          opacity: 0,
+        }}
+        className="absolute inset-0 z-40 flex items-center justify-center bg-black p-5 text-center"
+      >
+        <div>
+          <Lock className="mx-auto h-10 w-10 text-red-400" />
 
-                    <VideoWatermark
-                      phone={
-                        profile?.phone ??
-                        session?.user.phone ??
-                        "عضو MedCore"
-                      }
-                      name={
-                        profile?.full_name ??
-                        session?.user.user_metadata?.full_name ??
-                        "مستخدم MedCore"
-                      }
-                      containerRef={watermarkRef}
-                    />
+          <h3 className="mt-4 text-lg font-black text-white">
+            المحتوى محمي
+          </h3>
 
-                    {/* تغطية فورية سوداء عند فقدان التركيز/التبويب أو getDisplayMedia */}
-                    <AnimatePresence>
-                      {isCovered && !screenRecordingDetected && (
-                        <motion.div
-                          initial={{ opacity: 0 }}
-                          animate={{ opacity: 1 }}
-                          exit={{ opacity: 0 }}
-                          className="absolute inset-0 z-30 bg-black"
-                        />
-                      )}
-                    </AnimatePresence>
-
-                    {/* Recording warning */}
-                    <AnimatePresence>
-                      {screenRecordingDetected && (
-                        <motion.div
-                          initial={{
-                            opacity: 0,
-                            scale: 0.95,
-                          }}
-                          animate={{
-                            opacity: 1,
-                            scale: 1,
-                          }}
-                          exit={{
-                            opacity: 0,
-                          }}
-                          className="absolute inset-0 z-40 flex items-center justify-center bg-black p-5 text-center"
-                        >
-                          <div>
-                            <Lock className="mx-auto h-10 w-10 text-red-400" />
-
-                            <h3 className="mt-4 text-lg font-black text-white">
-                              المحتوى محمي
-                            </h3>
-
-                            <p className="mt-2 text-sm text-white/60">
-                              لا يسمح بتسجيل أو تصوير محتوى الدرس.
-                            </p>
-                          </div>
-                        </motion.div>
-                      )}
-                    </AnimatePresence>
-                </div>
+          <p className="mt-2 text-sm text-white/60">
+            لا يسمح بتسجيل أو تصوير محتوى الدرس.
+          </p>
+        </div>
+      </motion.div>
+    )}
+  </AnimatePresence>
+</div>
 
                 {/* Video Offline */}
                 {activeVideoUrl && (

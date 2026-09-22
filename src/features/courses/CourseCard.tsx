@@ -8,6 +8,8 @@ import {
   PlayCircle,
   Star,
   Stethoscope,
+  ToothbrushSparkles,
+  Pill,
   Users,
 } from "lucide-react";
 
@@ -21,17 +23,51 @@ interface CourseCardProps {
   index?: number;
 }
 
+/* =========================================================
+   College visual identity (icon + gradient)
+   نفس الفكرة المستخدمة في FeaturedCoursesSection باللاندنج
+========================================================= */
+
+type CollegeMeta = {
+  icon: typeof Stethoscope;
+  gradient: string;
+};
+
+const COLLEGE_META: Record<string, CollegeMeta> = {
+  medicine: {
+    icon: Stethoscope,
+    gradient: "from-brand-700 via-brand-600 to-cyan-600",
+  },
+  dentistry: {
+    icon: ToothbrushSparkles,
+    gradient: "from-violet-600 via-violet-500 to-brand-600",
+  },
+  pharmacy: {
+    icon: Pill,
+    gradient: "from-emerald-600 via-emerald-500 to-teal-600",
+  },
+};
+
+const DEFAULT_COLLEGE_META: CollegeMeta = {
+  icon: Stethoscope,
+  gradient: "from-brand-700 via-brand-600 to-cyan-600",
+};
+
 export function CourseCard({ course, index = 0 }: CourseCardProps) {
   const thumbnail = course.thumbnail_path
     ? getPublicUrl("course-thumbnails", course.thumbnail_path)
     : null;
-
 
   const studentsCount = Number(course.students_count ?? 0);
   const price = Number(course.price ?? 0);
 
   const collegeLabel =
     COLLEGE_LABELS[course.college] ?? "تخصص طبي";
+
+  const collegeMeta =
+    COLLEGE_META[course.college as string] ?? DEFAULT_COLLEGE_META;
+
+  const CollegeIcon = collegeMeta.icon;
 
   const teacherName =
     course.teacher?.full_name?.trim() || "فريق Med Core";
@@ -60,7 +96,9 @@ export function CourseCard({ course, index = 0 }: CourseCardProps) {
         <div className="pointer-events-none absolute -right-16 -top-16 h-32 w-32 rounded-full bg-brand-100/50 blur-3xl transition-all duration-700 group-hover:bg-brand-200/70" />
 
         {/* Thumbnail */}
-        <div className="relative h-[220px] shrink-0 overflow-hidden bg-gradient-to-br from-brand-700 via-brand-600 to-cyan-600">
+        <div
+          className={`relative h-[220px] shrink-0 overflow-hidden bg-gradient-to-br ${collegeMeta.gradient}`}
+        >
           {thumbnail ? (
             <img
               src={thumbnail}
@@ -71,7 +109,7 @@ export function CourseCard({ course, index = 0 }: CourseCardProps) {
           ) : (
             <div className="flex h-full w-full items-center justify-center">
               <div className="flex h-20 w-20 items-center justify-center rounded-[24px] border border-white/20 bg-white/10 backdrop-blur-md">
-                <Stethoscope className="h-10 w-10 text-white/90" />
+                <CollegeIcon className="h-10 w-10 text-white/90" />
               </div>
             </div>
           )}
@@ -91,8 +129,6 @@ export function CourseCard({ course, index = 0 }: CourseCardProps) {
               {collegeLabel}
             </span>
           </div>
-
-
 
           {/* Free / paid */}
           <div className="absolute bottom-4 right-4">

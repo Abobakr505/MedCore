@@ -79,22 +79,25 @@ export function useScreenRecordingGuard({
 
     // 3) تغطية فورية عند فقدان تركيز النافذة أو التبويب (يغطي "ألت-تاب" ونوافذ تسجيل كثيرة،
     //    لكن لا يوقف تصوير الشاشة بموبايل تاني أو أداة نظام لا تسحب التركيز)
-    const handleBlur = () => {
-      setCovered(true);
-      reportFocusLoss();
-    };
+const handleBlur = () => {
+  // فقدان focus وحده ليس دليلًا على تسجيل الشاشة.
+  // لا نغطي الفيديو ولا نوقفه هنا.
+  reportFocusLoss();
+};
 
-    const handleFocus = () => {
-      setCovered(false);
-    };
+const handleFocus = () => {
+  // لا نفعل شيئًا عند عودة التركيز.
+};
 
-    const handleVisibilityChange = () => {
-      if (document.visibilityState === "hidden") {
-        setCovered(true);
-      } else {
-        setCovered(false);
-      }
-    };
+const handleVisibilityChange = () => {
+  // visibilitychange أقوى من blur:
+  // نغطي فقط عندما تصبح الصفحة مخفية فعلًا.
+  if (document.visibilityState === "hidden") {
+    setCovered(true);
+  } else {
+    setCovered(false);
+  }
+};
 
     window.addEventListener("blur", handleBlur);
     window.addEventListener("focus", handleFocus);
