@@ -19,19 +19,14 @@ import { sendContactMessage } from "@/services/support";
 
 const contactInfo = [
   {
-    icon: Mail,
-    label: "البريد الإلكتروني",
-    value: "ibrahimrezk1552006@gmail.com",
-  },
-  {
     icon: Phone,
     label: "الهاتف",
-    value: "+201040181269",
+    value: " 201040181269+",
   },
   {
     icon: MapPin,
     label: "العنوان",
-    value: "المملكة العربية السعودية",
+    value: "سوهاج ، مصر ",
   },
 ];
 
