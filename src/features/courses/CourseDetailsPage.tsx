@@ -54,7 +54,10 @@ import {
 } from "@/utils/format";
 
 import { getPublicUrl } from "@/lib/supabase";
-import { getLessonPlaybackUrl } from "@/services/videoPlayback";
+import {
+  getLessonPlaybackUrl,
+  type VdoCipherPlaybackData,
+} from "@/services/videoPlayback";
 
 /* =========================================================
    College visual identity (icon + gradient)
@@ -86,6 +89,20 @@ const DEFAULT_COLLEGE_META: CollegeMeta = {
   gradient: "from-brand-600 to-brand-900",
 };
 
+/**
+ * بناء رابط تشغيل VdoCipher (iframe embed) من otp + playbackInfo.
+ */
+function buildVdoCipherEmbedUrl(
+  playbackData: VdoCipherPlaybackData
+): string {
+  const params = new URLSearchParams({
+    otp: playbackData.otp,
+    playbackInfo: playbackData.playbackInfo,
+  });
+
+  return `https://player.vdocipher.com/v2/?${params.toString()}`;
+}
+
 export default function CourseDetailsPage() {
   const { slug } =
     useParams<{ slug: string }>();
@@ -103,9 +120,10 @@ export default function CourseDetailsPage() {
   /* State                                                                   */
   /* ---------------------------------------------------------------------- */
 
-const [playingLesson, setPlayingLesson] = useState<Lesson | null>(null);
-const [previewVideoUrl, setPreviewVideoUrl] = useState<string | null>(null);
-const [previewLoading, setPreviewLoading] = useState(false);
+  const [playingLesson, setPlayingLesson] = useState<Lesson | null>(null);
+  const [previewPlaybackData, setPreviewPlaybackData] =
+    useState<VdoCipherPlaybackData | null>(null);
+  const [previewLoading, setPreviewLoading] = useState(false);
   const [course, setCourse] =
     useState<Course | null>(null);
 
@@ -342,71 +360,73 @@ const [previewLoading, setPreviewLoading] = useState(false);
   /* ---------------------------------------------------------------------- */
   /* Lesson click                                                            */
   /* ---------------------------------------------------------------------- */
-const handleLessonClick = async (
-  lesson: Lesson,
-  accessible: boolean
-) => {
-  if (!accessible) {
-    showToast("اشترك في الكورس لمشاهدة هذا الدرس", "info");
-    return;
-  }
-
-  // لو الطالب مشترك، يدخل صفحة التعلم عادي
-  if (enrolled) {
-    navigate(`/app/student/courses/${course!.id}/learn`);
-    return;
-  }
-
-  // غير مشترك => لازم يكون Preview
-  if (!lesson.is_preview) {
-    showToast("اشترك في الكورس لمشاهدة هذا الدرس", "info");
-    return;
-  }
-
-  const bunnyVideoId = (
-    lesson as Lesson & {
-      bunny_video_id?: string;
-    }
-  ).bunny_video_id;
-
-  console.log("[Preview] lesson:", lesson);
-  console.log("[Preview] bunny_video_id:", bunnyVideoId);
-
-  if (!bunnyVideoId) {
-    showToast("لم يتم ربط فيديو المعاينة بهذا الدرس", "info");
-    return;
-  }
-
-  setPlayingLesson(lesson);
-  setPreviewVideoUrl(null);
-  setPreviewLoading(true);
-
-  try {
-    console.log("[Preview] Getting Bunny playback URL...");
-
-    const playbackUrl = await getLessonPlaybackUrl(bunnyVideoId);
-
-    console.log("[Preview] playback URL:", playbackUrl);
-
-    if (!playbackUrl) {
-      throw new Error("لم يتم الحصول على رابط تشغيل الفيديو");
+  const handleLessonClick = async (
+    lesson: Lesson,
+    accessible: boolean
+  ) => {
+    if (!accessible) {
+      showToast("اشترك في الكورس لمشاهدة هذا الدرس", "info");
+      return;
     }
 
-    setPreviewVideoUrl(playbackUrl);
-  } catch (error) {
-    console.error("[Preview] Video error:", error);
+    // لو الطالب مشترك، يدخل صفحة التعلم عادي
+    if (enrolled) {
+      navigate(`/app/student/courses/${course!.id}/learn`);
+      return;
+    }
 
-    setPlayingLesson(null);
-    setPreviewVideoUrl(null);
+    // غير مشترك => لازم يكون Preview
+    if (!lesson.is_preview) {
+      showToast("اشترك في الكورس لمشاهدة هذا الدرس", "info");
+      return;
+    }
 
-    showToast(
-      "حدث خطأ أثناء تحميل فيديو المعاينة",
-      "error"
-    );
-  } finally {
-    setPreviewLoading(false);
-  }
-};
+    // تم التحويل من Bunny إلى VdoCipher: الحقل الآن vdocipher_video_id
+    const vdocipherVideoId = (
+      lesson as Lesson & {
+        vdocipher_video_id?: string;
+      }
+    ).vdocipher_video_id;
+
+    console.log("[Preview] lesson:", lesson);
+    console.log("[Preview] vdocipher_video_id:", vdocipherVideoId);
+
+    if (!vdocipherVideoId) {
+      showToast("لم يتم ربط فيديو المعاينة بهذا الدرس", "info");
+      return;
+    }
+
+    setPlayingLesson(lesson);
+    setPreviewPlaybackData(null);
+    setPreviewLoading(true);
+
+    try {
+      console.log("[Preview] Getting VdoCipher playback data...");
+
+      const playbackData = await getLessonPlaybackUrl(vdocipherVideoId);
+
+      console.log("[Preview] playback data:", playbackData);
+
+      if (!playbackData) {
+        throw new Error("لم يتم الحصول على بيانات تشغيل الفيديو");
+      }
+
+      setPreviewPlaybackData(playbackData);
+    } catch (error) {
+      console.error("[Preview] Video error:", error);
+
+      setPlayingLesson(null);
+      setPreviewPlaybackData(null);
+
+      showToast(
+        "حدث خطأ أثناء تحميل فيديو المعاينة",
+        "error"
+      );
+    } finally {
+      setPreviewLoading(false);
+    }
+  };
+
   /* ---------------------------------------------------------------------- */
   /* Loading                                                                 */
   /* ---------------------------------------------------------------------- */
@@ -487,10 +507,11 @@ const handleLessonClick = async (
    * Preview video فقط.
    *
    * فيديوهات الدروس المدفوعة لا يتم تكوين URL لها هنا.
-   * LearningPage هي المسؤولة عن Bunny.
+   * LearningPage هي المسؤولة عن VdoCipher الخاص بالمدفوع.
    */
-const playingVideoUrl =
-  playingLesson?.video_path ?? null;
+  const previewEmbedUrl = previewPlaybackData
+    ? buildVdoCipherEmbedUrl(previewPlaybackData)
+    : null;
 
   /* ---------------------------------------------------------------------- */
   /* Render                                                                  */
@@ -1006,70 +1027,70 @@ const playingVideoUrl =
       {/* ================================================================== */}
       {/* Free Preview Player                                                */}
       {/* ================================================================== */}
-<Modal
-  open={!!playingLesson}
-  onClose={() => {
-    setPlayingLesson(null);
-    setPreviewVideoUrl(null);
-    setPreviewLoading(false);
-  }}
-  title={playingLesson?.title ?? "معاينة الدرس"}
->
-  <div className="space-y-4">
-    {previewLoading ? (
-      <div className="flex aspect-video items-center justify-center rounded-2xl bg-black">
-        <div className="flex flex-col items-center gap-3 text-white">
-          <Loader2 className="h-8 w-8 animate-spin" />
+      <Modal
+        open={!!playingLesson}
+        onClose={() => {
+          setPlayingLesson(null);
+          setPreviewPlaybackData(null);
+          setPreviewLoading(false);
+        }}
+        title={playingLesson?.title ?? "معاينة الدرس"}
+      >
+        <div className="space-y-4">
+          {previewLoading ? (
+            <div className="flex aspect-video items-center justify-center rounded-2xl bg-black">
+              <div className="flex flex-col items-center gap-3 text-white">
+                <Loader2 className="h-8 w-8 animate-spin" />
 
-          <span className="text-sm">
-            جاري تحميل فيديو المعاينة...
-          </span>
+                <span className="text-sm">
+                  جاري تحميل فيديو المعاينة...
+                </span>
+              </div>
+            </div>
+          ) : previewEmbedUrl ? (
+            <div className="overflow-hidden rounded-2xl bg-black shadow-2xl">
+              <iframe
+                key={previewEmbedUrl}
+                src={previewEmbedUrl}
+                title={playingLesson?.title ?? "فيديو المعاينة"}
+                className="aspect-video w-full border-0"
+                allow="accelerometer; gyroscope; autoplay; encrypted-media; picture-in-picture"
+                allowFullScreen
+              />
+            </div>
+          ) : (
+            <div className="flex aspect-video items-center justify-center rounded-2xl bg-slate-950">
+              <div className="text-center text-white">
+                <Video className="mx-auto mb-3 h-10 w-10 opacity-70" />
+
+                <p className="text-sm text-white/70">
+                  لا يمكن تشغيل فيديو المعاينة حاليًا
+                </p>
+              </div>
+            </div>
+          )}
+
+          {playingLesson && (
+            <div className="rounded-xl bg-slate-50 p-4">
+              <div className="flex items-center gap-3">
+                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-primary-100">
+                  <Play className="h-5 w-5 text-primary-600" />
+                </div>
+
+                <div className="min-w-0">
+                  <h3 className="truncate font-bold text-slate-900">
+                    {playingLesson.title}
+                  </h3>
+
+                  <p className="mt-1 text-xs text-slate-500">
+                    فيديو معاينة مجاني
+                  </p>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
-      </div>
-    ) : previewVideoUrl ? (
-      <div className="overflow-hidden rounded-2xl bg-black shadow-2xl">
-        <iframe
-          key={previewVideoUrl}
-          src={previewVideoUrl}
-          title={playingLesson?.title ?? "فيديو المعاينة"}
-          className="aspect-video w-full border-0"
-          allow="accelerometer; gyroscope; autoplay; encrypted-media; picture-in-picture"
-          allowFullScreen
-        />
-      </div>
-    ) : (
-      <div className="flex aspect-video items-center justify-center rounded-2xl bg-slate-950">
-        <div className="text-center text-white">
-          <Video className="mx-auto mb-3 h-10 w-10 opacity-70" />
-
-          <p className="text-sm text-white/70">
-            لا يمكن تشغيل فيديو المعاينة حاليًا
-          </p>
-        </div>
-      </div>
-    )}
-
-    {playingLesson && (
-      <div className="rounded-xl bg-slate-50 p-4">
-        <div className="flex items-center gap-3">
-          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-primary-100">
-            <Play className="h-5 w-5 text-primary-600" />
-          </div>
-
-          <div className="min-w-0">
-            <h3 className="truncate font-bold text-slate-900">
-              {playingLesson.title}
-            </h3>
-
-            <p className="mt-1 text-xs text-slate-500">
-              فيديو معاينة مجاني
-            </p>
-          </div>
-        </div>
-      </div>
-    )}
-  </div>
-</Modal>
+      </Modal>
     </div>
   );
 }
