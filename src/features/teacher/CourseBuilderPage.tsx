@@ -50,8 +50,10 @@ import {
   deleteLesson,
   deleteSection,
   updateSection,
-  uploadLessonVideoBunny,
-  deleteLessonVideoBunny,
+  // تم استبدال Bunny بـ VdoCipher، مع إبقاء نفس أسماء الدوال هنا
+  // (via alias) حتى لا نضطر لتعديل باقي هذا الملف بالكامل.
+  uploadLessonVideoVdoCipher as uploadLessonVideoBunny,
+  deleteLessonVideoVdoCipher as deleteLessonVideoBunny,
 } from "@/services/teacherCourses";
 
 import type {
@@ -597,8 +599,9 @@ function LessonCard({
   );
   const [savingEdit, setSavingEdit] = useState(false);
 
+  // تم التحويل من Bunny إلى VdoCipher: الحقل الآن vdocipher_video_id
   const hasVideo = Boolean(
-    (lesson as Lesson & { bunny_video_id?: string }).bunny_video_id
+    (lesson as Lesson & { vdocipher_video_id?: string }).vdocipher_video_id
   );
 
   const isUploading = videoUploadState?.uploading ?? false;
@@ -1319,7 +1322,7 @@ function SectionBlock({
           "seconds"
         );
 
-        // رفع الفيديو إلى Bunny
+        // رفع الفيديو إلى VdoCipher
         await uploadLessonVideoBunny(
           lesson.id,
           file,
@@ -2057,14 +2060,15 @@ export default function CourseBuilderPage() {
       (section) => section.lessons ?? []
     );
 
+    // تم التحويل من Bunny إلى VdoCipher: الحقل الآن vdocipher_video_id
     const videos = lessons.filter(
       (lesson) =>
         Boolean(
           (
             lesson as Lesson & {
-              bunny_video_id?: string;
+              vdocipher_video_id?: string;
             }
-          ).bunny_video_id
+          ).vdocipher_video_id
         )
     ).length;
 

@@ -28,9 +28,6 @@ import {
   ClipboardList,
   ListVideo,
   Download,
-  Trash2,
-  Wifi,
-  WifiOff,
   FileText,
   FileImage,
   FileSpreadsheet,
@@ -48,15 +45,13 @@ import {
   AlertCircle,
   Trophy,
   Clock3,
-  Minimize,
-  Maximize,
 } from "lucide-react";
 
 import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/contexts/AuthContext";
-import { VideoWatermark } from "@/components/video/VideoWatermark";
 import { useScreenRecordingGuard } from "@/hooks/useScreenRecordingGuard";
-import { getLessonPlaybackUrl } from "@/services/videoPlayback";
+// تم استبدال Bunny بـ VdoCipher: بدل رابط تشغيل واحد، بنجيب otp + playbackInfo
+import { getLessonPlaybackData } from "@/services/videoPlayback";
 import {
   fetchCourseBySlugOrId,
   fetchCourseSections,
@@ -101,13 +96,6 @@ interface SectionWithLessons extends CourseSection {
   lessons?: LessonWithFiles[];
 }
 
-interface StoredVideo {
-  lessonId: string;
-  blobUrl: string;
-  fileName: string;
-  createdAt: number;
-}
-
 interface LessonProgressMap {
   [lessonId: string]: LessonProgress;
 }
@@ -117,13 +105,6 @@ interface LessonProgressMap {
 /* -------------------------------------------------------------------------- */
 
 const FILE_BUCKET = "course-files";
-
-const VIDEO_CACHE_PREFIX =
-  "medcore-offline-video-";
-
-const VIDEO_CACHE_DB = "medcore-video-cache";
-
-const VIDEO_CACHE_STORE = "videos";
 
 /* -------------------------------------------------------------------------- */
 /* Helpers                                                                    */
@@ -253,163 +234,6 @@ function getFileType(
     return "فيديو";
 
   return extension;
-}
-
-/* -------------------------------------------------------------------------- */
-/* IndexedDB                                                                  */
-/* -------------------------------------------------------------------------- */
-
-function openVideoDB(): Promise<IDBDatabase> {
-  return new Promise((resolve, reject) => {
-    const request = indexedDB.open(
-      VIDEO_CACHE_DB,
-      1
-    );
-
-    request.onupgradeneeded = () => {
-      const db = request.result;
-
-      if (
-        !db.objectStoreNames.contains(
-          VIDEO_CACHE_STORE
-        )
-      ) {
-        db.createObjectStore(
-          VIDEO_CACHE_STORE,
-          {
-            keyPath: "lessonId",
-          }
-        );
-      }
-    };
-
-    request.onsuccess = () => {
-      resolve(request.result);
-    };
-
-    request.onerror = () => {
-      reject(request.error);
-    };
-  });
-}
-
-async function saveOfflineVideo(
-  lessonId: string,
-  blob: Blob,
-  fileName: string
-) {
-  const db = await openVideoDB();
-
-  await new Promise<void>(
-    (resolve, reject) => {
-      const transaction =
-        db.transaction(
-          VIDEO_CACHE_STORE,
-          "readwrite"
-        );
-
-      const store =
-        transaction.objectStore(
-          VIDEO_CACHE_STORE
-        );
-
-      store.put({
-        lessonId,
-        blob,
-        fileName,
-        createdAt: Date.now(),
-      });
-
-      transaction.oncomplete = () =>
-        resolve();
-
-      transaction.onerror = () =>
-        reject(transaction.error);
-    }
-  );
-
-  db.close();
-}
-
-async function getOfflineVideo(
-  lessonId: string
-): Promise<StoredVideo | null> {
-  const db = await openVideoDB();
-
-  return new Promise((resolve) => {
-    const transaction =
-      db.transaction(
-        VIDEO_CACHE_STORE,
-        "readonly"
-      );
-
-    const store =
-      transaction.objectStore(
-        VIDEO_CACHE_STORE
-      );
-
-    const request =
-      store.get(lessonId);
-
-    request.onsuccess = () => {
-      db.close();
-
-      const result = request.result;
-
-      if (!result) {
-        resolve(null);
-        return;
-      }
-
-      const blobUrl =
-        URL.createObjectURL(
-          result.blob
-        );
-
-      resolve({
-        lessonId: result.lessonId,
-        blobUrl,
-        fileName: result.fileName,
-        createdAt: result.createdAt,
-      });
-    };
-
-    request.onerror = () => {
-      db.close();
-      resolve(null);
-    };
-  });
-}
-
-async function deleteOfflineVideo(
-  lessonId: string
-) {
-  const db = await openVideoDB();
-
-  await new Promise<void>(
-    (resolve, reject) => {
-      const transaction =
-        db.transaction(
-          VIDEO_CACHE_STORE,
-          "readwrite"
-        );
-
-      const store =
-        transaction.objectStore(
-          VIDEO_CACHE_STORE
-        );
-
-      store.delete(lessonId);
-
-      transaction.oncomplete = () =>
-        resolve();
-
-      transaction.onerror = () =>
-        reject(transaction.error);
-    }
-  );
-
-  db.close();
 }
 
 /* -------------------------------------------------------------------------- */
@@ -825,17 +649,17 @@ export default function LearningPage() {
   const [activeLesson, setActiveLesson] =
     useState<LessonWithFiles | null>(null);
 
-  const [activeVideoUrl, setActiveVideoUrl] =
-    useState<string | null>(null);
+  // تم استبدال activeVideoUrl (Bunny) بـ playbackData (otp + playbackInfo من VdoCipher)
+  const [playbackData, setPlaybackData] = useState<{
+    otp: string;
+    playbackInfo: string;
+  } | null>(null);
 
   const [loading, setLoading] =
     useState(true);
 
-const [videoLoading, setVideoLoading] =
-  useState(false);
-
-const [videoDownloadPct, setVideoDownloadPct] =
-  useState(0); // جديد
+  const [videoLoading, setVideoLoading] =
+    useState(false);
 
   const [filesLoading, setFilesLoading] =
     useState(false);
@@ -848,18 +672,6 @@ const [videoDownloadPct, setVideoDownloadPct] =
 
   const [desktopSidebarOpen, setDesktopSidebarOpen] =
     useState(true);
-
-  const [offlineVideo, setOfflineVideo] =
-    useState<StoredVideo | null>(null);
-
-  const [downloadingOffline, setDownloadingOffline] =
-    useState(false);
-
-  const [offlineProgress, setOfflineProgress] =
-    useState(0);
-
-  const [showOfflineMenu, setShowOfflineMenu] =
-    useState(false);
 
   const [screenRecordingDetected, setScreenRecordingDetected] =
     useState(false);
@@ -936,43 +748,40 @@ const [videoDownloadPct, setVideoDownloadPct] =
 
         setCourse(loadedCourse);
 
-const loadedSections =
-  await fetchCourseSections(
-    loadedCourse.id
-  );
+        const loadedSections =
+          await fetchCourseSections(
+            loadedCourse.id
+          );
 
-const normalizedSections =
-  ((loadedSections ?? []) as SectionWithLessons[]).map(
-    (section) => ({
-      ...section,
-      lessons: [...(section.lessons ?? [])].sort(
-        (a, b) => {
-          const orderA = Number(a.order_index ?? 0);
-          const orderB = Number(b.order_index ?? 0);
+        const normalizedSections =
+          ((loadedSections ?? []) as SectionWithLessons[]).map(
+            (section) => ({
+              ...section,
+              lessons: [...(section.lessons ?? [])].sort(
+                (a, b) => {
+                  const orderA = Number(a.order_index ?? 0);
+                  const orderB = Number(b.order_index ?? 0);
 
-          if (orderA !== orderB) {
-            return orderA - orderB;
-          }
+                  if (orderA !== orderB) {
+                    return orderA - orderB;
+                  }
 
-          // لو order_index متساوي، الأقدم يظهر أولًا
-          const dateA = a.created_at
-            ? new Date(a.created_at).getTime()
-            : 0;
+                  // لو order_index متساوي، الأقدم يظهر أولًا
+                  const dateA = a.created_at
+                    ? new Date(a.created_at).getTime()
+                    : 0;
 
-          const dateB = b.created_at
-            ? new Date(b.created_at).getTime()
-            : 0;
+                  const dateB = b.created_at
+                    ? new Date(b.created_at).getTime()
+                    : 0;
 
-          return dateA - dateB;
-        }
-      ),
-    })
-  );
+                  return dateA - dateB;
+                }
+              ),
+            })
+          );
 
-setSections(normalizedSections);
-        setSections(
-          normalizedSections
-        );
+        setSections(normalizedSections);
 
         const allLessons =
           normalizedSections.flatMap(
@@ -1111,90 +920,74 @@ setSections(normalizedSections);
   );
 
   /* ---------------------------------------------------------------------- */
-  /* Get video URL                                                           */
+  /* Get video playback data (VdoCipher: otp + playbackInfo)                 */
   /* ---------------------------------------------------------------------- */
-const loadLessonVideo = useCallback(
-  async (lesson: LessonWithFiles) => {
-    setVideoLoading(true);
-    setActiveVideoUrl(null);
-    setOfflineVideo(null);
 
-    try {
-      if (isLessonLocked(lesson)) {
-        console.log(
-          "Lesson is locked, skipping video load"
-        );
+  const loadLessonVideo = useCallback(
+    async (lesson: LessonWithFiles) => {
+      setVideoLoading(true);
+      setPlaybackData(null);
 
-        return;
-      }
+      try {
+        if (isLessonLocked(lesson)) {
+          console.log(
+            "Lesson is locked, skipping video load"
+          );
 
-      const cached = await getOfflineVideo(
-        lesson.id
-      );
-
-      if (cached) {
-        console.log(
-          "Using cached offline video"
-        );
-
-        setOfflineVideo(cached);
-        setActiveVideoUrl(
-          cached.blobUrl
-        );
-
-        return;
-      }
-
-      const bunnyVideoId = (
-        lesson as LessonWithFiles & {
-          bunny_video_id?: string;
+          return;
         }
-      ).bunny_video_id;
 
-      console.log(
-        "Lesson object:",
-        lesson
-      );
+        const vdoCipherVideoId = (
+          lesson as LessonWithFiles & {
+            vdocipher_video_id?: string;
+          }
+        ).vdocipher_video_id;
 
-      console.log(
-        "bunnyVideoId:",
-        bunnyVideoId
-      );
-
-      if (!bunnyVideoId) {
         console.log(
-          "No bunnyVideoId found on lesson"
+          "Lesson object:",
+          lesson
         );
 
-        setActiveVideoUrl(null);
+        console.log(
+          "vdoCipherVideoId:",
+          vdoCipherVideoId
+        );
 
-        return;
+        if (!vdoCipherVideoId) {
+          console.log(
+            "No vdocipher_video_id found on lesson"
+          );
+
+          setPlaybackData(null);
+
+          return;
+        }
+
+        const data =
+          await getLessonPlaybackData(
+            vdoCipherVideoId
+          );
+
+        console.log(
+          "Playback data received:",
+          data
+        );
+
+        setPlaybackData(data);
+      } catch (error) {
+        console.error(
+          "Load lesson video error:",
+          error
+        );
+
+        setPlaybackData(null);
+      } finally {
+        setVideoLoading(false);
       }
+    },
+    [isLessonLocked]
+  );
 
-      const url =
-        await getLessonPlaybackUrl(
-          bunnyVideoId
-        );
-
-      console.log(
-        "Playback URL received:",
-        url
-      );
-
-      setActiveVideoUrl(url);
-    } catch (error) {
-      console.error(
-        "Load lesson video error:",
-        error
-      );
-
-      setActiveVideoUrl(null);
-    } finally {
-      setVideoLoading(false);
-    }
-  },
-  [isLessonLocked]
-);
   /* ---------------------------------------------------------------------- */
   /* Active lesson                                                           */
   /* ---------------------------------------------------------------------- */
@@ -1214,33 +1007,6 @@ const loadLessonVideo = useCallback(
     loadLessonFiles,
     loadLessonVideo,
   ]);
-
-  /* ---------------------------------------------------------------------- */
-  /* Offline video cleanup                                                   */
-  /* ---------------------------------------------------------------------- */
-
-  useEffect(() => {
-    return () => {
-      if (
-        activeVideoUrl?.startsWith("blob:") &&
-        !offlineVideo
-      ) {
-        URL.revokeObjectURL(
-          activeVideoUrl
-        );
-      }
-    };
-  }, [activeVideoUrl, offlineVideo]);
-
-  useEffect(() => {
-    return () => {
-      if (offlineVideo?.blobUrl) {
-        URL.revokeObjectURL(
-          offlineVideo.blobUrl
-        );
-      }
-    };
-  }, [offlineVideo]);
 
   /* ---------------------------------------------------------------------- */
   /* Navigation                                                              */
@@ -1351,237 +1117,6 @@ const markLessonCompleted = useCallback(
   },
   [activeLesson, course]
 );
-
-  /* ---------------------------------------------------------------------- */
-  /* Video progress                                                          */
-  /* ---------------------------------------------------------------------- */
-
-  const handleVideoTimeUpdate =
-    async () => {
-      if (
-        !videoRef.current ||
-        !activeLesson ||
-        !course
-      ) {
-        return;
-      }
-
-      const video =
-        videoRef.current;
-
-      if (!video.duration) return;
-
-      const percentage = Math.round(
-        (video.currentTime /
-          video.duration) *
-          100
-      );
-
-      if (
-        percentage < 90
-      ) {
-        return;
-      }
-
-      await markLessonCompleted();
-    };
-
-  /* ---------------------------------------------------------------------- */
-  /* Offline download                                                        */
-  /* ---------------------------------------------------------------------- */
-
-  const downloadOfflineVideo =
-    async () => {
-      if (
-        !activeLesson ||
-        !course
-      ) {
-        return;
-      }
-
-      if (isLessonLocked(activeLesson)) {
-        alert(
-          "هذا الدرس مقفول حتى اعتماد القسط المطلوب."
-        );
-        return;
-      }
-
-      const bunnyVideoId = (
-        activeLesson as LessonWithFiles & { bunny_video_id?: string }
-      ).bunny_video_id;
-
-      if (!bunnyVideoId) {
-        alert(
-          "لا يوجد فيديو متاح لهذا الدرس."
-        );
-        return;
-      }
-
-      setDownloadingOffline(true);
-      setOfflineProgress(0);
-      setShowOfflineMenu(false);
-
-      try {
-        const { data, error } =
-          await supabase.functions.invoke(
-            "get-bunny-download-url",
-            { body: { videoId: bunnyVideoId } }
-          );
-
-        if (error) {
-          throw error;
-        }
-
-        if (!data?.url) {
-          throw new Error(
-            "تعذر الحصول على رابط الفيديو"
-          );
-        }
-
-        const response =
-          await fetch(
-            data.url
-          );
-
-        if (!response.ok) {
-          throw new Error(
-            "تعذر تحميل الفيديو"
-          );
-        }
-
-        const contentLength =
-          response.headers.get(
-            "content-length"
-          );
-
-        const total =
-          Number(
-            contentLength ?? 0
-          );
-
-        const reader =
-          response.body?.getReader();
-
-        if (!reader) {
-          throw new Error(
-            "المتصفح لا يدعم تحميل الفيديو"
-          );
-        }
-
-        const chunks: ArrayBuffer[] =
-          [];
-
-        let received = 0;
-
-        while (true) {
-          const {
-            done,
-            value,
-          } = await reader.read();
-
-          if (done) break;
-
-          if (value) {
-            const chunk = new Uint8Array(
-              value.byteLength
-            );
-
-            chunk.set(value);
-            chunks.push(
-              chunk.buffer as ArrayBuffer
-            );
-            received += value.length;
-
-            if (total > 0) {
-              setOfflineProgress(
-                Math.round(
-                  (received / total) *
-                    100
-                )
-              );
-            }
-          }
-        }
-
-        const blob = new Blob(
-          chunks,
-          {
-            type:
-              response.headers.get(
-                "content-type"
-              ) ??
-              "video/mp4",
-          }
-        );
-
-        await saveOfflineVideo(
-          activeLesson.id,
-          blob,
-          `${activeLesson.title}.mp4`
-        );
-
-        const cached =
-          await getOfflineVideo(
-            activeLesson.id
-          );
-
-        if (cached) {
-          setOfflineVideo(cached);
-        }
-
-        setOfflineProgress(100);
-      } catch (error) {
-        console.error(
-          "Offline download error:",
-          error
-        );
-
-        alert(
-          "تعذر حفظ الفيديو بدون إنترنت."
-        );
-      } finally {
-        setDownloadingOffline(false);
-      }
-    };
-
-  /* ---------------------------------------------------------------------- */
-  /* Delete offline                                                          */
-  /* ---------------------------------------------------------------------- */
-
-  const removeOfflineVideo =
-    async () => {
-      if (!activeLesson) return;
-
-      const confirmed =
-        window.confirm(
-          "هل تريد حذف نسخة الفيديو المحفوظة بدون إنترنت؟"
-        );
-
-      if (!confirmed) return;
-
-      try {
-        if (offlineVideo?.blobUrl) {
-          URL.revokeObjectURL(
-            offlineVideo.blobUrl
-          );
-        }
-
-        await deleteOfflineVideo(
-          activeLesson.id
-        );
-
-        setOfflineVideo(null);
-
-        await loadLessonVideo(
-          activeLesson
-        );
-      } catch (error) {
-        console.error(
-          "Delete offline video error:",
-          error
-        );
-      }
-    };
 
   /* ---------------------------------------------------------------------- */
   /* Keyboard protection                                                     */
@@ -1718,29 +1253,7 @@ const markLessonCompleted = useCallback(
       ),
     [visibleQuizzes]
   );
-const videoContainerRef = useRef<HTMLDivElement | null>(null);
 
-const [isFullscreen, setIsFullscreen] = useState(false);
-
-useEffect(() => {
-  const handleFullscreenChange = () => {
-    setIsFullscreen(
-      document.fullscreenElement === videoContainerRef.current
-    );
-  };
-
-  document.addEventListener(
-    "fullscreenchange",
-    handleFullscreenChange
-  );
-
-  return () => {
-    document.removeEventListener(
-      "fullscreenchange",
-      handleFullscreenChange
-    );
-  };
-}, []);
   /* ---------------------------------------------------------------------- */
   /* Loading                                                                 */
   /* ---------------------------------------------------------------------- */
@@ -2033,260 +1546,83 @@ useEffect(() => {
                 </div>
 
                 {/* Video */}
-                {/* Video */}
-<div
-  ref={videoContainerRef}
-  className={`relative overflow-hidden bg-black shadow-2xl ${
-    isFullscreen
-      ? "h-screen w-screen rounded-none"
-      : "rounded-3xl"
-  }`}
->
-  {videoLoading ? (
-    <div className="absolute inset-0 flex flex-col items-center justify-center gap-3">
-      <Loader2 className="h-10 w-10 animate-spin text-white" />
-
-      {videoDownloadPct > 0 && (
-        <span className="text-sm font-bold text-white/80">
-          {videoDownloadPct}%
-        </span>
-      )}
-    </div>
-  ) : activeVideoUrl ? (
-    <LessonVideoPlayer
-      key={activeVideoUrl}
-      src={activeVideoUrl}
-      onTimeUpdate={(currentTime, duration) => {
-        if (!duration) return;
-
-        const percentage = Math.round(
-          (currentTime / duration) * 100
-        );
-
-        if (percentage >= 90) {
-          markLessonCompleted();
-        }
-      }}
-      onEnded={markLessonCompleted}
-      className="h-full w-full"
-    />
-  ) : (
-    <div className="absolute inset-0 flex flex-col items-center justify-center px-5 text-center">
-      <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-white/10 text-white">
-        <VideoIcon />
-      </div>
-
-      <h3 className="mt-4 font-bold text-white">
-        لا يوجد فيديو لهذا الدرس
-      </h3>
-
-      <p className="mt-2 text-xs text-white/50">
-        يمكنك الاطلاع على الملفات والوصف بالأسفل.
-      </p>
-    </div>
-  )}
-
-  {/* Fixed brand watermark */}
-  <div className="pointer-events-none absolute left-4 top-4 z-20 rounded-lg bg-black/30 px-3 py-1.5 text-[10px] font-bold text-white/60 backdrop-blur">
-    MedCore
-  </div>
-
-  {/* User Watermark */}
-  <VideoWatermark
-    phone={
-      profile?.phone ??
-      session?.user.phone ??
-      "عضو MedCore"
-    }
-    name={
-      profile?.full_name ??
-      session?.user.user_metadata?.full_name ??
-      "مستخدم MedCore"
-    }
-    containerRef={watermarkRef}
-  />
-
-  {/* Fullscreen Button */}
-  <button
-    type="button"
-    onClick={async () => {
-      try {
-        if (!document.fullscreenElement) {
-          await videoContainerRef.current?.requestFullscreen();
-        } else {
-          await document.exitFullscreen();
-        }
-      } catch (error) {
-        console.error(
-          "Fullscreen error:",
-          error
-        );
-      }
-    }}
-    className="absolute bottom-4 right-4 z-50 flex h-10 w-10 items-center justify-center rounded-lg bg-black/60 text-white backdrop-blur transition hover:bg-black/80"
-    aria-label={
-      isFullscreen
-        ? "الخروج من ملء الشاشة"
-        : "ملء الشاشة"
-    }
-  >
-    {isFullscreen ? (
-      <Minimize className="h-5 w-5" />
-    ) : (
-      <Maximize className="h-5 w-5" />
-    )}
-  </button>
-
-  {/* تغطية فورية سوداء عند فقدان التركيز/التبويب */}
-  <AnimatePresence>
-    {isCovered && !screenRecordingDetected && (
-      <motion.div
-        initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
-        exit={{ opacity: 0 }}
-        className="absolute inset-0 z-30 bg-black"
-      />
-    )}
-  </AnimatePresence>
-
-  {/* Recording warning */}
-  <AnimatePresence>
-    {screenRecordingDetected && (
-      <motion.div
-        initial={{
-          opacity: 0,
-          scale: 0.95,
-        }}
-        animate={{
-          opacity: 1,
-          scale: 1,
-        }}
-        exit={{
-          opacity: 0,
-        }}
-        className="absolute inset-0 z-40 flex items-center justify-center bg-black p-5 text-center"
-      >
-        <div>
-          <Lock className="mx-auto h-10 w-10 text-red-400" />
-
-          <h3 className="mt-4 text-lg font-black text-white">
-            المحتوى محمي
-          </h3>
-
-          <p className="mt-2 text-sm text-white/60">
-            لا يسمح بتسجيل أو تصوير محتوى الدرس.
-          </p>
-        </div>
-      </motion.div>
-    )}
-  </AnimatePresence>
-</div>
-
-                {/* Video Offline */}
-                {activeVideoUrl && (
-                  <div className="relative mt-3">
-                    <div className="flex flex-col gap-3 rounded-2xl border border-slate-200 bg-white p-4 sm:flex-row sm:items-center sm:justify-between">
-                      <div className="flex items-center gap-3">
-                        <div
-                          className={`flex h-10 w-10 items-center justify-center rounded-xl ${
-                            offlineVideo
-                              ? "bg-emerald-50 text-emerald-600"
-                              : "bg-slate-100 text-slate-500"
-                          }`}
-                        >
-                          {offlineVideo ? (
-                            <WifiOff className="h-5 w-5" />
-                          ) : (
-                            <Wifi className="h-5 w-5" />
-                          )}
-                        </div>
-
-                        <div>
-                          <p className="text-sm font-bold text-slate-800">
-                            {offlineVideo
-                              ? "الفيديو محفوظ بدون إنترنت"
-                              : "مشاهدة بدون إنترنت"}
-                          </p>
-
-                          <p className="mt-1 text-xs text-slate-400">
-                            {offlineVideo
-                              ? "يمكنك تشغيل الفيديو بدون اتصال."
-                              : "احفظ الفيديو على جهازك للمشاهدة لاحقًا."}
-                          </p>
-                        </div>
+                <div className="relative overflow-hidden rounded-3xl bg-black shadow-2xl">
+                  {videoLoading ? (
+                    <div className="flex aspect-video items-center justify-center">
+                      <Loader2 className="h-10 w-10 animate-spin text-white" />
+                    </div>
+                  ) : playbackData ? (
+                    <LessonVideoPlayer
+                      key={playbackData.otp}
+                      otp={playbackData.otp}
+                      playbackInfo={playbackData.playbackInfo}
+                      className="h-full w-full"
+                    />
+                  ) : (
+                    <div className="flex aspect-video flex-col items-center justify-center px-5 text-center">
+                      <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-white/10 text-white">
+                        <VideoIcon />
                       </div>
 
-                      <button
-                        type="button"
-                        onClick={() => {
-                          if (
-                            offlineVideo
-                          ) {
-                            setShowOfflineMenu(
-                              (value) =>
-                                !value
-                            );
-                          } else {
-                            downloadOfflineVideo();
-                          }
-                        }}
-                        disabled={
-                          downloadingOffline
-                        }
-                        className="inline-flex items-center justify-center gap-2 rounded-xl bg-slate-900 px-4 py-2.5 text-xs font-bold text-white disabled:opacity-50"
-                      >
-                        {downloadingOffline ? (
-                          <>
-                            <Loader2 className="h-4 w-4 animate-spin" />
-                            {offlineProgress}%
-                          </>
-                        ) : offlineVideo ? (
-                          <>
-                            <WifiOff className="h-4 w-4" />
-                            إدارة النسخة
-                          </>
-                        ) : (
-                          <>
-                            <Download className="h-4 w-4" />
-                            حفظ بدون إنترنت
-                          </>
-                        )}
-                      </button>
-                    </div>
+                      <h3 className="mt-4 font-bold text-white">
+                        لا يوجد فيديو لهذا الدرس
+                      </h3>
 
-                    <AnimatePresence>
-                      {showOfflineMenu &&
-                        offlineVideo && (
-                          <motion.div
-                            initial={{
-                              opacity: 0,
-                              y: -5,
-                            }}
-                            animate={{
-                              opacity: 1,
-                              y: 0,
-                            }}
-                            exit={{
-                              opacity: 0,
-                              y: -5,
-                            }}
-                            className="absolute left-0 top-full z-20 mt-2 w-full overflow-hidden rounded-2xl border border-slate-200 bg-white p-2 shadow-xl sm:w-64"
-                          >
-                            <button
-                              type="button"
-                              onClick={
-                                removeOfflineVideo
-                              }
-                              className="flex w-full items-center gap-3 rounded-xl px-3 py-3 text-right text-sm font-semibold text-red-600 hover:bg-red-50"
-                            >
-                              <Trash2 className="h-4 w-4" />
-                              حذف النسخة المحفوظة
-                            </button>
-                          </motion.div>
-                        )}
-                    </AnimatePresence>
+                      <p className="mt-2 text-xs text-white/50">
+                        يمكنك الاطلاع على الملفات والوصف بالأسفل.
+                      </p>
+                    </div>
+                  )}
+
+                  {/* Fixed brand watermark */}
+                  <div className="pointer-events-none absolute left-4 top-4 z-20 rounded-lg bg-black/30 px-3 py-1.5 text-[10px] font-bold text-white/60 backdrop-blur">
+                    MedCore
                   </div>
-                )}
+
+                  {/* تغطية فورية سوداء عند فقدان التركيز/التبويب */}
+                  <AnimatePresence>
+                    {isCovered && !screenRecordingDetected && (
+                      <motion.div
+                        initial={{ opacity: 0 }}
+                        animate={{ opacity: 1 }}
+                        exit={{ opacity: 0 }}
+                        className="absolute inset-0 z-30 bg-black"
+                      />
+                    )}
+                  </AnimatePresence>
+
+                  {/* Recording warning */}
+                  <AnimatePresence>
+                    {screenRecordingDetected && (
+                      <motion.div
+                        initial={{
+                          opacity: 0,
+                          scale: 0.95,
+                        }}
+                        animate={{
+                          opacity: 1,
+                          scale: 1,
+                        }}
+                        exit={{
+                          opacity: 0,
+                        }}
+                        className="absolute inset-0 z-40 flex items-center justify-center bg-black p-5 text-center"
+                      >
+                        <div>
+                          <Lock className="mx-auto h-10 w-10 text-red-400" />
+
+                          <h3 className="mt-4 text-lg font-black text-white">
+                            المحتوى محمي
+                          </h3>
+
+                          <p className="mt-2 text-sm text-white/60">
+                            لا يسمح بتسجيل أو تصوير محتوى الدرس.
+                          </p>
+                        </div>
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
+                </div>
 
                 {/* Lesson Info */}
                 <section className="mt-5 rounded-3xl border border-slate-200 bg-white p-5 sm:p-6">

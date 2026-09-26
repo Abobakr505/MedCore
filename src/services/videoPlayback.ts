@@ -1,21 +1,61 @@
-// services/videoPlayback.ts
+// src/services/videoPlayback.ts
+
 import { supabase } from "@/lib/supabase";
 
+export interface VdoCipherPlaybackData {
+  otp: string;
+  playbackInfo: string;
+}
+
 /**
- * يجيب رابط مشاهدة HLS آمن ومؤقت من Bunny Stream
- * عبر Edge Function (التوكن بيتولّد سيرفر-سايد فقط)
+ * جلب OTP + playbackInfo لتشغيل فيديو VdoCipher.
+ *
+ * الـ OTP والـ playbackInfo يتم توليدهما
+ * من السيرفر عن طريق Supabase Edge Function.
+ */
+export async function getLessonPlaybackData(
+  videoId: string
+): Promise<VdoCipherPlaybackData> {
+  if (!videoId) {
+    throw new Error("معرّف الفيديو غير موجود");
+  }
+
+  const { data, error } = await supabase.functions.invoke(
+    "get-vdocipher-otp",
+    {
+      body: {
+        videoId,
+      },
+    }
+  );
+
+  if (error) {
+    console.error("VdoCipher OTP Error:", error);
+    throw new Error("تعذّر تحميل بيانات تشغيل الفيديو");
+  }
+
+  if (!data?.otp || !data?.playbackInfo) {
+    console.error("Invalid VdoCipher response:", data);
+    throw new Error("بيانات تشغيل الفيديو غير صالحة");
+  }
+
+  return {
+    otp: data.otp,
+    playbackInfo: data.playbackInfo,
+  };
+}
+
+/**
+ * Alias للتوافق مع الملفات القديمة التي تستورد:
+ *
+ * getLessonPlaybackUrl
+ *
+ * ملاحظة:
+ * هذه الدالة لا ترجع URL مباشرًا.
+ * ترجع OTP + playbackInfo الخاصة بـ VdoCipher.
  */
 export async function getLessonPlaybackUrl(
   videoId: string
-): Promise<string> {
-  const { data, error } = await supabase.functions.invoke(
-    "get-bunny-playback-url",
-    { body: { videoId } }
-  );
-
-  if (error || !data?.url) {
-    throw new Error("تعذّر تحميل رابط الفيديو");
-  }
-
-  return data.url as string;
+): Promise<VdoCipherPlaybackData> {
+  return getLessonPlaybackData(videoId);
 }

@@ -1,3 +1,4 @@
+
 import { supabase } from "@/lib/supabase";
 import type { Course, CourseSection } from "@/types";
 
@@ -36,11 +37,9 @@ export interface LessonFile {
    Fetch Courses
 ========================================================= */
 
-/* =========================================================
-   Fetch Courses
-========================================================= */
-
-export async function fetchCourses(filters: CourseFilters = {}) {
+export async function fetchCourses(
+  filters: CourseFilters = {}
+) {
   const {
     search,
     college,
@@ -67,28 +66,16 @@ export async function fetchCourses(filters: CourseFilters = {}) {
 
   /* =======================================================
      Search + College
-     
-     الحالات:
-     
-     1. بدون بحث + بدون كلية
-        => كل الكورسات
-
-     2. بحث فقط
-        => title OR description
-
-     3. كلية فقط
-        => selected college OR all
-
-     4. بحث + كلية
-        => (title OR description)
-        AND
-        (selected college OR all)
   ======================================================= */
 
   const cleanSearch = search?.trim();
   const cleanCollege = college?.trim();
 
-  if (cleanSearch && cleanCollege && cleanCollege !== "all") {
+  if (
+    cleanSearch &&
+    cleanCollege &&
+    cleanCollege !== "all"
+  ) {
     const escapedSearch = cleanSearch
       .replace(/[%_]/g, "\\$&")
       .replace(/,/g, "\\,");
@@ -104,7 +91,10 @@ export async function fetchCourses(filters: CourseFilters = {}) {
     query = query.or(
       `title.ilike.%${escapedSearch}%,description.ilike.%${escapedSearch}%`
     );
-  } else if (cleanCollege && cleanCollege !== "all") {
+  } else if (
+    cleanCollege &&
+    cleanCollege !== "all"
+  ) {
     query = query.or(
       `college.eq.${cleanCollege},college.eq.all`
     );
@@ -180,7 +170,11 @@ export async function fetchCourses(filters: CourseFilters = {}) {
   } = await query;
 
   if (error) {
-    console.error("fetchCourses error:", error);
+    console.error(
+      "fetchCourses error:",
+      error
+    );
+
     throw error;
   }
 
@@ -189,18 +183,24 @@ export async function fetchCourses(filters: CourseFilters = {}) {
     total: count ?? 0,
   };
 }
+
 /* =========================================================
    Fetch Course By Slug
 ========================================================= */
 
-export async function fetchCourseBySlug(slug: string) {
+export async function fetchCourseBySlug(
+  slug: string
+) {
   const cleanSlug = slug?.trim();
 
   if (!cleanSlug) {
     throw new Error("Course slug is required");
   }
 
-  const { data, error } = await supabase
+  const {
+    data,
+    error,
+  } = await supabase
     .from("courses")
     .select(`
       *,
@@ -214,7 +214,11 @@ export async function fetchCourseBySlug(slug: string) {
     .maybeSingle();
 
   if (error) {
-    console.error("fetchCourseBySlug error:", error);
+    console.error(
+      "fetchCourseBySlug error:",
+      error
+    );
+
     throw error;
   }
 
@@ -230,12 +234,13 @@ export async function fetchCourseBySlug(slug: string) {
 /* =========================================================
    Fetch Course Sections
    Includes Lessons + Lesson Files
+
+   VdoCipher:
+   - vdocipher_video_id
+   - لا يوجد bunny_video_id
+   - لا يوجد bunny_video_status
 ========================================================= */
-/* =========================================================
-   Fetch Course Sections
-   Includes Lessons + Lesson Files
-   Lessons: oldest -> newest
-========================================================= */
+
 export async function fetchCourseSections(
   courseId: string
 ) {
@@ -261,8 +266,7 @@ export async function fetchCourseSections(
           is_preview,
           video_path,
           video_chunk_count,
-          bunny_video_id,
-          bunny_video_status,
+          vdocipher_video_id,
           created_at,
           lesson_files (
             id,
@@ -294,59 +298,93 @@ export async function fetchCourseSections(
 
   const sections = (data ?? []).map(
     (section: any) => {
-      const lessons = [...(section.lessons ?? [])]
-        .sort((a: any, b: any) => {
-          const orderA = Number(a.order_index ?? 0);
-          const orderB = Number(b.order_index ?? 0);
+      const lessons = [
+        ...(section.lessons ?? []),
+      ]
+        .sort(
+          (a: any, b: any) => {
+            const orderA = Number(
+              a.order_index ?? 0
+            );
 
-          // أولًا: ترتيب الدروس حسب order_index
-          if (orderA !== orderB) {
-            return orderA - orderB;
+            const orderB = Number(
+              b.order_index ?? 0
+            );
+
+            /* أولًا: ترتيب الدروس */
+            if (orderA !== orderB) {
+              return orderA - orderB;
+            }
+
+            /* ثانيًا: الأقدم created_at */
+            const dateA = a.created_at
+              ? new Date(
+                  a.created_at
+                ).getTime()
+              : 0;
+
+            const dateB = b.created_at
+              ? new Date(
+                  b.created_at
+                ).getTime()
+              : 0;
+
+            return dateA - dateB;
           }
+        )
+        .map(
+          (lesson: any) => {
+            const files = [
+              ...(lesson.lesson_files ?? []),
+            ].sort(
+              (
+                a: any,
+                b: any
+              ) => {
+                const orderA =
+                  Number(
+                    a.order_index ?? 0
+                  );
 
-          // ثانيًا: لو نفس order_index
-          // الأقدم created_at يظهر أولًا
-          const dateA = a.created_at
-            ? new Date(a.created_at).getTime()
-            : 0;
+                const orderB =
+                  Number(
+                    b.order_index ?? 0
+                  );
 
-          const dateB = b.created_at
-            ? new Date(b.created_at).getTime()
-            : 0;
+                if (
+                  orderA !== orderB
+                ) {
+                  return (
+                    orderA - orderB
+                  );
+                }
 
-          return dateA - dateB;
-        })
-        .map((lesson: any) => {
-          const files = [...(lesson.lesson_files ?? [])]
-            .sort((a: any, b: any) => {
-              const orderA = Number(
-                a.order_index ?? 0
-              );
+                const dateA =
+                  a.created_at
+                    ? new Date(
+                        a.created_at
+                      ).getTime()
+                    : 0;
 
-              const orderB = Number(
-                b.order_index ?? 0
-              );
+                const dateB =
+                  b.created_at
+                    ? new Date(
+                        b.created_at
+                      ).getTime()
+                    : 0;
 
-              if (orderA !== orderB) {
-                return orderA - orderB;
+                return (
+                  dateA - dateB
+                );
               }
+            );
 
-              const dateA = a.created_at
-                ? new Date(a.created_at).getTime()
-                : 0;
-
-              const dateB = b.created_at
-                ? new Date(b.created_at).getTime()
-                : 0;
-
-              return dateA - dateB;
-            });
-
-          return {
-            ...lesson,
-            files,
-          };
-        });
+            return {
+              ...lesson,
+              files,
+            };
+          }
+        );
 
       return {
         ...section,
@@ -357,6 +395,7 @@ export async function fetchCourseSections(
 
   return sections as CourseSection[];
 }
+
 /* =========================================================
    Check Student Enrollment
 ========================================================= */
@@ -392,92 +431,171 @@ export async function isStudentEnrolled(
   return !!data;
 }
 
-export async function fetchCourseQuizzes(courseId: string) {
+/* =========================================================
+   Fetch Course Quizzes
+========================================================= */
+
+export async function fetchCourseQuizzes(
+  courseId: string
+) {
   if (!courseId) {
     throw new Error("Course ID is required");
   }
 
-  const { data, error } = await supabase
+  const {
+    data,
+    error,
+  } = await supabase
     .from("quizzes")
     .select("*")
     .eq("course_id", courseId)
-    .order("created_at", { ascending: true });
+    .order("created_at", {
+      ascending: true,
+    });
 
   if (error) {
-    console.error("fetchCourseQuizzes error:", error);
+    console.error(
+      "fetchCourseQuizzes error:",
+      error
+    );
+
     throw error;
   }
 
   return data ?? [];
 }
+
+/* =========================================================
+   Fetch Lesson Progress
+========================================================= */
+
 export async function fetchLessonProgress(
   userId: string,
   courseId: string
 ) {
-  const { data: sections, error: sectionsError } = await supabase
+  const {
+    data: sections,
+    error: sectionsError,
+  } = await supabase
     .from("course_sections")
     .select("id")
     .eq("course_id", courseId);
 
-  if (sectionsError) throw sectionsError;
+  if (sectionsError) {
+    throw sectionsError;
+  }
 
-  const sectionIds = (sections ?? []).map((s) => s.id);
-  if (!sectionIds.length) return [];
+  const sectionIds = (
+    sections ?? []
+  ).map(
+    (s) => s.id
+  );
 
-  const { data: lessons, error: lessonsError } = await supabase
+  if (!sectionIds.length) {
+    return [];
+  }
+
+  const {
+    data: lessons,
+    error: lessonsError,
+  } = await supabase
     .from("lessons")
     .select("id")
-    .in("section_id", sectionIds);
+    .in(
+      "section_id",
+      sectionIds
+    );
 
-  if (lessonsError) throw lessonsError;
+  if (lessonsError) {
+    throw lessonsError;
+  }
 
-  const lessonIds = (lessons ?? []).map((l) => l.id);
-  if (!lessonIds.length) return [];
+  const lessonIds = (
+    lessons ?? []
+  ).map(
+    (l) => l.id
+  );
 
-  const { data, error } = await supabase
+  if (!lessonIds.length) {
+    return [];
+  }
+
+  const {
+    data,
+    error,
+  } = await supabase
     .from("lesson_progress")
     .select("*")
-    .eq("student_id", userId)   // بدل user_id
-    .in("lesson_id", lessonIds);
+    .eq(
+      "student_id",
+      userId
+    )
+    .in(
+      "lesson_id",
+      lessonIds
+    );
 
-  if (error) throw error;
+  if (error) {
+    throw error;
+  }
 
   return data;
 }
+
+/* =========================================================
+   Update Lesson Progress
+========================================================= */
+
 export async function updateLessonProgress(
   userId: string,
   lessonId: string,
-  courseId: string,   // مش مستخدم فعليًا لأن الجدول مالوش course_id
+  courseId: string,
   percentage: number,
   completed: boolean
 ) {
-  const { data, error } = await supabase
+  const {
+    data,
+    error,
+  } = await supabase
     .from("lesson_progress")
     .upsert(
       {
-        student_id: userId,        // بدل user_id
+        student_id: userId,
         lesson_id: lessonId,
-        progress_seconds: percentage, // انتبه: العمود progress_seconds مش percentage — لو الـ percentage اللي بتوصله فعليًا ثواني، سيبه كده. لو نسبة مئوية (0-100) هيبقى فيه لبس، شوف الملاحظة تحت
+        progress_seconds: percentage,
         completed,
-        last_watched_at: new Date().toISOString(),  // بدل updated_at
+        last_watched_at:
+          new Date().toISOString(),
       },
-      { onConflict: "student_id,lesson_id" }
+      {
+        onConflict:
+          "student_id,lesson_id",
+      }
     )
     .select("*")
     .single();
 
-  if (error) throw error;
+  if (error) {
+    throw error;
+  }
 
   return data;
 }
 
+/* =========================================================
+   Fetch Course By Slug Or ID
+========================================================= */
+
 export async function fetchCourseBySlugOrId(
   value: string
 ) {
-  const cleanValue = value?.trim();
+  const cleanValue =
+    value?.trim();
 
   if (!cleanValue) {
-    throw new Error("Course slug or ID is required");
+    throw new Error(
+      "Course slug or ID is required"
+    );
   }
 
   const uuidRegex =
@@ -492,9 +610,15 @@ export async function fetchCourseBySlugOrId(
     )
   `;
 
-  // UUID => Course ID
+  /* =======================================================
+     UUID => Course ID
+  ======================================================= */
+
   if (uuidRegex.test(cleanValue)) {
-    const { data, error } = await supabase
+    const {
+      data,
+      error,
+    } = await supabase
       .from("courses")
       .select(selectQuery)
       .eq("id", cleanValue)
@@ -505,6 +629,7 @@ export async function fetchCourseBySlugOrId(
         "fetchCourseBySlugOrId by ID error:",
         error
       );
+
       throw error;
     }
 
@@ -513,8 +638,14 @@ export async function fetchCourseBySlugOrId(
     }
   }
 
-  // Otherwise => Course slug
-  const { data, error } = await supabase
+  /* =======================================================
+     Otherwise => Course slug
+  ======================================================= */
+
+  const {
+    data,
+    error,
+  } = await supabase
     .from("courses")
     .select(selectQuery)
     .eq("slug", cleanValue)
@@ -525,6 +656,7 @@ export async function fetchCourseBySlugOrId(
       "fetchCourseBySlugOrId by slug error:",
       error
     );
+
     throw error;
   }
 
@@ -537,49 +669,110 @@ export async function fetchCourseBySlugOrId(
   return data as unknown as Course;
 }
 
-/** يرجع أعلى رقم شهر تم اعتماد دفعه فعليًا لهذا الطالب في هذا الكورس (0 لو ولا شهر) */
-export async function fetchUnlockedMonth(studentId: string, courseId: string) {
-  if (!studentId || !courseId) return 0;
+/* =========================================================
+   Fetch Unlocked Month
+========================================================= */
 
-  const { data, error } = await supabase
-    .from("student_installments")
-    .select("month_number")
-    .eq("student_id", studentId)
-    .eq("course_id", courseId)
-    .eq("status", "approved")
-    .order("month_number", { ascending: false })
-    .limit(1)
-    .maybeSingle();
+/**
+ * يرجع أعلى رقم شهر تم اعتماد دفعه فعليًا
+ * لهذا الطالب في هذا الكورس.
+ *
+ * يرجع 0 إذا لم يوجد أي شهر معتمد.
+ */
 
-  if (error) {
-    console.error("fetchUnlockedMonth error:", error);
+export async function fetchUnlockedMonth(
+  studentId: string,
+  courseId: string
+) {
+  if (!studentId || !courseId) {
     return 0;
   }
 
-  // كورس غير تقسيط أو لسه مفيش أقساط approved = يعتبر مفتوح لو فيه enrollment عادي (بيتحقق بمكان تاني)
-  return data?.month_number ?? 0;
-}
-
-/* =========================================================
-   Fetch Latest Course For Student's College (Simple Alert)
-========================================================= */
-
-export async function fetchLatestCourseForCollege(college: string) {
-  if (!college) return null;
-
-  const { data, error } = await supabase
-    .from("courses")
-    .select("id, title, slug, college")
-    .eq("is_published", true)
-    .or(`college.eq.${college},college.eq.all`)
-    .order("created_at", { ascending: false })
+  const {
+    data,
+    error,
+  } = await supabase
+    .from("student_installments")
+    .select("month_number")
+    .eq(
+      "student_id",
+      studentId
+    )
+    .eq(
+      "course_id",
+      courseId
+    )
+    .eq(
+      "status",
+      "approved"
+    )
+    .order(
+      "month_number",
+      {
+        ascending: false,
+      }
+    )
     .limit(1)
     .maybeSingle();
 
   if (error) {
-    console.error("fetchLatestCourseForCollege error:", error);
+    console.error(
+      "fetchUnlockedMonth error:",
+      error
+    );
+
+    return 0;
+  }
+
+  return (
+    data?.month_number ?? 0
+  );
+}
+
+/* =========================================================
+   Fetch Latest Course For Student's College
+========================================================= */
+
+export async function fetchLatestCourseForCollege(
+  college: string
+) {
+  if (!college) {
+    return null;
+  }
+
+  const {
+    data,
+    error,
+  } = await supabase
+    .from("courses")
+    .select(
+      "id, title, slug, college"
+    )
+    .eq(
+      "is_published",
+      true
+    )
+    .or(
+      `college.eq.${college},college.eq.all`
+    )
+    .order(
+      "created_at",
+      {
+        ascending: false,
+      }
+    )
+    .limit(1)
+    .maybeSingle();
+
+  if (error) {
+    console.error(
+      "fetchLatestCourseForCollege error:",
+      error
+    );
+
     throw error;
   }
 
   return data;
 }
+
