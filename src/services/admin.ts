@@ -1,14 +1,22 @@
 import { supabase } from "@/lib/supabase";
 import type { Profile, UserDevice } from "@/types";
+import { deleteCourseVideosVdoCipher } from "@/services/teacherCourses";
 
 export async function fetchUsersByRole(role: "student" | "teacher") {
-  const { data, error } = await supabase.from("profiles").select("*").eq("role", role).order("created_at", { ascending: false });
+  const { data, error } = await supabase
+    .from("profiles")
+    .select("*")
+    .eq("role", role)
+    .order("created_at", { ascending: false });
   if (error) throw error;
   return (data ?? []) as Profile[];
 }
 
 export async function updateUserStatus(userId: string, status: string) {
-  const { error } = await supabase.from("profiles").update({ status }).eq("id", userId);
+  const { error } = await supabase
+    .from("profiles")
+    .update({ status })
+    .eq("id", userId);
   if (error) throw error;
 }
 
@@ -22,6 +30,11 @@ export async function fetchAllCoursesAdmin() {
 }
 
 export async function adminDeleteCourse(courseId: string) {
+  // 1) احذف كل فيديوهات الكورس من VdoCipher أولاً.
+  //    لو فشل الحذف هيرمي Error ولن يتم حذف الكورس (عشان ما يفضلش فيديوهات يتيمة).
+  await deleteCourseVideosVdoCipher(courseId);
+
+  // 2) احذف الكورس من قاعدة البيانات
   const { error } = await supabase.from("courses").delete().eq("id", courseId);
   if (error) throw error;
 }
@@ -37,7 +50,9 @@ export async function fetchAllDevices() {
 }
 
 export async function resetUserDevice(userId: string) {
-  const { error } = await supabase.rpc("admin_reset_device", { p_user_id: userId });
+  const { error } = await supabase.rpc("admin_reset_device", {
+    p_user_id: userId,
+  });
   if (error) throw error;
 }
 
@@ -48,7 +63,10 @@ export async function fetchPlatformSettings() {
 }
 
 export async function updatePlatformSetting(key: string, value: unknown) {
-  const { error } = await supabase.from("platform_settings").update({ value }).eq("key", key);
+  const { error } = await supabase
+    .from("platform_settings")
+    .update({ value })
+    .eq("key", key);
   if (error) throw error;
 }
 
@@ -62,17 +80,34 @@ export interface DashboardStats {
 }
 
 export async function fetchDashboardStats(): Promise<DashboardStats> {
-  const [students, teachers, courses, payments, enrollments] = await Promise.all([
-    supabase.from("profiles").select("id", { count: "exact", head: true }).eq("role", "student"),
-    supabase.from("profiles").select("id", { count: "exact", head: true }).eq("role", "teacher"),
-    supabase.from("courses").select("id", { count: "exact", head: true }),
-    supabase.from("payments").select("amount, status"),
-    supabase.from("enrollments").select("id", { count: "exact", head: true }).eq("status", "active"),
-  ]);
+  const [students, teachers, courses, payments, enrollments] =
+    await Promise.all([
+      supabase
+        .from("profiles")
+        .select("id", { count: "exact", head: true })
+        .eq("role", "student"),
+      supabase
+        .from("profiles")
+        .select("id", { count: "exact", head: true })
+        .eq("role", "teacher"),
+      supabase.from("courses").select("id", { count: "exact", head: true }),
+      supabase.from("payments").select("amount, status"),
+      supabase
+        .from("enrollments")
+        .select("id", { count: "exact", head: true })
+        .eq("status", "active"),
+    ]);
 
-  const approvedPayments = (payments.data ?? []).filter((p: any) => p.status === "approved");
-  const pendingCount = (payments.data ?? []).filter((p: any) => p.status === "pending").length;
-  const revenue = approvedPayments.reduce((sum: number, p: any) => sum + Number(p.amount), 0);
+  const approvedPayments = (payments.data ?? []).filter(
+    (p: any) => p.status === "approved"
+  );
+  const pendingCount = (payments.data ?? []).filter(
+    (p: any) => p.status === "pending"
+  ).length;
+  const revenue = approvedPayments.reduce(
+    (sum: number, p: any) => sum + Number(p.amount),
+    0
+  );
 
   return {
     studentsCount: students.count ?? 0,
@@ -97,8 +132,18 @@ export interface TeacherPerformance {
 }
 
 const ARABIC_MONTHS = [
-  "يناير", "فبراير", "مارس", "أبريل", "مايو", "يونيو",
-  "يوليو", "أغسطس", "سبتمبر", "أكتوبر", "نوفمبر", "ديسمبر",
+  "يناير",
+  "فبراير",
+  "مارس",
+  "أبريل",
+  "مايو",
+  "يونيو",
+  "يوليو",
+  "أغسطس",
+  "سبتمبر",
+  "أكتوبر",
+  "نوفمبر",
+  "ديسمبر",
 ];
 
 function lastNMonthsKeys(n: number) {
@@ -106,7 +151,10 @@ function lastNMonthsKeys(n: number) {
   const now = new Date();
   for (let i = n - 1; i >= 0; i--) {
     const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
-    keys.push({ key: `${d.getFullYear()}-${d.getMonth()}`, label: ARABIC_MONTHS[d.getMonth()] });
+    keys.push({
+      key: `${d.getFullYear()}-${d.getMonth()}`,
+      label: ARABIC_MONTHS[d.getMonth()],
+    });
   }
   return keys;
 }
@@ -117,18 +165,20 @@ export async function fetchMonthlyGrowth(months = 6): Promise<MonthlyStat[]> {
   fromDate.setMonth(fromDate.getMonth() - (months - 1));
   fromDate.setDate(1);
 
-  const [{ data: users, error: usersErr }, { data: payments, error: paymentsErr }] =
-    await Promise.all([
-      supabase
-        .from("profiles")
-        .select("created_at")
-        .gte("created_at", fromDate.toISOString()),
-      supabase
-        .from("payments")
-        .select("created_at, amount, status")
-        .eq("status", "approved")
-        .gte("created_at", fromDate.toISOString()),
-    ]);
+  const [
+    { data: users, error: usersErr },
+    { data: payments, error: paymentsErr },
+  ] = await Promise.all([
+    supabase
+      .from("profiles")
+      .select("created_at")
+      .gte("created_at", fromDate.toISOString()),
+    supabase
+      .from("payments")
+      .select("created_at, amount, status")
+      .eq("status", "approved")
+      .gte("created_at", fromDate.toISOString()),
+  ]);
 
   if (usersErr) throw usersErr;
   if (paymentsErr) throw paymentsErr;
@@ -155,10 +205,14 @@ export async function fetchMonthlyGrowth(months = 6): Promise<MonthlyStat[]> {
   }));
 }
 
-export async function fetchTeacherPerformance(limit = 6): Promise<TeacherPerformance[]> {
+export async function fetchTeacherPerformance(
+  limit = 6
+): Promise<TeacherPerformance[]> {
   const { data: courses, error } = await supabase
     .from("courses")
-    .select("students_count, price, teacher:profiles!courses_teacher_id_fkey(full_name)");
+    .select(
+      "students_count, price, teacher:profiles!courses_teacher_id_fkey(full_name)"
+    );
 
   if (error) throw error;
 

@@ -142,6 +142,11 @@ export async function togglePublish(
 export async function deleteCourse(
   courseId: string
 ) {
+  // 1) احذف فيديوهات الكورس من VdoCipher أولاً
+  //    لو فشل هيرمي Error ولن يتم حذف الكورس
+  await deleteCourseVideosVdoCipher(courseId);
+
+  // 2) احذف الكورس من قاعدة البيانات
   const { error } = await supabase
     .from("courses")
     .delete()
@@ -223,6 +228,11 @@ export async function createSection(
 export async function deleteSection(
   sectionId: string
 ) {
+  const ids =
+    await fetchSectionVdoCipherVideoIds(sectionId);
+
+  await deleteVdoCipherVideos(ids);
+
   const { error } = await supabase
     .from("course_sections")
     .delete()
@@ -1554,3 +1564,93 @@ export async function deleteLessonVideoVdoCipher(
 export const uploadLessonVideoBunny =
   uploadLessonVideoVdoCipher;
 
+// =====================================================
+// VDOCIPHER BULK DELETE HELPERS
+// =====================================================
+
+/**
+ * حذف مجموعة فيديوهات من VdoCipher.
+ * لو فشل يرمي Error (عشان نوقف حذف الكورس/القسم/الدرس).
+ */
+export async function deleteVdoCipherVideos(
+  videoIds: string[]
+): Promise<void> {
+  const ids = Array.from(
+    new Set(videoIds.filter(Boolean))
+  );
+
+  if (ids.length === 0) return;
+
+  const { data, error } =
+    await supabase.functions.invoke(
+      "delete-vdocipher-video",
+      {
+        body: { videoIds: ids },
+      }
+    );
+
+  if (error) {
+    throw new Error(
+      `تعذر حذف الفيديوهات من VdoCipher: ${
+        error.message || "خطأ غير معروف"
+      }`
+    );
+  }
+
+  if (data && data.success === false) {
+    throw new Error(
+      data.error ||
+        "تعذر حذف الفيديوهات من VdoCipher"
+    );
+  }
+}
+
+/** كل فيديوهات VdoCipher الخاصة بكورس كامل */
+export async function fetchCourseVdoCipherVideoIds(
+  courseId: string
+): Promise<string[]> {
+  const { data, error } = await supabase
+    .from("course_sections")
+    .select("id, lessons(vdocipher_video_id)")
+    .eq("course_id", courseId);
+
+  if (error) throw error;
+
+  const ids: string[] = [];
+
+  for (const section of (data ?? []) as any[]) {
+    for (const lesson of section.lessons ?? []) {
+      if (lesson?.vdocipher_video_id) {
+        ids.push(lesson.vdocipher_video_id);
+      }
+    }
+  }
+
+  return ids;
+}
+
+/** كل فيديوهات VdoCipher الخاصة بقسم */
+export async function fetchSectionVdoCipherVideoIds(
+  sectionId: string
+): Promise<string[]> {
+  const { data, error } = await supabase
+    .from("lessons")
+    .select("vdocipher_video_id")
+    .eq("section_id", sectionId);
+
+  if (error) throw error;
+
+  return (data ?? [])
+    .map((l: any) => l.vdocipher_video_id)
+    .filter(Boolean) as string[];
+}
+
+/** حذف كل فيديوهات الكورس من VdoCipher (تُستخدم أيضًا في صفحة الأدمن) */
+export async function deleteCourseVideosVdoCipher(
+  courseId: string
+): Promise<void> {
+  const ids =
+    await fetchCourseVdoCipherVideoIds(courseId);
+
+  await deleteVdoCipherVideos(ids);
+}

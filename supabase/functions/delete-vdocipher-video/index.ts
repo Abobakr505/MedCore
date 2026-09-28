@@ -2,9 +2,11 @@ const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers":
     "authorization, x-client-info, apikey, content-type",
-  "Access-Control-Allow-Methods":
-    "POST, OPTIONS",
+  "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
+
+// عدد الفيديوهات في الطلب الواحد لـ VdoCipher
+const BATCH_SIZE = 50;
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
@@ -16,10 +18,7 @@ Deno.serve(async (req) => {
 
   if (req.method !== "POST") {
     return json(
-      {
-        success: false,
-        error: "Method not allowed",
-      },
+      { success: false, error: "Method not allowed" },
       405
     );
   }
@@ -27,94 +26,100 @@ Deno.serve(async (req) => {
   try {
     const body = await req.json();
 
-    const videoId = body?.videoId;
+    // يدعم videoId واحد أو videoIds كمصفوفة
+    const rawIds: unknown[] = Array.isArray(body?.videoIds)
+      ? body.videoIds
+      : body?.videoId
+      ? [body.videoId]
+      : [];
 
-    if (
-      !videoId ||
-      typeof videoId !== "string"
-    ) {
+    const videoIds = Array.from(
+      new Set(
+        rawIds
+          .filter(
+            (id): id is string =>
+              typeof id === "string" && id.trim().length > 0
+          )
+          .map((id) => id.trim())
+      )
+    );
+
+    if (videoIds.length === 0) {
       return json(
         {
           success: false,
-          error: "videoId is required",
+          error: "videoId or videoIds is required",
         },
         400
       );
     }
 
-    const apiSecret =
-      Deno.env.get("VDOCIPHER_API_SECRET");
+    const apiSecret = Deno.env.get("VDOCIPHER_API_SECRET");
 
     if (!apiSecret) {
-      console.error(
-        "VDOCIPHER_API_SECRET is missing"
-      );
+      console.error("VDOCIPHER_API_SECRET is missing");
 
       return json(
         {
           success: false,
-          error:
-            "Missing VDOCIPHER_API_SECRET",
+          error: "Missing VDOCIPHER_API_SECRET",
         },
         500
       );
     }
 
-    /*
-     * VdoCipher Delete API
-     *
-     * الصحيح:
-     * DELETE /api/videos?videos=VIDEO_ID
-     */
-    const deleteUrl =
-      "https://dev.vdocipher.com/api/videos?videos=" +
-      encodeURIComponent(videoId);
+    const deleted: string[] = [];
+    const failed: {
+      videoIds: string[];
+      vdoStatus: number;
+      vdoResponse: string | null;
+    }[] = [];
 
-    console.log(
-      "Deleting VdoCipher video:",
-      videoId
-    );
+    for (let i = 0; i < videoIds.length; i += BATCH_SIZE) {
+      const batch = videoIds.slice(i, i + BATCH_SIZE);
 
-    const vdoRes = await fetch(
-      deleteUrl,
-      {
+      /*
+       * VdoCipher Delete API
+       * DELETE /api/videos?videos=ID1,ID2,ID3
+       */
+      const deleteUrl =
+        "https://dev.vdocipher.com/api/videos?videos=" +
+        encodeURIComponent(batch.join(","));
+
+      console.log("Deleting VdoCipher videos:", batch);
+
+      const vdoRes = await fetch(deleteUrl, {
         method: "DELETE",
-
         headers: {
-          "Authorization":
-            "Apisecret " + apiSecret,
-          "Accept":
-            "application/json",
-          "Content-Type":
-            "application/json",
+          Authorization: "Apisecret " + apiSecret,
+          Accept: "application/json",
+          "Content-Type": "application/json",
         },
+      });
+
+      const responseText = await vdoRes.text();
+
+      console.log("VdoCipher delete status:", vdoRes.status);
+      console.log("VdoCipher delete response:", responseText);
+
+      if (vdoRes.ok) {
+        deleted.push(...batch);
+      } else {
+        failed.push({
+          videoIds: batch,
+          vdoStatus: vdoRes.status,
+          vdoResponse: responseText || null,
+        });
       }
-    );
+    }
 
-    const responseText =
-      await vdoRes.text();
-
-    console.log(
-      "VdoCipher delete status:",
-      vdoRes.status
-    );
-
-    console.log(
-      "VdoCipher delete response:",
-      responseText
-    );
-
-    if (!vdoRes.ok) {
+    if (failed.length > 0) {
       return json(
         {
           success: false,
-          error:
-            "VdoCipher refused to delete the video.",
-          vdoStatus:
-            vdoRes.status,
-          vdoResponse:
-            responseText || null,
-          videoId,
+          error: "VdoCipher refused to delete some videos.",
+          deleted,
+          failed,
         },
         500
       );
@@ -122,19 +127,12 @@ Deno.serve(async (req) => {
 
     return json({
       success: true,
-      videoId,
-      message:
-        "Video deleted from VdoCipher.",
-      vdoStatus:
-        vdoRes.status,
-      vdoResponse:
-        responseText || null,
+      message: "Videos deleted from VdoCipher.",
+      deletedCount: deleted.length,
+      deleted,
     });
   } catch (error) {
-    console.error(
-      "DELETE VDOCIPHER VIDEO ERROR:",
-      error
-    );
+    console.error("DELETE VDOCIPHER VIDEO ERROR:", error);
 
     return json(
       {
@@ -149,19 +147,12 @@ Deno.serve(async (req) => {
   }
 });
 
-function json(
-  data: unknown,
-  status = 200
-): Response {
-  return new Response(
-    JSON.stringify(data),
-    {
-      status,
-      headers: {
-        ...corsHeaders,
-        "Content-Type":
-          "application/json",
-      },
-    }
-  );
+function json(data: unknown, status = 200): Response {
+  return new Response(JSON.stringify(data), {
+    status,
+    headers: {
+      ...corsHeaders,
+      "Content-Type": "application/json",
+    },
+  });
 }
