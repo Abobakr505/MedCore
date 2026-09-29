@@ -23,6 +23,7 @@ import { useToast } from "@/contexts/ToastContext";
 import {
   fetchUsersByRole,
   updateUserStatus,
+  fetchTeacherSubscriberCounts,
 } from "@/services/admin";
 
 import type { Profile } from "@/types";
@@ -30,10 +31,7 @@ import { COLLEGE_LABELS } from "@/types";
 
 import { formatDate } from "@/utils/format";
 
-const STATUS_COLORS: Record<
-  string,
-  "green" | "red" | "amber"
-> = {
+const STATUS_COLORS: Record<string, "green" | "red" | "amber"> = {
   active: "green",
   suspended: "red",
   pending_verification: "amber",
@@ -49,19 +47,29 @@ export default function TeachersAdminPage() {
   const { showToast } = useToast();
 
   const [teachers, setTeachers] = useState<Profile[]>([]);
+  const [subscriberCounts, setSubscriberCounts] = useState<
+    Record<string, number>
+  >({});
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState("all");
-  const [processingId, setProcessingId] = useState<string | null>(
-    null
-  );
+  const [processingId, setProcessingId] = useState<string | null>(null);
 
   const load = async () => {
     setLoading(true);
 
     try {
-      const data = await fetchUsersByRole("teacher");
+      // فشل جلب عدد المشتركين لا يجب أن يمنع عرض المعلمين
+      const [data, counts] = await Promise.all([
+        fetchUsersByRole("teacher"),
+        fetchTeacherSubscriberCounts().catch(() => {
+          showToast("تعذّر تحميل أعداد المشتركين", "error");
+          return {} as Record<string, number>;
+        }),
+      ]);
+
       setTeachers(data);
+      setSubscriberCounts(counts);
     } catch {
       showToast("تعذّر تحميل المعلمين", "error");
     } finally {
@@ -73,39 +81,37 @@ export default function TeachersAdminPage() {
     load();
   }, []);
 
+  const getSubscribers = (teacherId: string) =>
+    subscriberCounts[teacherId] ?? 0;
+
   const stats = useMemo(
     () => ({
       total: teachers.length,
       active: teachers.filter((t) => t.status === "active").length,
-      suspended: teachers.filter(
-        (t) => t.status === "suspended"
-      ).length,
-      pending: teachers.filter(
-        (t) => t.status === "pending_verification"
-      ).length,
+      suspended: teachers.filter((t) => t.status === "suspended").length,
+      pending: teachers.filter((t) => t.status === "pending_verification")
+        .length,
+      subscribers: teachers.reduce(
+        (sum, t) => sum + (subscriberCounts[t.id] ?? 0),
+        0
+      ),
     }),
-    [teachers]
+    [teachers, subscriberCounts]
   );
 
   const filteredTeachers = useMemo(() => {
     const query = search.trim().toLowerCase();
 
     return teachers.filter((teacher) => {
-      const matchesFilter =
-        filter === "all" || teacher.status === filter;
+      const matchesFilter = filter === "all" || teacher.status === filter;
 
       if (!matchesFilter) return false;
 
       if (!query) return true;
 
-      const name =
-        teacher.full_name?.toLowerCase() || "";
-
-      const email =
-        teacher.email?.toLowerCase() || "";
-
-      const college =
-        COLLEGE_LABELS[teacher.college]?.toLowerCase() || "";
+      const name = teacher.full_name?.toLowerCase() || "";
+      const email = teacher.email?.toLowerCase() || "";
+      const college = COLLEGE_LABELS[teacher.college]?.toLowerCase() || "";
 
       return (
         name.includes(query) ||
@@ -116,10 +122,7 @@ export default function TeachersAdminPage() {
   }, [teachers, search, filter]);
 
   const toggleStatus = async (teacher: Profile) => {
-    const newStatus =
-      teacher.status === "suspended"
-        ? "active"
-        : "suspended";
+    const newStatus = teacher.status === "suspended" ? "active" : "suspended";
 
     setProcessingId(teacher.id);
 
@@ -174,21 +177,9 @@ export default function TeachersAdminPage() {
   };
 
   const filters = [
-    {
-      value: "all",
-      label: "الكل",
-      count: stats.total,
-    },
-    {
-      value: "active",
-      label: "نشط",
-      count: stats.active,
-    },
-    {
-      value: "suspended",
-      label: "موقوف",
-      count: stats.suspended,
-    },
+    { value: "all", label: "الكل", count: stats.total },
+    { value: "active", label: "نشط", count: stats.active },
+    { value: "suspended", label: "موقوف", count: stats.suspended },
     {
       value: "pending_verification",
       label: "بانتظار التفعيل",
@@ -221,14 +212,14 @@ export default function TeachersAdminPage() {
               </div>
 
               <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-500">
-                إدارة حسابات المعلمين، متابعة حالاتهم والتحكم في
-                إمكانية الوصول إلى لوحة المعلم.
+                إدارة حسابات المعلمين، متابعة حالاتهم والتحكم في إمكانية الوصول
+                إلى لوحة المعلم.
               </p>
             </div>
           </div>
 
           {/* Quick Stats */}
-          <div className="grid grid-cols-3 gap-3">
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
             <MiniStat
               icon={<UserCheck className="h-4 w-4" />}
               label="نشط"
@@ -248,6 +239,13 @@ export default function TeachersAdminPage() {
               label="معلق"
               value={stats.pending}
               iconClass="bg-amber-50 text-amber-600"
+            />
+
+            <MiniStat
+              icon={<Users className="h-4 w-4" />}
+              label="إجمالي المشتركين"
+              value={stats.subscribers}
+              iconClass="bg-purple-50 text-purple-600"
             />
           </div>
         </div>
@@ -361,6 +359,10 @@ export default function TeachersAdminPage() {
                     </th>
 
                     <th className="px-5 py-4 text-xs font-extrabold text-slate-500">
+                      المشتركون
+                    </th>
+
+                    <th className="px-5 py-4 text-xs font-extrabold text-slate-500">
                       تاريخ التسجيل
                     </th>
 
@@ -384,15 +386,13 @@ export default function TeachersAdminPage() {
                       <td className="px-5 py-4">
                         <div className="flex items-center gap-3">
                           <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-purple-50 font-extrabold text-purple-600">
-                            {teacher.full_name
-                              ?.charAt(0)
-                              ?.toUpperCase() || "؟"}
+                            {teacher.full_name?.charAt(0)?.toUpperCase() ||
+                              "؟"}
                           </div>
 
                           <div className="min-w-0">
                             <p className="truncate font-extrabold text-slate-800">
-                              {teacher.full_name ||
-                                "معلم غير معروف"}
+                              {teacher.full_name || "معلم غير معروف"}
                             </p>
 
                             <div className="mt-1 flex items-center gap-1.5 text-xs text-slate-400">
@@ -409,31 +409,34 @@ export default function TeachersAdminPage() {
                       {/* College */}
                       <td className="px-5 py-4">
                         <span className="rounded-lg bg-slate-100 px-3 py-1.5 text-xs font-bold text-slate-600">
-                          {COLLEGE_LABELS[teacher.college] ||
-                            "غير محددة"}
+                          {COLLEGE_LABELS[teacher.college] || "غير محددة"}
                         </span>
+                      </td>
+
+                      {/* Subscribers */}
+                      <td className="px-5 py-4">
+                        <div className="inline-flex items-center gap-2 rounded-lg bg-purple-50 px-3 py-1.5 text-purple-700">
+                          <Users className="h-4 w-4" />
+                          <span className="text-sm font-extrabold">
+                            {getSubscribers(teacher.id)}
+                          </span>
+                        </div>
                       </td>
 
                       {/* Date */}
                       <td className="px-5 py-4">
                         <div className="flex items-center gap-2 text-slate-500">
                           <CalendarDays className="h-4 w-4 text-slate-400" />
-                          <span>
-                            {formatDate(teacher.created_at)}
-                          </span>
+                          <span>{formatDate(teacher.created_at)}</span>
                         </div>
                       </td>
 
                       {/* Status */}
                       <td className="px-5 py-4">
                         <Badge
-                          color={
-                            STATUS_COLORS[teacher.status] ||
-                            "amber"
-                          }
+                          color={STATUS_COLORS[teacher.status] || "amber"}
                         >
-                          {STATUS_LABELS[teacher.status] ||
-                            teacher.status}
+                          {STATUS_LABELS[teacher.status] || teacher.status}
                         </Badge>
                       </td>
 
@@ -469,12 +472,8 @@ export default function TeachersAdminPage() {
                                 ? "secondary"
                                 : "outline"
                             }
-                            isLoading={
-                              processingId === teacher.id
-                            }
-                            onClick={() =>
-                              toggleStatus(teacher)
-                            }
+                            isLoading={processingId === teacher.id}
+                            onClick={() => toggleStatus(teacher)}
                           >
                             {teacher.status === "suspended" ? (
                               <CheckCircle2 className="h-3.5 w-3.5" />
@@ -482,9 +481,7 @@ export default function TeachersAdminPage() {
                               <Ban className="h-3.5 w-3.5 text-red-500" />
                             )}
 
-                            {teacher.status === "suspended"
-                              ? "تفعيل"
-                              : "إيقاف"}
+                            {teacher.status === "suspended" ? "تفعيل" : "إيقاف"}
                           </Button>
                         )}
                       </td>
@@ -498,10 +495,7 @@ export default function TeachersAdminPage() {
           {/* Mobile Cards */}
           <div className="grid gap-3 md:hidden">
             {filteredTeachers.map((teacher) => (
-              <Card
-                key={teacher.id}
-                className="relative overflow-hidden p-4"
-              >
+              <Card key={teacher.id} className="relative overflow-hidden p-4">
                 <div
                   className={`absolute inset-y-0 right-0 w-1 ${
                     teacher.status === "active"
@@ -514,17 +508,14 @@ export default function TeachersAdminPage() {
 
                 <div className="flex items-start gap-3">
                   <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-purple-50 font-extrabold text-purple-600">
-                    {teacher.full_name
-                      ?.charAt(0)
-                      ?.toUpperCase() || "؟"}
+                    {teacher.full_name?.charAt(0)?.toUpperCase() || "؟"}
                   </div>
 
                   <div className="min-w-0 flex-1">
                     <div className="flex items-start justify-between gap-2">
                       <div className="min-w-0">
                         <p className="truncate font-extrabold text-slate-800">
-                          {teacher.full_name ||
-                            "معلم غير معروف"}
+                          {teacher.full_name || "معلم غير معروف"}
                         </p>
 
                         <p className="mt-1 truncate text-xs text-slate-400">
@@ -532,14 +523,8 @@ export default function TeachersAdminPage() {
                         </p>
                       </div>
 
-                      <Badge
-                        color={
-                          STATUS_COLORS[teacher.status] ||
-                          "amber"
-                        }
-                      >
-                        {STATUS_LABELS[teacher.status] ||
-                          teacher.status}
+                      <Badge color={STATUS_COLORS[teacher.status] || "amber"}>
+                        {STATUS_LABELS[teacher.status] || teacher.status}
                       </Badge>
                     </div>
                   </div>
@@ -553,8 +538,7 @@ export default function TeachersAdminPage() {
                     </div>
 
                     <p className="mt-1 truncate text-sm font-bold text-slate-700">
-                      {COLLEGE_LABELS[teacher.college] ||
-                        "غير محددة"}
+                      {COLLEGE_LABELS[teacher.college] || "غير محددة"}
                     </p>
                   </div>
 
@@ -566,6 +550,17 @@ export default function TeachersAdminPage() {
 
                     <p className="mt-1 text-sm font-bold text-slate-700">
                       {formatDate(teacher.created_at)}
+                    </p>
+                  </div>
+
+                  <div className="col-span-2 rounded-xl bg-purple-50 p-3">
+                    <div className="flex items-center gap-1.5 text-xs text-purple-500">
+                      <Users className="h-3.5 w-3.5" />
+                      عدد المشتركين
+                    </div>
+
+                    <p className="mt-1 text-sm font-extrabold text-purple-700">
+                      {getSubscribers(teacher.id)} مشترك
                     </p>
                   </div>
                 </div>
@@ -596,13 +591,9 @@ export default function TeachersAdminPage() {
                   <Button
                     size="sm"
                     variant={
-                      teacher.status === "suspended"
-                        ? "secondary"
-                        : "outline"
+                      teacher.status === "suspended" ? "secondary" : "outline"
                     }
-                    isLoading={
-                      processingId === teacher.id
-                    }
+                    isLoading={processingId === teacher.id}
                     onClick={() => toggleStatus(teacher)}
                     className="mt-3 w-full"
                   >
@@ -651,13 +642,9 @@ function MiniStat({
         {icon}
       </div>
 
-      <p className="text-lg font-extrabold text-slate-900">
-        {value}
-      </p>
+      <p className="text-lg font-extrabold text-slate-900">{value}</p>
 
-      <p className="text-[11px] font-medium text-slate-400">
-        {label}
-      </p>
+      <p className="text-[11px] font-medium text-slate-400">{label}</p>
     </div>
   );
 }

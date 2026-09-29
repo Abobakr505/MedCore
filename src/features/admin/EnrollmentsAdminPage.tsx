@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ListChecks,
   Search,
@@ -7,6 +7,9 @@ import {
   Clock3,
   XCircle,
   BookOpen,
+  Bell,
+  X,
+  ChevronDown,
 } from "lucide-react";
 
 import { Card } from "@/components/ui/Card";
@@ -16,16 +19,16 @@ import { EmptyState } from "@/components/ui/EmptyState";
 
 import { fetchAllEnrollments } from "@/services/enrollments";
 
-import {
-  ENROLLMENT_STATUS_LABELS,
-} from "@/types";
+import { ENROLLMENT_STATUS_LABELS } from "@/types";
 
 import { formatDate } from "@/utils/format";
 
-const STATUS_COLORS: Record<
-  string,
-  "green" | "amber" | "red" | "slate"
-> = {
+const NEW_WINDOW_HOURS = 48; // أي اشتراك خلال هذه المدة يعتبر "جديد"
+const REFRESH_INTERVAL_MS = 60_000; // تحديث تلقائي كل دقيقة
+const BANNER_PREVIEW_COUNT = 4; // عدد الاشتراكات الظاهرة قبل "عرض الكل"
+const LAST_SEEN_KEY = "admin_enrollments_last_seen";
+
+const STATUS_COLORS: Record<string, "green" | "amber" | "red" | "slate"> = {
   active: "green",
   pending: "amber",
   suspended: "red",
@@ -39,19 +42,52 @@ const STATUS_ICONS: Record<string, typeof CheckCircle2> = {
   cancelled: XCircle,
 };
 
+function timeAgo(dateStr: string) {
+  const diff = Date.now() - new Date(dateStr).getTime();
+  const minutes = Math.floor(diff / 60_000);
+
+  if (minutes < 1) return "الآن";
+  if (minutes < 60) return minutes === 1 ? "منذ دقيقة" : `منذ ${minutes} دقيقة`;
+
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return hours === 1 ? "منذ ساعة" : `منذ ${hours} ساعة`;
+
+  const days = Math.floor(hours / 24);
+  return days === 1 ? "منذ يوم" : `منذ ${days} يوم`;
+}
+
 export default function EnrollmentsAdminPage() {
   const [rows, setRows] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState("all");
 
-  useEffect(() => {
-    setLoading(true);
+  const [bannerExpanded, setBannerExpanded] = useState(false);
+  const [lastSeen, setLastSeen] = useState<number>(() => {
+    try {
+      return Number(localStorage.getItem(LAST_SEEN_KEY)) || 0;
+    } catch {
+      return 0;
+    }
+  });
 
-    fetchAllEnrollments()
+  const load = useCallback((silent = false) => {
+    if (!silent) setLoading(true);
+
+    return fetchAllEnrollments()
       .then(setRows)
-      .finally(() => setLoading(false));
+      .catch(() => {})
+      .finally(() => {
+        if (!silent) setLoading(false);
+      });
   }, []);
+
+  useEffect(() => {
+    load();
+
+    const id = setInterval(() => load(true), REFRESH_INTERVAL_MS);
+    return () => clearInterval(id);
+  }, [load]);
 
   const stats = useMemo(() => {
     return {
@@ -62,25 +98,50 @@ export default function EnrollmentsAdminPage() {
     };
   }, [rows]);
 
+  // الاشتراكات الجديدة: خلال آخر 48 ساعة وبعد آخر مرة ضغط فيها "تم الاطلاع"
+  const newRows = useMemo(() => {
+    const cutoff = Date.now() - NEW_WINDOW_HOURS * 60 * 60 * 1000;
+
+    return rows
+      .filter((row) => {
+        if (!row.enrolled_at) return false;
+        const t = new Date(row.enrolled_at).getTime();
+        return t > cutoff && t > lastSeen;
+      })
+      .sort(
+        (a, b) =>
+          new Date(b.enrolled_at).getTime() -
+          new Date(a.enrolled_at).getTime()
+      );
+  }, [rows, lastSeen]);
+
+  const newIds = useMemo(() => new Set(newRows.map((r) => r.id)), [newRows]);
+
+  const dismissBanner = () => {
+    const now = Date.now();
+    setLastSeen(now);
+    setBannerExpanded(false);
+
+    try {
+      localStorage.setItem(LAST_SEEN_KEY, String(now));
+    } catch {
+      /* ignore */
+    }
+  };
+
   const filteredRows = useMemo(() => {
     const query = search.trim().toLowerCase();
 
     return rows.filter((row) => {
-      const matchesFilter =
-        filter === "all" || row.status === filter;
+      const matchesFilter = filter === "all" || row.status === filter;
 
       if (!matchesFilter) return false;
 
       if (!query) return true;
 
-      const studentName =
-        row.student?.full_name?.toLowerCase() || "";
-
-      const studentEmail =
-        row.student?.email?.toLowerCase() || "";
-
-      const courseTitle =
-        row.course?.title?.toLowerCase() || "";
+      const studentName = row.student?.full_name?.toLowerCase() || "";
+      const studentEmail = row.student?.email?.toLowerCase() || "";
+      const courseTitle = row.course?.title?.toLowerCase() || "";
 
       return (
         studentName.includes(query) ||
@@ -91,30 +152,117 @@ export default function EnrollmentsAdminPage() {
   }, [rows, search, filter]);
 
   const filters = [
-    {
-      value: "all",
-      label: "الكل",
-      count: stats.total,
-    },
-    {
-      value: "active",
-      label: "نشطة",
-      count: stats.active,
-    },
-    {
-      value: "pending",
-      label: "معلقة",
-      count: stats.pending,
-    },
-    {
-      value: "suspended",
-      label: "موقوفة",
-      count: stats.suspended,
-    },
+    { value: "all", label: "الكل", count: stats.total },
+    { value: "active", label: "نشطة", count: stats.active },
+    { value: "pending", label: "معلقة", count: stats.pending },
+    { value: "suspended", label: "موقوفة", count: stats.suspended },
   ];
+
+  const visibleNew = bannerExpanded
+    ? newRows
+    : newRows.slice(0, BANNER_PREVIEW_COUNT);
 
   return (
     <div className="space-y-6">
+      {/* New enrollments banner */}
+      {!loading && newRows.length > 0 && (
+        <div className="relative overflow-hidden rounded-3xl border border-brand-200 bg-gradient-to-l from-brand-50 via-white to-white p-5 shadow-sm">
+          <div className="absolute inset-y-0 right-0 w-1.5 bg-brand-500" />
+
+          <div className="flex items-start justify-between gap-3">
+            <div className="flex items-center gap-3">
+              <div className="relative flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-brand-500 text-white shadow-md shadow-brand-500/30">
+                <Bell className="h-5 w-5" />
+                <span className="absolute -left-1 -top-1 flex h-3.5 w-3.5">
+                  <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-red-400 opacity-75" />
+                  <span className="relative inline-flex h-3.5 w-3.5 rounded-full bg-red-500" />
+                </span>
+              </div>
+
+              <div>
+                <h2 className="text-base font-extrabold text-slate-900">
+                  {newRows.length === 1
+                    ? "اشتراك جديد"
+                    : `${newRows.length} اشتراكات جديدة`}
+                </h2>
+                <p className="mt-0.5 text-xs text-slate-500">
+                  آخر {NEW_WINDOW_HOURS} ساعة — الأحدث أولاً
+                </p>
+              </div>
+            </div>
+
+            <button
+              type="button"
+              onClick={dismissBanner}
+              className="flex shrink-0 items-center gap-1.5 rounded-xl bg-white px-3 py-2 text-xs font-bold text-slate-600 ring-1 ring-slate-200 transition hover:bg-slate-50 hover:text-slate-800"
+            >
+              <X className="h-3.5 w-3.5" />
+              تم الاطلاع
+            </button>
+          </div>
+
+          <div className="mt-4 grid gap-2 sm:grid-cols-2">
+            {visibleNew.map((row) => {
+              const StatusIcon = STATUS_ICONS[row.status] || Clock3;
+
+              return (
+                <div
+                  key={row.id}
+                  className="flex items-center gap-3 rounded-2xl border border-slate-100 bg-white p-3 shadow-sm"
+                >
+                  <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-brand-50 font-extrabold text-brand-600">
+                    {row.student?.full_name?.charAt(0)?.toUpperCase() || "؟"}
+                  </div>
+
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-sm font-bold text-slate-800">
+                      {row.student?.full_name || "طالب غير معروف"}
+                    </p>
+
+                    <p className="mt-0.5 flex items-center gap-1.5 truncate text-xs text-slate-500">
+                      <BookOpen className="h-3 w-3 shrink-0" />
+                      <span className="truncate">
+                        {row.course?.title || "كورس غير معروف"}
+                      </span>
+                    </p>
+                  </div>
+
+                  <div className="flex shrink-0 flex-col items-end gap-1.5">
+                    <Badge color={STATUS_COLORS[row.status] || "slate"}>
+                      <span className="flex items-center gap-1">
+                        <StatusIcon className="h-3 w-3" />
+                        {ENROLLMENT_STATUS_LABELS[row.status] || row.status}
+                      </span>
+                    </Badge>
+
+                    <span className="text-[11px] text-slate-400">
+                      {timeAgo(row.enrolled_at)}
+                    </span>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+
+          {newRows.length > BANNER_PREVIEW_COUNT && (
+            <button
+              type="button"
+              onClick={() => setBannerExpanded((v) => !v)}
+              className="mt-3 flex items-center gap-1.5 text-xs font-bold text-brand-700 transition hover:text-brand-800"
+            >
+              {bannerExpanded
+                ? "عرض أقل"
+                : `عرض الكل (${newRows.length - BANNER_PREVIEW_COUNT} إضافية)`}
+              <ChevronDown
+                className={`h-3.5 w-3.5 transition ${
+                  bannerExpanded ? "rotate-180" : ""
+                }`}
+              />
+            </button>
+          )}
+        </div>
+      )}
+
       {/* Header */}
       <div className="relative overflow-hidden rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
         <div className="absolute -left-16 -top-20 h-48 w-48 rounded-full bg-brand-500/10 blur-3xl" />
@@ -287,13 +435,15 @@ export default function EnrollmentsAdminPage() {
 
                 <tbody className="divide-y divide-slate-100">
                   {filteredRows.map((row) => {
-                    const StatusIcon =
-                      STATUS_ICONS[row.status] || Clock3;
+                    const StatusIcon = STATUS_ICONS[row.status] || Clock3;
+                    const isNew = newIds.has(row.id);
 
                     return (
                       <tr
                         key={row.id}
-                        className="group transition hover:bg-slate-50/70"
+                        className={`group transition hover:bg-slate-50/70 ${
+                          isNew ? "bg-brand-50/40" : ""
+                        }`}
                       >
                         <td className="px-5 py-4">
                           <div className="flex items-center gap-3">
@@ -304,10 +454,17 @@ export default function EnrollmentsAdminPage() {
                             </div>
 
                             <div className="min-w-0">
-                              <p className="truncate font-bold text-slate-800">
-                                {row.student?.full_name ||
-                                  "طالب غير معروف"}
-                              </p>
+                              <div className="flex items-center gap-2">
+                                <p className="truncate font-bold text-slate-800">
+                                  {row.student?.full_name || "طالب غير معروف"}
+                                </p>
+
+                                {isNew && (
+                                  <span className="shrink-0 rounded-full bg-brand-500 px-2 py-0.5 text-[10px] font-bold text-white">
+                                    جديد
+                                  </span>
+                                )}
+                              </div>
 
                               <p className="mt-0.5 truncate text-xs text-slate-400">
                                 {row.student?.email || "لا يوجد بريد"}
@@ -323,8 +480,7 @@ export default function EnrollmentsAdminPage() {
                             </div>
 
                             <span className="font-semibold text-slate-700">
-                              {row.course?.title ||
-                                "كورس غير معروف"}
+                              {row.course?.title || "كورس غير معروف"}
                             </span>
                           </div>
                         </td>
@@ -334,17 +490,12 @@ export default function EnrollmentsAdminPage() {
                         </td>
 
                         <td className="px-5 py-4">
-                          <Badge
-                            color={
-                              STATUS_COLORS[row.status] || "slate"
-                            }
-                          >
+                          <Badge color={STATUS_COLORS[row.status] || "slate"}>
                             <span className="flex items-center gap-1.5">
                               <StatusIcon className="h-3.5 w-3.5" />
 
-                              {ENROLLMENT_STATUS_LABELS[
-                                row.status
-                              ] || row.status}
+                              {ENROLLMENT_STATUS_LABELS[row.status] ||
+                                row.status}
                             </span>
                           </Badge>
                         </td>
@@ -359,8 +510,8 @@ export default function EnrollmentsAdminPage() {
           {/* Mobile */}
           <div className="grid gap-3 md:hidden">
             {filteredRows.map((row) => {
-              const StatusIcon =
-                STATUS_ICONS[row.status] || Clock3;
+              const StatusIcon = STATUS_ICONS[row.status] || Clock3;
+              const isNew = newIds.has(row.id);
 
               return (
                 <Card
@@ -371,32 +522,31 @@ export default function EnrollmentsAdminPage() {
 
                   <div className="flex items-start gap-3">
                     <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-brand-50 font-extrabold text-brand-600">
-                      {row.student?.full_name
-                        ?.charAt(0)
-                        ?.toUpperCase() || "؟"}
+                      {row.student?.full_name?.charAt(0)?.toUpperCase() || "؟"}
                     </div>
 
                     <div className="min-w-0 flex-1">
-                      <p className="truncate font-extrabold text-slate-800">
-                        {row.student?.full_name ||
-                          "طالب غير معروف"}
-                      </p>
+                      <div className="flex items-center gap-2">
+                        <p className="truncate font-extrabold text-slate-800">
+                          {row.student?.full_name || "طالب غير معروف"}
+                        </p>
+
+                        {isNew && (
+                          <span className="shrink-0 rounded-full bg-brand-500 px-2 py-0.5 text-[10px] font-bold text-white">
+                            جديد
+                          </span>
+                        )}
+                      </div>
 
                       <p className="mt-0.5 truncate text-xs text-slate-400">
                         {row.student?.email || "لا يوجد بريد"}
                       </p>
                     </div>
 
-                    <Badge
-                      color={
-                        STATUS_COLORS[row.status] || "slate"
-                      }
-                    >
+                    <Badge color={STATUS_COLORS[row.status] || "slate"}>
                       <span className="flex items-center gap-1">
                         <StatusIcon className="h-3.5 w-3.5" />
-                        {ENROLLMENT_STATUS_LABELS[
-                          row.status
-                        ] || row.status}
+                        {ENROLLMENT_STATUS_LABELS[row.status] || row.status}
                       </span>
                     </Badge>
                   </div>
@@ -459,13 +609,9 @@ function MiniStat({
         {icon}
       </div>
 
-      <p className="text-lg font-extrabold text-slate-900">
-        {value}
-      </p>
+      <p className="text-lg font-extrabold text-slate-900">{value}</p>
 
-      <p className="text-[11px] font-medium text-slate-400">
-        {label}
-      </p>
+      <p className="text-[11px] font-medium text-slate-400">{label}</p>
     </div>
   );
 }

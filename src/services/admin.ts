@@ -26,9 +26,27 @@ export async function fetchAllCoursesAdmin() {
     .select("*, teacher:profiles!courses_teacher_id_fkey(full_name)")
     .order("created_at", { ascending: false });
   if (error) throw error;
-  return data ?? [];
-}
 
+  const list = data ?? [];
+  if (list.length === 0) return list;
+
+  // عدّ دقيق لكل كورس من enrollments (بدون حد الـ 1000 صف)
+  const counts = await Promise.all(
+    list.map(async (course: any) => {
+      const { count } = await supabase
+        .from("enrollments")
+        .select("id", { count: "exact", head: true })
+        .eq("course_id", course.id)
+        .eq("status", "active");
+      return count ?? 0;
+    })
+  );
+
+  return list.map((course: any, i: number) => ({
+    ...course,
+    students_count: counts[i],
+  }));
+}
 export async function adminDeleteCourse(courseId: string) {
   // 1) احذف كل فيديوهات الكورس من VdoCipher أولاً.
   //    لو فشل الحذف هيرمي Error ولن يتم حذف الكورس (عشان ما يفضلش فيديوهات يتيمة).
@@ -230,4 +248,17 @@ export async function fetchTeacherPerformance(
     .map(([name, v]) => ({ name, ...v }))
     .sort((a, b) => b.revenue - a.revenue)
     .slice(0, limit);
+}
+
+
+export async function fetchTeacherSubscriberCounts(): Promise<
+  Record<string, number>
+> {
+  const courses = await fetchAllCoursesAdmin();
+
+  const counts: Record<string, number> = {};
+  for (const c of courses as any[]) {
+    counts[c.teacher_id] = (counts[c.teacher_id] ?? 0) + (c.students_count ?? 0);
+  }
+  return counts;
 }

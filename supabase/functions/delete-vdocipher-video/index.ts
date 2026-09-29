@@ -1,10 +1,7 @@
 // supabase/functions/delete-vdocipher-video/index.ts
-//
 // يحذف فيديو أو أكثر من VdoCipher.
-// - يتحقق من هوية المستخدم (JWT)
-// - يسمح فقط للأدمن أو المدرس
-// - لو الفيديو مربوط بدرس، لازم يكون المدرس صاحب الكورس (أو أدمن)
-// - يعتبر الفيديو المحذوف مسبقًا (404) نجاحًا (idempotent)
+// المسموح: الأدمن (أي فيديو) أو المدرس صاحب الكورس.
+// الفيديو المحذوف مسبقًا (404) يعتبر نجاحًا.
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
@@ -15,20 +12,14 @@ const corsHeaders = {
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
 
-// عدد الفيديوهات في الطلب الواحد لـ VdoCipher
 const BATCH_SIZE = 50;
-
-// عدّل أسماء الأدوار حسب مشروعك لو مختلفة
 const ADMIN_ROLES = ["admin"];
 const TEACHER_ROLES = ["teacher"];
 
 function json(data: unknown, status = 200): Response {
   return new Response(JSON.stringify(data), {
     status,
-    headers: {
-      ...corsHeaders,
-      "Content-Type": "application/json",
-    },
+    headers: { ...corsHeaders, "Content-Type": "application/json" },
   });
 }
 
@@ -40,41 +31,28 @@ Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { status: 204, headers: corsHeaders });
   }
-
   if (req.method !== "POST") {
     return json({ success: false, error: "Method not allowed" }, 405);
   }
 
   try {
-    // =========================
     // 1. Env
-    // =========================
     const apiSecret = Deno.env.get("VDOCIPHER_API_SECRET");
     const supabaseUrl = Deno.env.get("SUPABASE_URL");
     const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
 
     if (!apiSecret) {
-      console.error("VDOCIPHER_API_SECRET is missing");
       return json({ success: false, error: "Missing VDOCIPHER_API_SECRET" }, 500);
     }
-
     if (!supabaseUrl || !serviceKey) {
-      console.error("Supabase env is missing");
-      return json(
-        { success: false, error: "Server is not configured correctly" },
-        500,
-      );
+      return json({ success: false, error: "Server is not configured correctly" }, 500);
     }
 
-    // =========================
     // 2. Authenticate
-    // =========================
-    const authHeader = req.headers.get("Authorization") ?? "";
-    const token = authHeader.replace(/^Bearer\s+/i, "").trim();
-
-    if (!token) {
-      return json({ success: false, error: "Unauthorized" }, 401);
-    }
+    const token = (req.headers.get("Authorization") ?? "")
+      .replace(/^Bearer\s+/i, "")
+      .trim();
+    if (!token) return json({ success: false, error: "Unauthorized" }, 401);
 
     const admin = createClient(supabaseUrl, serviceKey, {
       auth: { persistSession: false, autoRefreshToken: false },
@@ -84,10 +62,7 @@ Deno.serve(async (req) => {
       data: { user },
       error: userError,
     } = await admin.auth.getUser(token);
-
-    if (userError || !user) {
-      return json({ success: false, error: "Unauthorized" }, 401);
-    }
+    if (userError || !user) return json({ success: false, error: "Unauthorized" }, 401);
 
     const { data: profile } = await admin
       .from("profiles")
@@ -103,9 +78,7 @@ Deno.serve(async (req) => {
       return json({ success: false, error: "Forbidden" }, 403);
     }
 
-    // =========================
-    // 3. Body (videoId أو videoIds)
-    // =========================
+    // 3. Body
     let body: any = null;
     try {
       body = await req.json();
@@ -122,80 +95,48 @@ Deno.serve(async (req) => {
     const videoIds = Array.from(
       new Set(
         rawIds
-          .filter(
-            (id): id is string =>
-              typeof id === "string" && id.trim().length > 0,
-          )
+          .filter((id): id is string => typeof id === "string" && id.trim().length > 0)
           .map((id) => id.trim()),
       ),
     );
 
     if (videoIds.length === 0) {
-      return json(
-        { success: false, error: "videoId or videoIds is required" },
-        400,
-      );
+      return json({ success: false, error: "videoId or videoIds is required" }, 400);
     }
 
-    // =========================
-    // 4. Ownership check (للمدرس فقط)
-    // الفيديو المربوط بدرس لازم يكون من كورس المدرس.
-    // الفيديو غير المربوط (يتيم بعد فشل رفع) مسموح بحذفه.
-    // =========================
+    // 4. Ownership check (للمدرس فقط - الأدمن يتجاوز)
     if (!isAdmin) {
       const { data: linked, error: linkedError } = await admin
         .from("lessons")
-        .select(
-          "id, vdocipher_video_id, course_sections!inner(courses!inner(teacher_id))",
-        )
+        .select("id, vdocipher_video_id, course_sections!inner(courses!inner(teacher_id))")
         .in("vdocipher_video_id", videoIds);
 
       if (linkedError) {
         console.error("Ownership lookup error:", linkedError);
-        return json(
-          { success: false, error: "Failed to verify ownership" },
-          500,
-        );
+        return json({ success: false, error: "Failed to verify ownership" }, 500);
       }
 
       for (const row of (linked ?? []) as any[]) {
         const section = first<any>(row.course_sections);
         const course = first<any>(section?.courses);
-
         if (course?.teacher_id !== user.id) {
           return json(
-            {
-              success: false,
-              error: "Forbidden: video belongs to another teacher",
-            },
+            { success: false, error: "Forbidden: video belongs to another teacher" },
             403,
           );
         }
       }
     }
 
-    // =========================
     // 5. Delete from VdoCipher
-    // =========================
     const deleted: string[] = [];
-    const failed: {
-      videoIds: string[];
-      vdoStatus: number;
-      vdoResponse: string | null;
-    }[] = [];
+    const failed: { videoIds: string[]; vdoStatus: number; vdoResponse: string | null }[] = [];
 
     for (let i = 0; i < videoIds.length; i += BATCH_SIZE) {
       const batch = videoIds.slice(i, i + BATCH_SIZE);
-
-      /*
-       * VdoCipher Delete API
-       * DELETE /api/videos?videos=ID1,ID2,ID3
-       */
       const deleteUrl =
         "https://dev.vdocipher.com/api/videos?videos=" +
         encodeURIComponent(batch.join(","));
-
-      console.log("Deleting VdoCipher videos:", batch);
 
       const vdoRes = await fetch(deleteUrl, {
         method: "DELETE",
@@ -204,13 +145,9 @@ Deno.serve(async (req) => {
           Accept: "application/json",
         },
       });
-
       const responseText = await vdoRes.text();
+      console.log("VdoCipher delete:", vdoRes.status, responseText);
 
-      console.log("VdoCipher delete status:", vdoRes.status);
-      console.log("VdoCipher delete response:", responseText);
-
-      // 404 = الفيديو محذوف بالفعل، نعتبره نجاح
       if (vdoRes.ok || vdoRes.status === 404) {
         deleted.push(...batch);
       } else {
@@ -224,12 +161,7 @@ Deno.serve(async (req) => {
 
     if (failed.length > 0) {
       return json(
-        {
-          success: false,
-          error: "VdoCipher refused to delete some videos.",
-          deleted,
-          failed,
-        },
+        { success: false, error: "VdoCipher refused to delete some videos.", deleted, failed },
         502,
       );
     }
@@ -242,12 +174,8 @@ Deno.serve(async (req) => {
     });
   } catch (error) {
     console.error("DELETE VDOCIPHER VIDEO ERROR:", error);
-
     return json(
-      {
-        success: false,
-        error: error instanceof Error ? error.message : String(error),
-      },
+      { success: false, error: error instanceof Error ? error.message : String(error) },
       500,
     );
   }
