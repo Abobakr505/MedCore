@@ -358,9 +358,17 @@ export async function createLesson(params: {
   return data as Lesson;
 }
 
-export async function deleteLesson(
-  lessonId: string
-) {
+export async function deleteLesson(lessonId: string) {
+  const { data: lesson } = await supabase
+    .from("lessons")
+    .select("vdocipher_video_id")
+    .eq("id", lessonId)
+    .maybeSingle();
+
+  if (lesson?.vdocipher_video_id) {
+    await deleteVdoCipherVideos([lesson.vdocipher_video_id]);
+  }
+
   const { error } = await supabase
     .from("lessons")
     .delete()
@@ -1035,7 +1043,6 @@ export async function deleteLessonVideoChunks(
     })
     .eq("id", lessonId);
 }
-
 // =====================================================
 // VDOCIPHER UPLOAD
 // =====================================================
@@ -1044,440 +1051,450 @@ export interface VdoCipherCreateResponse {
   success: boolean;
   videoId: string;
   uploadUrl: string;
-  uploadParameters: Record<
-    string,
-    string
-  >;
+  uploadParameters: Record<string, string>;
+}
+
+export type VideoUploadStatus =
+  | "preparing"
+  | "uploading"
+  | "saving"
+  | "done"
+  | "error";
+
+export interface VideoUploadTask {
+  lessonId: string;
+  fileName: string;
+  progress: number;
+  status: VideoUploadStatus;
+  attempt: number;
+  maxAttempts: number;
+  error: string | null;
+}
+
+const MAX_UPLOAD_ATTEMPTS = 3;
+
+const ALLOWED_VIDEO_EXTENSIONS = [
+  "mp4",
+  "webm",
+  "mov",
+  "m4v",
+  "mkv",
+  "avi",
+];
+
+/* ---------- Global upload store (يعيش خارج React) ---------- */
+/* لو الصفحة اتعملها unmount أثناء الرفع، الحالة والتقدم يفضلوا موجودين */
+
+const uploadTasks = new Map<string, VideoUploadTask>();
+const inflightUploads = new Map<string, Promise<void>>();
+const uploadListeners = new Set<() => void>();
+
+let uploadsSnapshot: Record<string, VideoUploadTask> = {};
+let unloadGuardOn = false;
+
+function beforeUnloadHandler(event: BeforeUnloadEvent) {
+  event.preventDefault();
+  event.returnValue = "";
+}
+
+function syncUnloadGuard() {
+  if (typeof window === "undefined") return;
+
+  const active = inflightUploads.size > 0;
+
+  if (active && !unloadGuardOn) {
+    window.addEventListener("beforeunload", beforeUnloadHandler);
+    unloadGuardOn = true;
+  } else if (!active && unloadGuardOn) {
+    window.removeEventListener("beforeunload", beforeUnloadHandler);
+    unloadGuardOn = false;
+  }
+}
+
+function emitUploads() {
+  uploadsSnapshot = Object.fromEntries(uploadTasks);
+  uploadListeners.forEach((listener) => listener());
+  syncUnloadGuard();
+}
+
+function patchTask(lessonId: string, patch: Partial<VideoUploadTask>) {
+  const current = uploadTasks.get(lessonId);
+  if (!current) return;
+
+  uploadTasks.set(lessonId, { ...current, ...patch });
+  emitUploads();
+}
+
+export function subscribeVideoUploads(listener: () => void) {
+  uploadListeners.add(listener);
+  return () => {
+    uploadListeners.delete(listener);
+  };
+}
+
+export function getVideoUploadsSnapshot() {
+  return uploadsSnapshot;
+}
+
+export function isVideoUploading(lessonId: string) {
+  return inflightUploads.has(lessonId);
+}
+
+/* ---------- Helpers ---------- */
+
+function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function validateVideoFile(lessonId: string, file: File) {
+  if (!lessonId) {
+    throw new Error("Lesson ID غير موجود");
+  }
+
+  if (!(file instanceof File) || !file.size) {
+    throw new Error("ملف الفيديو غير صالح أو فارغ");
+  }
+
+  const extension = file.name.split(".").pop()?.toLowerCase();
+
+  if (!extension || !ALLOWED_VIDEO_EXTENSIONS.includes(extension)) {
+    throw new Error(
+      "صيغة الفيديو غير مدعومة. استخدم MP4 أو WebM أو MOV أو MKV"
+    );
+  }
+}
+
+/** قراءة مدة الفيديو. لا ترمي خطأ أبدًا: لو فشلت ترجع null */
+function readVideoDuration(file: File): Promise<number | null> {
+  return new Promise((resolve) => {
+    const video = document.createElement("video");
+    const objectUrl = URL.createObjectURL(file);
+
+    let finished = false;
+
+    const finish = (value: number | null) => {
+      if (finished) return;
+      finished = true;
+      clearTimeout(timer);
+      video.removeAttribute("src");
+      video.load();
+      URL.revokeObjectURL(objectUrl);
+      resolve(value);
+    };
+
+    const timer = setTimeout(() => finish(null), 15000);
+
+    video.preload = "metadata";
+
+    video.onloadedmetadata = () => {
+      const duration = video.duration;
+      finish(
+        Number.isFinite(duration) && duration > 0
+          ? Math.round(duration)
+          : null
+      );
+    };
+
+    video.onerror = () => finish(null);
+
+    video.src = objectUrl;
+  });
+}
+
+/** استخراج رسالة الخطأ الحقيقية من Edge Function */
+async function extractFunctionError(error: any): Promise<string> {
+  try {
+    const response = error?.context;
+
+    if (response && typeof response.json === "function") {
+      const body = await response.json();
+
+      const parts = [
+        body?.error,
+        body?.details?.message,
+        typeof body?.details === "string" ? body.details : null,
+      ].filter(Boolean);
+
+      if (parts.length) return parts.join(" - ");
+    }
+  } catch {
+    // ignore
+  }
+
+  return error?.message || "خطأ غير معروف";
+}
+
+async function createVdoCipherVideo(
+  lessonId: string,
+  title: string
+): Promise<VdoCipherCreateResponse> {
+  const { data, error } = await supabase.functions.invoke(
+    "create-vdocipher-video",
+    { body: { lessonId, title } }
+  );
+
+  if (error) {
+    throw new Error(
+      `فشل إنشاء الفيديو على VdoCipher: ${await extractFunctionError(error)}`
+    );
+  }
+
+  if (!data?.videoId) {
+    throw new Error("VdoCipher لم يرجع videoId");
+  }
+
+  if (!data.uploadUrl) {
+    throw new Error("VdoCipher لم يرجع uploadUrl");
+  }
+
+  if (!data.uploadParameters || typeof data.uploadParameters !== "object") {
+    throw new Error("VdoCipher لم يرجع بيانات الرفع المطلوبة");
+  }
+
+  return data as VdoCipherCreateResponse;
+}
+
+class UploadHttpError extends Error {
+  retryable: boolean;
+
+  constructor(message: string, retryable: boolean) {
+    super(message);
+    this.retryable = retryable;
+  }
+}
+
+function postFormToStorage(
+  uploadUrl: string,
+  uploadParameters: Record<string, string>,
+  file: File,
+  onProgress: (pct: number) => void
+): Promise<void> {
+  return new Promise<void>((resolve, reject) => {
+    // FormData لازم تتبنى من جديد في كل محاولة
+    const formData = new FormData();
+
+    Object.entries(uploadParameters).forEach(([key, value]) => {
+      formData.append(key, String(value));
+    });
+
+    formData.append("success_action_status", "201");
+    formData.append("success_action_redirect", "");
+
+    // الملف لازم يكون آخر حقل
+    formData.append("file", file);
+
+    const xhr = new XMLHttpRequest();
+
+    xhr.open("POST", uploadUrl, true);
+
+    // لا تضبط Content-Type يدويًا: المتصفح بيضيف boundary
+
+    xhr.upload.onprogress = (event) => {
+      if (event.lengthComputable && event.total > 0) {
+        onProgress(Math.round((event.loaded / event.total) * 100));
+      }
+    };
+
+    xhr.onload = () => {
+      if (xhr.status >= 200 && xhr.status < 300) {
+        resolve();
+        return;
+      }
+
+      // 5xx قابلة لإعادة المحاولة، 4xx (سياسة منتهية/غلط) لا
+      reject(
+        new UploadHttpError(
+          `فشل رفع الفيديو إلى VdoCipher (HTTP ${xhr.status}): ${
+            xhr.responseText || "Unknown error"
+          }`,
+          xhr.status >= 500
+        )
+      );
+    };
+
+    xhr.onerror = () => {
+      reject(
+        new UploadHttpError("فشل الاتصال بـ VdoCipher أثناء رفع الفيديو", true)
+      );
+    };
+
+    xhr.ontimeout = () => {
+      reject(new UploadHttpError("انتهت مهلة رفع الفيديو", true));
+    };
+
+    xhr.onabort = () => {
+      reject(new UploadHttpError("تم إلغاء رفع الفيديو", false));
+    };
+
+    xhr.send(formData);
+  });
+}
+
+/* ---------- Main upload ---------- */
+
+async function runVideoUpload(
+  lessonId: string,
+  file: File,
+  onProgress?: (pct: number) => void
+) {
+  // نبدأ قراءة المدة بالتوازي ولا ننتظرها قبل الرفع
+  const durationPromise = readVideoDuration(file);
+
+  // الفيديو القديم (لو موجود) عشان نمسحه بعد نجاح الاستبدال
+  const { data: current } = await supabase
+    .from("lessons")
+    .select("vdocipher_video_id")
+    .eq("id", lessonId)
+    .maybeSingle();
+
+  const oldVideoId: string | null = current?.vdocipher_video_id ?? null;
+
+  const created = await createVdoCipherVideo(lessonId, file.name);
+
+  try {
+    patchTask(lessonId, { status: "uploading", progress: 0 });
+
+    for (let attempt = 1; attempt <= MAX_UPLOAD_ATTEMPTS; attempt++) {
+      patchTask(lessonId, { attempt, progress: 0 });
+
+      try {
+        await postFormToStorage(
+          created.uploadUrl,
+          created.uploadParameters,
+          file,
+          (pct) => {
+            // لا نعرض 100% إلا بعد الحفظ الفعلي
+            const shown = Math.min(99, pct);
+            patchTask(lessonId, { progress: shown });
+            onProgress?.(shown);
+          }
+        );
+
+        break;
+      } catch (err) {
+        const retryable = err instanceof UploadHttpError && err.retryable;
+
+        console.warn(
+          `VdoCipher upload attempt ${attempt}/${MAX_UPLOAD_ATTEMPTS} failed:`,
+          err
+        );
+
+        if (!retryable || attempt === MAX_UPLOAD_ATTEMPTS) {
+          throw err;
+        }
+
+        await sleep(2000 * attempt);
+      }
+    }
+
+    patchTask(lessonId, { status: "saving", progress: 99 });
+
+    const durationSeconds = await durationPromise;
+
+    const payload: Record<string, unknown> = {
+      vdocipher_video_id: created.videoId,
+    };
+
+    if (durationSeconds) {
+      payload.duration_seconds = durationSeconds;
+    }
+
+    const { error: updateError } = await supabase
+      .from("lessons")
+      .update(payload)
+      .eq("id", lessonId);
+
+    if (updateError) {
+      throw new Error(
+        `تم رفع الفيديو إلى VdoCipher لكن تعذر ربطه بالدرس: ${updateError.message}`
+      );
+    }
+  } catch (err) {
+    // ما نسيبش فيديو يتيم على VdoCipher
+    await deleteVdoCipherVideos([created.videoId]).catch((cleanupError) =>
+      console.warn("Failed to cleanup orphan video:", cleanupError)
+    );
+
+    throw err;
+  }
+
+  // نجح الاستبدال: امسح الفيديو القديم (best effort)
+  if (oldVideoId && oldVideoId !== created.videoId) {
+    deleteVdoCipherVideos([oldVideoId]).catch((err) =>
+      console.warn("Failed to delete previous video:", err)
+    );
+  }
+
+  onProgress?.(100);
 }
 
 /**
- * رفع فيديو إلى VdoCipher
- *
- * الخطوات:
- *
- * 1. إنشاء Video على VdoCipher
- *    عن طريق Edge Function.
- *
- * 2. الحصول على:
- *    videoId
- *    uploadUrl
- *    uploadParameters
- *
- * 3. رفع الملف مباشرة من المتصفح
- *    إلى VdoCipher S3.
- *
- * 4. حفظ videoId داخل lesson.
+ * رفع فيديو إلى VdoCipher.
+ * - يمنع رفعين متزامنين لنفس الدرس
+ * - يعيد المحاولة تلقائيًا عند أخطاء الشبكة
+ * - الحالة محفوظة في store عام (subscribeVideoUploads)
  */
-export async function uploadLessonVideoVdoCipher(
+export function uploadLessonVideoVdoCipher(
   lessonId: string,
   file: File,
-  onProgress?: (
-    pct: number
-  ) => void
+  onProgress?: (pct: number) => void
 ): Promise<void> {
-  // ==========================================
-  // Validation
-  // ==========================================
-
-  if (!lessonId) {
-    throw new Error(
-      "Lesson ID غير موجود"
-    );
+  if (inflightUploads.has(lessonId)) {
+    return Promise.reject(new Error("يوجد رفع جارٍ بالفعل لهذا الدرس"));
   }
 
-  if (
-    !(file instanceof File) ||
-    !file.size
-  ) {
-    throw new Error(
-      "ملف الفيديو غير صالح أو فارغ"
-    );
+  try {
+    validateVideoFile(lessonId, file);
+  } catch (err) {
+    return Promise.reject(err);
   }
 
-  const allowedExtensions = [
-    "mp4",
-    "webm",
-    "mov",
-    "m4v",
-  ];
+  uploadTasks.set(lessonId, {
+    lessonId,
+    fileName: file.name,
+    progress: 0,
+    status: "preparing",
+    attempt: 1,
+    maxAttempts: MAX_UPLOAD_ATTEMPTS,
+    error: null,
+  });
 
-  const extension = file.name
-    .split(".")
-    .pop()
-    ?.toLowerCase();
+  const promise = runVideoUpload(lessonId, file, onProgress)
+    .then(() => {
+      patchTask(lessonId, { status: "done", progress: 100, error: null });
 
-  if (
-    !extension ||
-    !allowedExtensions.includes(
-      extension
-    )
-  ) {
-    throw new Error(
-      "صيغة الفيديو غير مدعومة. استخدم MP4 أو WebM أو MOV"
-    );
-  }
-
-  console.log(
-    "Creating VdoCipher video...",
-    {
-      lessonId,
-      title: file.name,
-      size: file.size,
-      type: file.type,
-    }
-  );
-
-  onProgress?.(0);
-
-  // ==========================================
-  // 1. Create video on VdoCipher
-  // ==========================================
-
-  const {
-    data: createData,
-    error: createError,
-  } =
-    await supabase.functions.invoke(
-      "create-vdocipher-video",
-      {
-        body: {
-          lessonId,
-          title: file.name,
-        },
-      }
-    );
-
-  console.log(
-    "VdoCipher create response:",
-    createData
-  );
-
-  if (createError) {
-    console.error(
-      "VdoCipher create error:",
-      createError
-    );
-
-    throw new Error(
-      `فشل إنشاء الفيديو على VdoCipher: ${
-        createError.message ||
-        "خطأ غير معروف"
-      }`
-    );
-  }
-
-  if (!createData) {
-    throw new Error(
-      "لم ترجع Edge Function أي بيانات"
-    );
-  }
-
-  // ==========================================
-  // 2. Validate videoId
-  // ==========================================
-
-  if (!createData.videoId) {
-    console.error(
-      "Missing VdoCipher videoId:",
-      createData
-    );
-
-    throw new Error(
-      `VdoCipher لم يرجع videoId: ${JSON.stringify(
-        createData
-      )}`
-    );
-  }
-
-  // ==========================================
-  // 3. Validate uploadUrl
-  // ==========================================
-
-  if (!createData.uploadUrl) {
-    console.error(
-      "Missing VdoCipher uploadUrl:",
-      createData
-    );
-
-    throw new Error(
-      `VdoCipher لم يرجع uploadUrl: ${JSON.stringify(
-        createData
-      )}`
-    );
-  }
-
-  // ==========================================
-  // 4. Validate uploadParameters
-  // ==========================================
-
-  if (
-    !createData.uploadParameters ||
-    typeof createData.uploadParameters !==
-      "object"
-  ) {
-    console.error(
-      "Missing VdoCipher uploadParameters:",
-      createData
-    );
-
-    throw new Error(
-      "VdoCipher لم يرجع بيانات الرفع المطلوبة"
-    );
-  }
-
-  const {
-    videoId,
-    uploadUrl,
-    uploadParameters,
-  } =
-    createData as VdoCipherCreateResponse;
-
-  console.log(
-    "VdoCipher video created:",
-    videoId
-  );
-
-  console.log(
-    "VdoCipher upload URL:",
-    uploadUrl
-  );
-
-  // ==========================================
-  // 5. Build FormData
-  // ==========================================
-
-  const formData =
-    new FormData();
-
-  // ------------------------------------------
-  // VdoCipher / AWS credentials
-  // ------------------------------------------
-
-  Object.entries(
-    uploadParameters
-  ).forEach(
-    ([key, value]) => {
-      formData.append(
-        key,
-        String(value)
-      );
-    }
-  );
-
-  // ------------------------------------------
-  // REQUIRED BY VDOCIPHER UPLOAD POLICY
-  // ------------------------------------------
-
-  formData.append(
-    "success_action_status",
-    "201"
-  );
-
-  formData.append(
-    "success_action_redirect",
-    ""
-  );
-
-  // ------------------------------------------
-  // IMPORTANT:
-  // file MUST be appended LAST
-  // ------------------------------------------
-
-  formData.append(
-    "file",
-    file
-  );
-
-  // ==========================================
-  // 6. Upload directly to VdoCipher
-  // ==========================================
-
-  console.log(
-    "Starting direct upload to VdoCipher..."
-  );
-
-  await new Promise<void>(
-    (resolve, reject) => {
-      const xhr =
-        new XMLHttpRequest();
-
-      xhr.open(
-        "POST",
-        uploadUrl,
-        true
-      );
-
-      // ----------------------------------------
-      // IMPORTANT:
-      // Do NOT manually set Content-Type.
-      //
-      // Browser automatically generates:
-      //
-      // multipart/form-data;
-      // boundary=...
-      // ----------------------------------------
-
-      // ----------------------------------------
-      // Upload progress
-      // ----------------------------------------
-
-      xhr.upload.onprogress =
-        (event) => {
-          if (
-            event.lengthComputable
-          ) {
-            const percent =
-              Math.round(
-                (event.loaded /
-                  event.total) *
-                  100
-              );
-
-            onProgress?.(
-              percent
-            );
-
-            console.log(
-              `VdoCipher upload: ${percent}%`
-            );
-          }
-        };
-
-      // ----------------------------------------
-      // Response
-      // ----------------------------------------
-
-      xhr.onload = () => {
-        console.log(
-          "VdoCipher upload finished",
-          {
-            status:
-              xhr.status,
-            response:
-              xhr.responseText,
-          }
-        );
-
-        if (
-          xhr.status >= 200 &&
-          xhr.status < 300
-        ) {
-          onProgress?.(100);
-
-          resolve();
-          return;
-        }
-
-        reject(
-          new Error(
-            `فشل رفع الفيديو إلى VdoCipher (HTTP ${
-              xhr.status
-            }): ${
-              xhr.responseText ||
-              "Unknown error"
-            }`
-          )
-        );
-      };
-
-      // ----------------------------------------
-      // Network error
-      // ----------------------------------------
-
-      xhr.onerror = () => {
-        reject(
-          new Error(
-            "فشل الاتصال بـ VdoCipher أثناء رفع الفيديو"
-          )
-        );
-      };
-
-      // ----------------------------------------
-      // Abort
-      // ----------------------------------------
-
-      xhr.onabort = () => {
-        reject(
-          new Error(
-            "تم إلغاء رفع الفيديو"
-          )
-        );
-      };
-
-      // ----------------------------------------
-      // Timeout
-      // ----------------------------------------
-
-      xhr.ontimeout = () => {
-        reject(
-          new Error(
-            "انتهت مهلة رفع الفيديو"
-          )
-        );
-      };
-
-      // ----------------------------------------
-      // Send
-      // ----------------------------------------
-
-      xhr.send(formData);
-    }
-  );
-
-  // ==========================================
-  // 7. Save VdoCipher video ID in lesson
-  // ==========================================
-
-  console.log(
-    "Saving VdoCipher video ID to lesson..."
-  );
-
-  const {
-    error: updateError,
-  } = await supabase
-    .from("lessons")
-    .update({
-      vdocipher_video_id:
-        videoId,
+      setTimeout(() => {
+        uploadTasks.delete(lessonId);
+        emitUploads();
+      }, 1500);
     })
-    .eq(
-      "id",
-      lessonId
-    );
+    .catch((err) => {
+      patchTask(lessonId, {
+        status: "error",
+        progress: 0,
+        error:
+          err instanceof Error ? err.message : "حدث خطأ أثناء رفع الفيديو",
+      });
 
-  if (updateError) {
-    console.error(
-      "Failed to save VdoCipher video ID:",
-      updateError
-    );
+      setTimeout(() => {
+        const task = uploadTasks.get(lessonId);
+        if (task?.status === "error") {
+          uploadTasks.delete(lessonId);
+          emitUploads();
+        }
+      }, 15000);
 
-    throw new Error(
-      `تم رفع الفيديو إلى VdoCipher لكن تعذر ربطه بالدرس: ${updateError.message}`
-    );
-  }
+      throw err;
+    })
+    .finally(() => {
+      inflightUploads.delete(lessonId);
+      emitUploads();
+    });
 
-  // ==========================================
-  // Done
-  // ==========================================
+  inflightUploads.set(lessonId, promise);
+  emitUploads();
 
-  onProgress?.(100);
-
-  console.log(
-    "================================="
-  );
-
-  console.log(
-    "VdoCipher video uploaded successfully"
-  );
-
-  console.log(
-    "videoId:",
-    videoId
-  );
-
-  console.log(
-    "================================="
-  );
+  return promise;
 }
 
 // =====================================================
@@ -1488,70 +1505,34 @@ export async function deleteLessonVideoVdoCipher(
   lessonId: string
 ): Promise<void> {
   if (!lessonId) {
-    throw new Error(
-      "Lesson ID غير موجود"
-    );
+    throw new Error("Lesson ID غير موجود");
   }
 
-  const {
-    data: lesson,
-    error: fetchError,
-  } =
-    await supabase
-      .from("lessons")
-      .select(
-        "vdocipher_video_id"
-      )
-      .eq(
-        "id",
-        lessonId
-      )
-      .single();
-
-  if (fetchError) {
-    throw fetchError;
+  if (inflightUploads.has(lessonId)) {
+    throw new Error("لا يمكن حذف الفيديو أثناء رفعه");
   }
 
-  const videoId =
-    lesson?.vdocipher_video_id;
+  const { data: lesson, error: fetchError } = await supabase
+    .from("lessons")
+    .select("vdocipher_video_id")
+    .eq("id", lessonId)
+    .single();
+
+  if (fetchError) throw fetchError;
+
+  const videoId = lesson?.vdocipher_video_id;
 
   if (videoId) {
-    const {
-      error: deleteError,
-    } =
-      await supabase.functions.invoke(
-        "delete-vdocipher-video",
-        {
-          body: {
-            videoId,
-          },
-        }
-      );
-
-    if (deleteError) {
-      throw deleteError;
-    }
+    await deleteVdoCipherVideos([videoId]);
   }
 
-  const {
-    error: updateError,
-  } =
-    await supabase
-      .from("lessons")
-      .update({
-        vdocipher_video_id:
-          null,
-      })
-      .eq(
-        "id",
-        lessonId
-      );
+  const { error: updateError } = await supabase
+    .from("lessons")
+    .update({ vdocipher_video_id: null, duration_seconds: 0 })
+    .eq("id", lessonId);
 
-  if (updateError) {
-    throw updateError;
-  }
+  if (updateError) throw updateError;
 }
-
 // =====================================================
 // BACKWARD COMPATIBILITY
 // =====================================================

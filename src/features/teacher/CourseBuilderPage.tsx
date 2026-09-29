@@ -4,6 +4,7 @@ import {
   useMemo,
   useRef,
   useState,
+  useSyncExternalStore,
 } from "react";
 
 import { Link, useParams } from "react-router-dom";
@@ -16,7 +17,6 @@ import {
   ChevronDown,
   ChevronUp,
   ClipboardList,
-  Download,
   Eye,
   File,
   FileArchive,
@@ -27,7 +27,6 @@ import {
   FileVideo,
   FolderOpen,
   Loader2,
-  MoreVertical,
   Pencil,
   PlayCircle,
   Plus,
@@ -54,6 +53,9 @@ import {
   // (via alias) حتى لا نضطر لتعديل باقي هذا الملف بالكامل.
   uploadLessonVideoVdoCipher as uploadLessonVideoBunny,
   deleteLessonVideoVdoCipher as deleteLessonVideoBunny,
+  subscribeVideoUploads,
+  getVideoUploadsSnapshot,
+  isVideoUploading,
 } from "@/services/teacherCourses";
 
 import type {
@@ -140,10 +142,7 @@ function getFileIcon(mimeType: string | null, fileName: string) {
   const mime = mimeType?.toLowerCase() ?? "";
   const extension = fileName.split(".").pop()?.toLowerCase() ?? "";
 
-  if (
-    mime.includes("pdf") ||
-    extension === "pdf"
-  ) {
+  if (mime.includes("pdf") || extension === "pdf") {
     return FileText;
   }
 
@@ -180,12 +179,8 @@ function getFileIcon(mimeType: string | null, fileName: string) {
   return File;
 }
 
-function getFileTypeLabel(
-  mimeType: string | null,
-  fileName: string
-) {
-  const extension =
-    fileName.split(".").pop()?.toUpperCase() || "FILE";
+function getFileTypeLabel(mimeType: string | null, fileName: string) {
+  const extension = fileName.split(".").pop()?.toUpperCase() || "FILE";
 
   if (mimeType?.includes("pdf")) return "PDF";
   if (mimeType?.includes("word")) return "Word";
@@ -208,10 +203,7 @@ function LessonFilesManager({
 }: {
   lesson: LessonWithFiles;
   files: LessonFile[];
-  onFilesChange: (
-    lessonId: string,
-    files: LessonFile[]
-  ) => void;
+  onFilesChange: (lessonId: string, files: LessonFile[]) => void;
 }) {
   const inputRef = useRef<HTMLInputElement | null>(null);
   const { showToast } = useToast();
@@ -219,16 +211,13 @@ function LessonFilesManager({
   const [open, setOpen] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
-  const [uploadingName, setUploadingName] = useState<string | null>(
-    null
-  );
+  const [uploadingName, setUploadingName] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
 
   const [confirmState, setConfirmState] =
     useState<ConfirmState>(CLOSED_CONFIRM);
 
-  const closeConfirm = () =>
-    setConfirmState(CLOSED_CONFIRM);
+  const closeConfirm = () => setConfirmState(CLOSED_CONFIRM);
 
   const uploadFile = async (file: globalThis.File) => {
     if (!file) return;
@@ -277,28 +266,21 @@ function LessonFilesManager({
         .single();
 
       if (insertError) {
-        await supabase.storage
-          .from(FILE_BUCKET)
-          .remove([path]);
+        await supabase.storage.from(FILE_BUCKET).remove([path]);
 
         throw insertError;
       }
 
       setUploadProgress(100);
 
-      onFilesChange(lesson.id, [
-        ...files,
-        data as LessonFile,
-      ]);
+      onFilesChange(lesson.id, [...files, data as LessonFile]);
 
       showToast("تم رفع الملف بنجاح", "success");
     } catch (err) {
       console.error("Lesson file upload error:", err);
 
       showToast(
-        err instanceof Error
-          ? err.message
-          : "حدث خطأ أثناء رفع الملف",
+        err instanceof Error ? err.message : "حدث خطأ أثناء رفع الملف",
         "error"
       );
     } finally {
@@ -310,12 +292,9 @@ function LessonFilesManager({
     }
   };
 
-  const handleFileChange = async (
-    event: ChangeEvent<HTMLInputElement>
-  ) => {
-    const selectedFiles = Array.from(
-      event.target.files ?? []
-    );
+  const handleFileChange = async (event: ChangeEvent<HTMLInputElement>) => {
+    const input = event.target;
+    const selectedFiles = Array.from(input.files ?? []);
 
     if (!selectedFiles.length) return;
 
@@ -323,7 +302,7 @@ function LessonFilesManager({
       await uploadFile(file);
     }
 
-    event.target.value = "";
+    input.value = "";
   };
 
   const deleteFile = (file: LessonFile) => {
@@ -336,16 +315,12 @@ function LessonFilesManager({
         setDeletingId(file.id);
 
         try {
-          const { error: storageError } =
-            await supabase.storage
-              .from(FILE_BUCKET)
-              .remove([file.file_path]);
+          const { error: storageError } = await supabase.storage
+            .from(FILE_BUCKET)
+            .remove([file.file_path]);
 
           if (storageError) {
-            console.warn(
-              "Storage delete warning:",
-              storageError
-            );
+            console.warn("Storage delete warning:", storageError);
           }
 
           const { error: dbError } = await supabase
@@ -367,9 +342,7 @@ function LessonFilesManager({
           console.error("Delete lesson file error:", err);
 
           showToast(
-            err instanceof Error
-              ? err.message
-              : "حدث خطأ أثناء حذف الملف",
+            err instanceof Error ? err.message : "حدث خطأ أثناء حذف الملف",
             "error"
           );
         } finally {
@@ -393,14 +366,10 @@ function LessonFilesManager({
           </div>
 
           <div className="min-w-0">
-            <p className="font-semibold text-slate-800">
-              ملفات الدرس
-            </p>
+            <p className="font-semibold text-slate-800">ملفات الدرس</p>
 
             <p className="text-xs text-slate-500">
-              {files.length === 0
-                ? "لا توجد ملفات"
-                : `${files.length} ملف`}
+              {files.length === 0 ? "لا توجد ملفات" : `${files.length} ملف`}
             </p>
           </div>
         </div>
@@ -452,9 +421,7 @@ function LessonFilesManager({
           {uploading && (
             <div className="mb-4 rounded-xl border border-blue-100 bg-blue-50 p-4">
               <div className="mb-2 flex items-center justify-between gap-3 text-xs">
-                <span className="truncate text-blue-800">
-                  {uploadingName}
-                </span>
+                <span className="truncate text-blue-800">{uploadingName}</span>
 
                 <span className="font-bold text-blue-700">
                   {uploadProgress}%
@@ -464,9 +431,7 @@ function LessonFilesManager({
               <div className="h-2 overflow-hidden rounded-full bg-blue-100">
                 <div
                   className="h-full rounded-full bg-blue-600 transition-all duration-300"
-                  style={{
-                    width: `${uploadProgress}%`,
-                  }}
+                  style={{ width: `${uploadProgress}%` }}
                 />
               </div>
             </div>
@@ -487,10 +452,7 @@ function LessonFilesManager({
           ) : (
             <div className="space-y-2">
               {files.map((file) => {
-                const Icon = getFileIcon(
-                  file.mime_type,
-                  file.file_name
-                );
+                const Icon = getFileIcon(file.mime_type, file.file_name);
 
                 return (
                   <div
@@ -508,17 +470,12 @@ function LessonFilesManager({
 
                       <div className="mt-1 flex flex-wrap items-center gap-2 text-[11px] text-slate-400">
                         <span>
-                          {getFileTypeLabel(
-                            file.mime_type,
-                            file.file_name
-                          )}
+                          {getFileTypeLabel(file.mime_type, file.file_name)}
                         </span>
 
                         <span>•</span>
 
-                        <span>
-                          {formatFileSize(file.file_size)}
-                        </span>
+                        <span>{formatFileSize(file.file_size)}</span>
                       </div>
                     </div>
 
@@ -575,10 +532,7 @@ function LessonCard({
   lesson: LessonWithFiles;
   index: number;
   files: LessonFile[];
-  onFilesChange: (
-    lessonId: string,
-    files: LessonFile[]
-  ) => void;
+  onFilesChange: (lessonId: string, files: LessonFile[]) => void;
   onSaveEdit: (
     lesson: LessonWithFiles,
     title: string,
@@ -611,11 +565,7 @@ function LessonCard({
       setEditTitle(lesson.title);
       setEditDescription(lesson.description ?? "");
     }
-  }, [
-    lesson.title,
-    lesson.description,
-    editing,
-  ]);
+  }, [lesson.title, lesson.description, editing]);
 
   const startEditing = () => {
     setEditTitle(lesson.title);
@@ -641,25 +591,16 @@ function LessonCard({
     setSavingEdit(true);
 
     try {
-      await onSaveEdit(
-        lesson,
-        title,
-        description
-      );
+      await onSaveEdit(lesson, title, description);
 
       showToast("تم حفظ تعديلات الدرس", "success");
 
       setEditing(false);
     } catch (error) {
-      console.error(
-        "Save lesson edit error:",
-        error
-      );
+      console.error("Save lesson edit error:", error);
 
       showToast(
-        error instanceof Error
-          ? error.message
-          : "تعذر حفظ تعديلات الدرس",
+        error instanceof Error ? error.message : "تعذر حفظ تعديلات الدرس",
         "error"
       );
     } finally {
@@ -672,9 +613,7 @@ function LessonCard({
       <div className="flex flex-col gap-4 lg:flex-row lg:items-start">
         <div className="flex min-w-0 flex-1 gap-3">
           <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-brand-50 text-brand-600">
-            <span className="text-sm font-bold">
-              {index + 1}
-            </span>
+            <span className="text-sm font-bold">{index + 1}</span>
           </div>
 
           <div className="min-w-0 flex-1">
@@ -687,9 +626,7 @@ function LessonCard({
 
                   <input
                     value={editTitle}
-                    onChange={(event) =>
-                      setEditTitle(event.target.value)
-                    }
+                    onChange={(event) => setEditTitle(event.target.value)}
                     autoFocus
                     className="w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm font-bold text-slate-900 outline-none transition focus:border-brand-500 focus:ring-4 focus:ring-brand-500/10"
                     placeholder="اسم الدرس"
@@ -704,9 +641,7 @@ function LessonCard({
                   <textarea
                     rows={3}
                     value={editDescription}
-                    onChange={(event) =>
-                      setEditDescription(event.target.value)
-                    }
+                    onChange={(event) => setEditDescription(event.target.value)}
                     className="w-full resize-none rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm leading-6 text-slate-700 outline-none transition focus:border-brand-500 focus:ring-4 focus:ring-brand-500/10"
                     placeholder="اكتب تفاصيل الدرس..."
                   />
@@ -715,10 +650,7 @@ function LessonCard({
                 <div className="flex flex-wrap gap-2">
                   <button
                     type="button"
-                    disabled={
-                      savingEdit ||
-                      !editTitle.trim()
-                    }
+                    disabled={savingEdit || !editTitle.trim()}
                     onClick={saveEditing}
                     className="inline-flex items-center gap-2 rounded-xl bg-brand-600 px-4 py-2.5 text-xs font-bold text-white transition hover:bg-brand-700 disabled:cursor-not-allowed disabled:opacity-50"
                   >
@@ -779,9 +711,7 @@ function LessonCard({
                   <Video className="h-3.5 w-3.5" />
                 )}
 
-                {hasVideo
-                  ? "الفيديو مرفوع"
-                  : "لا يوجد فيديو"}
+                {hasVideo ? "الفيديو مرفوع" : "لا يوجد فيديو"}
               </span>
 
               <span className="inline-flex items-center gap-1.5 rounded-lg bg-amber-50 px-2.5 py-1.5 text-xs font-medium text-amber-700">
@@ -816,9 +746,7 @@ function LessonCard({
               >
                 <Eye className="h-3.5 w-3.5" />
 
-                {lesson.is_preview
-                  ? "إلغاء المعاينة"
-                  : "تفعيل المعاينة"}
+                {lesson.is_preview ? "إلغاء المعاينة" : "تفعيل المعاينة"}
               </button>
 
               <button
@@ -833,7 +761,11 @@ function LessonCard({
                   <Upload className="h-3.5 w-3.5" />
                 )}
 
-                {hasVideo ? "استبدال الفيديو" : "رفع الفيديو"}
+                {isUploading
+                  ? "جاري الرفع..."
+                  : hasVideo
+                  ? "استبدال الفيديو"
+                  : "رفع الفيديو"}
               </button>
 
               {hasVideo && (
@@ -850,8 +782,9 @@ function LessonCard({
 
               <button
                 type="button"
+                disabled={isUploading}
                 onClick={() => onDelete(lesson)}
-                className="inline-flex items-center gap-2 rounded-xl border border-red-200 px-3 py-2 text-xs font-semibold text-red-600 transition hover:bg-red-50"
+                className="inline-flex items-center gap-2 rounded-xl border border-red-200 px-3 py-2 text-xs font-semibold text-red-600 transition hover:bg-red-50 disabled:opacity-50"
               >
                 <Trash2 className="h-3.5 w-3.5" />
                 حذف
@@ -876,9 +809,7 @@ function LessonCard({
           <div className="h-2 overflow-hidden rounded-full bg-blue-100">
             <div
               className="h-full rounded-full bg-blue-600 transition-all"
-              style={{
-                width: `${videoUploadState?.progress ?? 0}%`,
-              }}
+              style={{ width: `${videoUploadState?.progress ?? 0}%` }}
             />
           </div>
         </div>
@@ -886,7 +817,7 @@ function LessonCard({
 
       {videoUploadState?.error && (
         <div className="mt-3 flex items-center gap-2 rounded-xl bg-red-50 p-3 text-xs text-red-700">
-          <AlertCircle className="h-4 w-4" />
+          <AlertCircle className="h-4 w-4 shrink-0" />
 
           {videoUploadState.error}
         </div>
@@ -901,33 +832,6 @@ function LessonCard({
   );
 }
 
-function getVideoDuration(file: File): Promise<number> {
-  return new Promise((resolve, reject) => {
-    const video = document.createElement("video");
-
-    video.preload = "metadata";
-
-    const objectUrl = URL.createObjectURL(file);
-
-    video.onloadedmetadata = () => {
-      URL.revokeObjectURL(objectUrl);
-
-      if (!Number.isFinite(video.duration) || video.duration <= 0) {
-        reject(new Error("تعذر تحديد مدة الفيديو"));
-        return;
-      }
-
-      resolve(Math.round(video.duration));
-    };
-
-    video.onerror = () => {
-      URL.revokeObjectURL(objectUrl);
-      reject(new Error("تعذر قراءة مدة الفيديو"));
-    };
-
-    video.src = objectUrl;
-  });
-}
 /* -------------------------------------------------------------------------- */
 /* Mobile Number Stepper                                                      */
 /* -------------------------------------------------------------------------- */
@@ -973,9 +877,7 @@ function NumberStepper({
     onChange(next);
   };
 
-  const handleInputChange = (
-    event: ChangeEvent<HTMLInputElement>
-  ) => {
+  const handleInputChange = (event: ChangeEvent<HTMLInputElement>) => {
     const raw = event.target.value;
 
     // السماح للمستخدم بمسح الحقل مؤقتًا
@@ -1049,10 +951,7 @@ function NumberStepper({
         <button
           type="button"
           onClick={increase}
-          disabled={
-            max !== undefined &&
-            safeValue >= max
-          }
+          disabled={max !== undefined && safeValue >= max}
           aria-label={`زيادة ${label ?? "القيمة"}`}
           className="flex w-14 shrink-0 items-center justify-center bg-slate-50 text-xl font-black text-slate-700 transition active:scale-95 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-30 sm:w-16"
         >
@@ -1062,6 +961,7 @@ function NumberStepper({
     </div>
   );
 }
+
 /* -------------------------------------------------------------------------- */
 /* Section Block                                                              */
 /* -------------------------------------------------------------------------- */
@@ -1081,77 +981,93 @@ function SectionBlock({
   const [addingLesson, setAddingLesson] = useState(false);
 
   const [newLessonTitle, setNewLessonTitle] = useState("");
-  const [newLessonDescription, setNewLessonDescription] =
-    useState("");
+  const [newLessonDescription, setNewLessonDescription] = useState("");
 
   const [editingSection, setEditingSection] = useState(false);
-  const [sectionTitle, setSectionTitle] = useState(
-    section.title
-  );
+  const [sectionTitle, setSectionTitle] = useState(section.title);
 
-  const [unlockMonth, setUnlockMonth] = useState(
-    section.unlock_month ?? 1
-  );
+  const [unlockMonth, setUnlockMonth] = useState(section.unlock_month ?? 1);
 
   const [saving, setSaving] = useState(false);
 
-  const [localFiles, setLocalFiles] = useState<
-    Record<string, LessonFile[]>
-  >({});
+  const [localFiles, setLocalFiles] = useState<Record<string, LessonFile[]>>(
+    {}
+  );
 
-  const [videoUploadStates, setVideoUploadStates] =
-    useState<Record<string, UploadState>>({});
+  // حالة رفع الفيديو محفوظة في store عام خارج React (في الـ service)،
+  // فتفضل ظاهرة حتى لو الصفحة اتعملها re-mount أثناء الرفع.
+  const uploads = useSyncExternalStore(
+    subscribeVideoUploads,
+    getVideoUploadsSnapshot
+  );
+
+  const videoUploadStates = useMemo(() => {
+    const result: Record<string, UploadState> = {};
+
+    for (const [lessonId, task] of Object.entries(uploads)) {
+      result[lessonId] = {
+        uploading:
+          task.status === "preparing" ||
+          task.status === "uploading" ||
+          task.status === "saving",
+        progress: task.progress,
+        error: task.error,
+        fileName:
+          task.attempt > 1 && task.status === "uploading"
+            ? `${task.fileName} (محاولة ${task.attempt}/${task.maxAttempts})`
+            : task.status === "saving"
+            ? `${task.fileName} (جاري الحفظ...)`
+            : task.fileName,
+      };
+    }
+
+    return result;
+  }, [uploads]);
 
   const [confirmState, setConfirmState] =
     useState<ConfirmState>(CLOSED_CONFIRM);
 
-  const closeConfirm = () =>
-    setConfirmState(CLOSED_CONFIRM);
+  const closeConfirm = () => setConfirmState(CLOSED_CONFIRM);
 
   const lessons = section.lessons ?? [];
+  const lessonIdsKey = lessons.map((lesson) => lesson.id).join(",");
 
   useEffect(() => {
+    if (!lessonIdsKey) return;
+
+    let cancelled = false;
+
     const loadFiles = async () => {
-      if (!lessons.length) return;
-
-      const lessonIds = lessons.map((lesson) => lesson.id);
-
       const { data, error } = await supabase
         .from("lesson_files")
         .select("*")
-        .in("lesson_id", lessonIds)
-        .order("order_index", {
-          ascending: true,
-        });
+        .in("lesson_id", lessonIdsKey.split(","))
+        .order("order_index", { ascending: true });
+
+      if (cancelled) return;
 
       if (error) {
-        console.error(
-          "Fetch lesson files error:",
-          error
-        );
+        console.error("Fetch lesson files error:", error);
         return;
       }
 
       const grouped: Record<string, LessonFile[]> = {};
 
       for (const file of (data ?? []) as LessonFile[]) {
-        if (!grouped[file.lesson_id]) {
-          grouped[file.lesson_id] = [];
-        }
-
-        grouped[file.lesson_id].push(file);
+        (grouped[file.lesson_id] ??= []).push(file);
       }
 
       setLocalFiles(grouped);
     };
 
     loadFiles();
-  }, [lessons]);
 
-  const handleFilesChange = (
-    lessonId: string,
-    files: LessonFile[]
-  ) => {
+    return () => {
+      cancelled = true;
+    };
+  }, [lessonIdsKey]);
+
+  const handleFilesChange = (lessonId: string, files: LessonFile[]) => {
     setLocalFiles((current) => ({
       ...current,
       [lessonId]: files,
@@ -1169,8 +1085,7 @@ function SectionBlock({
       await createLesson({
         sectionId: section.id,
         title,
-        description:
-          newLessonDescription.trim() || "",
+        description: newLessonDescription.trim() || "",
         orderIndex: lessons.length,
         isPreview: false,
       });
@@ -1186,9 +1101,7 @@ function SectionBlock({
       console.error("Create lesson error:", error);
 
       showToast(
-        error instanceof Error
-          ? error.message
-          : "حدث خطأ أثناء إنشاء الدرس",
+        error instanceof Error ? error.message : "حدث خطأ أثناء إنشاء الدرس",
         "error"
       );
     } finally {
@@ -1209,27 +1122,25 @@ function SectionBlock({
     await onRefresh();
   };
 
-  const deleteLessonHandler = (
-    lesson: LessonWithFiles
-  ) => {
+  const deleteLessonHandler = (lesson: LessonWithFiles) => {
+    if (isVideoUploading(lesson.id)) {
+      showToast("لا يمكن حذف الدرس أثناء رفع الفيديو", "error");
+      return;
+    }
+
     setConfirmState({
       open: true,
       title: "حذف الدرس",
-      description: `هل أنت متأكد من حذف "${lesson.title}"؟ سيتم حذف الدرس وملفاته نهائيًا.`,
+      description: `هل أنت متأكد من حذف "${lesson.title}"؟ سيتم حذف الدرس وفيديوه وملفاته نهائيًا.`,
       confirmLabel: "حذف الدرس",
       onConfirm: async () => {
         try {
-          const lessonFiles =
-            localFiles[lesson.id] ?? [];
+          const lessonFiles = localFiles[lesson.id] ?? [];
 
           if (lessonFiles.length) {
             await supabase.storage
               .from(FILE_BUCKET)
-              .remove(
-                lessonFiles.map(
-                  (file) => file.file_path
-                )
-              );
+              .remove(lessonFiles.map((file) => file.file_path));
 
             await supabase
               .from("lesson_files")
@@ -1237,6 +1148,7 @@ function SectionBlock({
               .eq("lesson_id", lesson.id);
           }
 
+          // deleteLesson في الـ service بيمسح الفيديو من VdoCipher كمان
           await deleteLesson(lesson.id);
 
           showToast("تم حذف الدرس بنجاح", "success");
@@ -1246,9 +1158,7 @@ function SectionBlock({
           console.error("Delete lesson error:", error);
 
           showToast(
-            error instanceof Error
-              ? error.message
-              : "تعذر حذف الدرس",
+            error instanceof Error ? error.message : "تعذر حذف الدرس",
             "error"
           );
         } finally {
@@ -1258,9 +1168,7 @@ function SectionBlock({
     });
   };
 
-  const togglePreview = async (
-    lesson: LessonWithFiles
-  ) => {
+  const togglePreview = async (lesson: LessonWithFiles) => {
     try {
       await updateLesson(lesson.id, {
         isPreview: !lesson.is_preview,
@@ -1275,123 +1183,62 @@ function SectionBlock({
 
       await onRefresh();
     } catch (error) {
-      console.error(
-        "Toggle lesson preview error:",
-        error
-      );
+      console.error("Toggle lesson preview error:", error);
 
       showToast(
-        error instanceof Error
-          ? error.message
-          : "تعذر تحديث المعاينة",
+        error instanceof Error ? error.message : "تعذر تحديث المعاينة",
         "error"
       );
     }
   };
 
-  const uploadVideo = async (
-    lesson: LessonWithFiles
-  ) => {
-    const input = document.createElement("input");
+  const uploadVideo = (lesson: LessonWithFiles) => {
+    if (isVideoUploading(lesson.id)) {
+      showToast("جاري رفع فيديو لهذا الدرس بالفعل", "error");
+      return;
+    }
 
+    // الـ input لازم يكون في الـ DOM عشان ما يتعملوش له garbage collection
+    const input = document.createElement("input");
     input.type = "file";
     input.accept = "video/*";
+    input.style.display = "none";
+    document.body.appendChild(input);
 
-    input.onchange = async () => {
-      const file = input.files?.[0];
+    input.addEventListener("cancel", () => input.remove(), { once: true });
 
-      if (!file) return;
+    input.addEventListener(
+      "change",
+      async () => {
+        const file = input.files?.[0];
+        input.remove();
 
-      setVideoUploadStates((current) => ({
-        ...current,
-        [lesson.id]: {
-          uploading: true,
-          progress: 0,
-          error: null,
-          fileName: file.name,
-        },
-      }));
+        if (!file) return;
 
-      try {
-        // حساب مدة الفيديو قبل الرفع
-        const durationSeconds = await getVideoDuration(file);
+        try {
+          // التقدم والأخطاء بتتعرض من الـ store العام.
+          // تحديث القائمة بعد النجاح بيتم تلقائيًا من CourseBuilderPage.
+          await uploadLessonVideoBunny(lesson.id, file);
 
-        console.log(
-          "Video duration:",
-          durationSeconds,
-          "seconds"
-        );
+          showToast("تم رفع الفيديو بنجاح", "success");
+        } catch (error) {
+          console.error("Video upload error:", error);
 
-        // رفع الفيديو إلى VdoCipher
-        await uploadLessonVideoBunny(
-          lesson.id,
-          file,
-          (pct) => {
-            setVideoUploadStates((current) => ({
-              ...current,
-              [lesson.id]: {
-                uploading: true,
-                progress: pct,
-                error: null,
-                fileName: file.name,
-              },
-            }));
-          }
-        );
-
-        // حفظ مدة الفيديو في Supabase
-        await updateLesson(lesson.id, {
-          durationSeconds,
-        });
-
-        setVideoUploadStates((current) => ({
-          ...current,
-          [lesson.id]: {
-            uploading: false,
-            progress: 100,
-            error: null,
-            fileName: file.name,
-          },
-        }));
-
-        showToast("تم رفع الفيديو بنجاح", "success");
-
-        await onRefresh();
-
-        setTimeout(() => {
-          setVideoUploadStates((current) => {
-            const next = { ...current };
-            delete next[lesson.id];
-            return next;
-          });
-        }, 1000);
-      } catch (error) {
-        console.error(
-          "Video upload error:",
-          error
-        );
-
-        setVideoUploadStates((current) => ({
-          ...current,
-          [lesson.id]: {
-            uploading: false,
-            progress: 0,
-            error:
-              error instanceof Error
-                ? error.message
-                : "حدث خطأ أثناء رفع الفيديو",
-            fileName: file.name,
-          },
-        }));
-      }
-    };
+          showToast(
+            error instanceof Error
+              ? error.message
+              : "حدث خطأ أثناء رفع الفيديو",
+            "error"
+          );
+        }
+      },
+      { once: true }
+    );
 
     input.click();
   };
 
-  const deleteVideo = (
-    lesson: LessonWithFiles
-  ) => {
+  const deleteVideo = (lesson: LessonWithFiles) => {
     setConfirmState({
       open: true,
       title: "حذف فيديو الدرس",
@@ -1406,15 +1253,10 @@ function SectionBlock({
 
           await onRefresh();
         } catch (error) {
-          console.error(
-            "Delete lesson video error:",
-            error
-          );
+          console.error("Delete lesson video error:", error);
 
           showToast(
-            error instanceof Error
-              ? error.message
-              : "تعذر حذف الفيديو",
+            error instanceof Error ? error.message : "تعذر حذف الفيديو",
             "error"
           );
         } finally {
@@ -1442,15 +1284,10 @@ function SectionBlock({
 
       await onRefresh();
     } catch (error) {
-      console.error(
-        "Update section error:",
-        error
-      );
+      console.error("Update section error:", error);
 
       showToast(
-        error instanceof Error
-          ? error.message
-          : "تعذر تعديل القسم",
+        error instanceof Error ? error.message : "تعذر تعديل القسم",
         "error"
       );
     } finally {
@@ -1459,10 +1296,7 @@ function SectionBlock({
   };
 
   const saveUnlockMonth = async () => {
-    const value = Math.max(
-      1,
-      Math.floor(Number(unlockMonth) || 1)
-    );
+    const value = Math.max(1, Math.floor(Number(unlockMonth) || 1));
 
     setUnlockMonth(value);
 
@@ -1473,16 +1307,22 @@ function SectionBlock({
 
       showToast("تم حفظ شهر فتح القسم", "success");
     } catch (error) {
-      console.error(
-        "Update section unlock month error:",
-        error
-      );
+      console.error("Update section unlock month error:", error);
 
       showToast("تعذر حفظ شهر فتح القسم", "error");
     }
   };
 
   const removeSection = () => {
+    const hasActiveUpload = lessons.some((lesson) =>
+      isVideoUploading(lesson.id)
+    );
+
+    if (hasActiveUpload) {
+      showToast("لا يمكن حذف القسم أثناء رفع فيديو بداخله", "error");
+      return;
+    }
+
     setConfirmState({
       open: true,
       title: "حذف القسم",
@@ -1496,15 +1336,10 @@ function SectionBlock({
 
           await onRefresh();
         } catch (error) {
-          console.error(
-            "Delete section error:",
-            error
-          );
+          console.error("Delete section error:", error);
 
           showToast(
-            error instanceof Error
-              ? error.message
-              : "تعذر حذف القسم",
+            error instanceof Error ? error.message : "تعذر حذف القسم",
             "error"
           );
         } finally {
@@ -1522,9 +1357,7 @@ function SectionBlock({
           <div className="flex min-w-0 items-center gap-3">
             <button
               type="button"
-              onClick={() =>
-                setExpanded((value) => !value)
-              }
+              onClick={() => setExpanded((value) => !value)}
               className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-white text-slate-600 shadow-sm transition hover:bg-slate-100"
             >
               {expanded ? (
@@ -1543,11 +1376,7 @@ function SectionBlock({
                 <div className="flex gap-2">
                   <input
                     value={sectionTitle}
-                    onChange={(event) =>
-                      setSectionTitle(
-                        event.target.value
-                      )
-                    }
+                    onChange={(event) => setSectionTitle(event.target.value)}
                     className="min-w-0 rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm font-bold outline-none focus:border-brand-500 focus:ring-4 focus:ring-brand-500/10"
                     autoFocus
                   />
@@ -1565,9 +1394,7 @@ function SectionBlock({
                     type="button"
                     onClick={() => {
                       setEditingSection(false);
-                      setSectionTitle(
-                        section.title
-                      );
+                      setSectionTitle(section.title);
                     }}
                     className="rounded-xl bg-slate-200 px-3 py-2 text-xs font-bold text-slate-700"
                   >
@@ -1583,9 +1410,7 @@ function SectionBlock({
 
                     <button
                       type="button"
-                      onClick={() =>
-                        setEditingSection(true)
-                      }
+                      onClick={() => setEditingSection(true)}
                       className="rounded-lg p-1.5 text-slate-400 transition hover:bg-white hover:text-slate-700"
                     >
                       <Pencil className="h-3.5 w-3.5" />
@@ -1595,27 +1420,28 @@ function SectionBlock({
                   <p className="mt-1 text-xs text-slate-500">
                     {lessons.length} درس
                   </p>
-<div className="mt-3 max-w-sm">
-  <NumberStepper
-    label="يفتح من الشهر"
-    value={unlockMonth}
-    min={1}
-    step={1}
-    suffix="شهر"
-    onChange={(value) => {
-      setUnlockMonth(value);
-    }}
-  />
 
-  <button
-    type="button"
-    onClick={saveUnlockMonth}
-    className="mt-2 inline-flex items-center gap-2 rounded-xl bg-brand-50 px-3 py-2 text-xs font-bold text-brand-700 transition hover:bg-brand-100"
-  >
-    <CheckCircle2 className="h-3.5 w-3.5" />
-    حفظ شهر الفتح
-  </button>
-</div>
+                  <div className="mt-3 max-w-sm">
+                    <NumberStepper
+                      label="يفتح من الشهر"
+                      value={unlockMonth}
+                      min={1}
+                      step={1}
+                      suffix="شهر"
+                      onChange={(value) => {
+                        setUnlockMonth(value);
+                      }}
+                    />
+
+                    <button
+                      type="button"
+                      onClick={saveUnlockMonth}
+                      className="mt-2 inline-flex items-center gap-2 rounded-xl bg-brand-50 px-3 py-2 text-xs font-bold text-brand-700 transition hover:bg-brand-100"
+                    >
+                      <CheckCircle2 className="h-3.5 w-3.5" />
+                      حفظ شهر الفتح
+                    </button>
+                  </div>
                 </>
               )}
             </div>
@@ -1624,9 +1450,7 @@ function SectionBlock({
           <div className="flex flex-wrap gap-2">
             <button
               type="button"
-              onClick={() =>
-                setAddingLesson(true)
-              }
+              onClick={() => setAddingLesson(true)}
               className="inline-flex items-center gap-2 rounded-xl bg-brand-600 px-4 py-2.5 text-sm font-bold text-white transition hover:bg-brand-700"
             >
               <Plus className="h-4 w-4" />
@@ -1652,9 +1476,7 @@ function SectionBlock({
             <div className="mb-5 rounded-2xl border border-brand-100 bg-brand-50/40 p-4">
               <div className="mb-4 flex items-center justify-between">
                 <div>
-                  <h4 className="font-bold text-slate-900">
-                    إضافة درس جديد
-                  </h4>
+                  <h4 className="font-bold text-slate-900">إضافة درس جديد</h4>
 
                   <p className="mt-1 text-xs text-slate-500">
                     أضف عنوان ووصف الدرس ثم ارفع الفيديو والملفات.
@@ -1663,9 +1485,7 @@ function SectionBlock({
 
                 <button
                   type="button"
-                  onClick={() =>
-                    setAddingLesson(false)
-                  }
+                  onClick={() => setAddingLesson(false)}
                   className="rounded-lg p-2 text-slate-400 hover:bg-white hover:text-slate-700"
                 >
                   <X className="h-4 w-4" />
@@ -1680,11 +1500,7 @@ function SectionBlock({
 
                   <input
                     value={newLessonTitle}
-                    onChange={(event) =>
-                      setNewLessonTitle(
-                        event.target.value
-                      )
-                    }
+                    onChange={(event) => setNewLessonTitle(event.target.value)}
                     placeholder="مثال: مقدمة في التشريح"
                     className="w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm outline-none transition focus:border-brand-500 focus:ring-4 focus:ring-brand-500/10"
                   />
@@ -1699,9 +1515,7 @@ function SectionBlock({
                     rows={3}
                     value={newLessonDescription}
                     onChange={(event) =>
-                      setNewLessonDescription(
-                        event.target.value
-                      )
+                      setNewLessonDescription(event.target.value)
                     }
                     placeholder="اكتب وصفًا مختصرًا للدرس..."
                     className="w-full resize-none rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm outline-none transition focus:border-brand-500 focus:ring-4 focus:ring-brand-500/10"
@@ -1711,9 +1525,7 @@ function SectionBlock({
                 <div className="flex justify-end gap-2">
                   <button
                     type="button"
-                    onClick={() =>
-                      setAddingLesson(false)
-                    }
+                    onClick={() => setAddingLesson(false)}
                     className="rounded-xl bg-white px-4 py-2.5 text-sm font-bold text-slate-700 ring-1 ring-slate-200"
                   >
                     إلغاء
@@ -1721,16 +1533,11 @@ function SectionBlock({
 
                   <button
                     type="button"
-                    disabled={
-                      saving ||
-                      !newLessonTitle.trim()
-                    }
+                    disabled={saving || !newLessonTitle.trim()}
                     onClick={addLesson}
                     className="inline-flex items-center gap-2 rounded-xl bg-brand-600 px-5 py-2.5 text-sm font-bold text-white disabled:cursor-not-allowed disabled:opacity-50"
                   >
-                    {saving && (
-                      <Loader2 className="h-4 w-4 animate-spin" />
-                    )}
+                    {saving && <Loader2 className="h-4 w-4 animate-spin" />}
 
                     إنشاء الدرس
                   </button>
@@ -1754,9 +1561,7 @@ function SectionBlock({
 
               <button
                 type="button"
-                onClick={() =>
-                  setAddingLesson(true)
-                }
+                onClick={() => setAddingLesson(true)}
                 className="mt-4 inline-flex items-center gap-2 rounded-xl bg-brand-600 px-4 py-2.5 text-sm font-bold text-white"
               >
                 <Plus className="h-4 w-4" />
@@ -1772,9 +1577,7 @@ function SectionBlock({
                 </div>
 
                 <div>
-                  <h4 className="font-black text-slate-900">
-                    الدروس
-                  </h4>
+                  <h4 className="font-black text-slate-900">الدروس</h4>
 
                   <p className="text-xs text-slate-400">
                     فيديوهات ومحتوى الدروس
@@ -1787,26 +1590,14 @@ function SectionBlock({
                   key={lesson.id}
                   lesson={lesson}
                   index={lessonIndex}
-                  files={
-                    localFiles[lesson.id] ?? []
-                  }
-                  onFilesChange={
-                    handleFilesChange
-                  }
+                  files={localFiles[lesson.id] ?? []}
+                  onFilesChange={handleFilesChange}
                   onSaveEdit={saveLessonEdit}
-                  onDelete={
-                    deleteLessonHandler
-                  }
-                  onTogglePreview={
-                    togglePreview
-                  }
+                  onDelete={deleteLessonHandler}
+                  onTogglePreview={togglePreview}
                   onUploadVideo={uploadVideo}
                   onDeleteVideo={deleteVideo}
-                  videoUploadState={
-                    videoUploadStates[
-                      lesson.id
-                    ]
-                  }
+                  videoUploadState={videoUploadStates[lesson.id]}
                 />
               ))}
 
@@ -1819,9 +1610,7 @@ function SectionBlock({
                     </div>
 
                     <div>
-                      <h4 className="font-black text-slate-900">
-                        الواجبات
-                      </h4>
+                      <h4 className="font-black text-slate-900">الواجبات</h4>
 
                       <p className="mt-1 text-xs text-slate-500">
                         إدارة واجبات واختبارات هذا الكورس
@@ -1868,60 +1657,45 @@ export default function CourseBuilderPage() {
 
   const { showToast } = useToast();
 
-  const [course, setCourse] =
-    useState<Course | null>(null);
+  const [course, setCourse] = useState<Course | null>(null);
 
-  const [sections, setSections] = useState<
-    SectionWithLessons[]
-  >([]);
+  const [sections, setSections] = useState<SectionWithLessons[]>([]);
 
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
 
-  const [error, setError] = useState<string | null>(
-    null
-  );
+  const [error, setError] = useState<string | null>(null);
 
-  const [addingSection, setAddingSection] =
-    useState(false);
+  const [addingSection, setAddingSection] = useState(false);
 
-  const [sectionTitle, setSectionTitle] =
-    useState("");
+  const [sectionTitle, setSectionTitle] = useState("");
 
-  const [creatingSection, setCreatingSection] =
-    useState(false);
+  const [creatingSection, setCreatingSection] = useState(false);
 
-  const [installmentSettings, setInstallmentSettings] =
-    useState({
-      enabled: false,
-      months: 3,
-      amount: 0,
-    });
+  const [installmentSettings, setInstallmentSettings] = useState({
+    enabled: false,
+    months: 3,
+    amount: 0,
+  });
 
   const [savingInstallmentSettings, setSavingInstallmentSettings] =
     useState(false);
 
-  const loadData = async (
-    showFullLoader = false
-  ) => {
+  const loadData = async (showFullLoader = false) => {
     if (!courseId) return;
 
     if (showFullLoader) {
       setLoading(true);
+      setError(null);
     } else {
       setRefreshing(true);
     }
 
-    setError(null);
-
     try {
-      const loadedCourse =
-        await fetchCourseBySlugOrId(courseId);
+      const loadedCourse = await fetchCourseBySlugOrId(courseId);
 
       if (!loadedCourse) {
-        throw new Error(
-          "لم يتم العثور على الكورس"
-        );
+        throw new Error("لم يتم العثور على الكورس");
       }
 
       setCourse(loadedCourse);
@@ -1932,23 +1706,25 @@ export default function CourseBuilderPage() {
         amount: loadedCourse.installment_amount ?? 0,
       });
 
-      const loadedSections =
-        await fetchSections(loadedCourse.id);
+      const loadedSections = await fetchSections(loadedCourse.id);
 
-      setSections(
-        (loadedSections ?? []) as SectionWithLessons[]
-      );
+      setSections((loadedSections ?? []) as SectionWithLessons[]);
+
+      // نجح التحميل: امسح أي خطأ قديم
+      setError(null);
     } catch (err) {
-      console.error(
-        "Course builder loading error:",
-        err
-      );
+      console.error("Course builder loading error:", err);
 
-      setError(
-        err instanceof Error
-          ? err.message
-          : "حدث خطأ أثناء تحميل الكورس"
-      );
+      const message =
+        err instanceof Error ? err.message : "حدث خطأ أثناء تحميل الكورس";
+
+      // لو الكورس متحمل بالفعل، ما نستبدلش الصفحة بشاشة الخطأ
+      // (ده كان بيعمل unmount للأقسام ويضيّع حالة الرفع)
+      if (showFullLoader || !course) {
+        setError(message);
+      } else {
+        showToast(message, "error");
+      }
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -1960,6 +1736,26 @@ export default function CourseBuilderPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [courseId]);
 
+  // لما أي رفع فيديو يخلص بنجاح (حتى لو الصفحة كانت اتعملها re-mount)
+  // نعمل refresh مرة واحدة عشان الفيديو الجديد يظهر.
+  const uploads = useSyncExternalStore(
+    subscribeVideoUploads,
+    getVideoUploadsSnapshot
+  );
+
+  const doneUploadsKey = Object.values(uploads)
+    .filter((task) => task.status === "done")
+    .map((task) => task.lessonId)
+    .sort()
+    .join(",");
+
+  useEffect(() => {
+    if (doneUploadsKey) {
+      loadData();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [doneUploadsKey]);
+
   const createNewSection = async () => {
     const title = sectionTitle.trim();
 
@@ -1968,11 +1764,7 @@ export default function CourseBuilderPage() {
     setCreatingSection(true);
 
     try {
-      await createSection(
-        course.id,
-        title,
-        sections.length
-      );
+      await createSection(course.id, title, sections.length);
 
       showToast("تم إنشاء القسم بنجاح", "success");
 
@@ -1981,15 +1773,10 @@ export default function CourseBuilderPage() {
 
       await loadData();
     } catch (err) {
-      console.error(
-        "Create section error:",
-        err
-      );
+      console.error("Create section error:", err);
 
       showToast(
-        err instanceof Error
-          ? err.message
-          : "حدث خطأ أثناء إنشاء القسم",
+        err instanceof Error ? err.message : "حدث خطأ أثناء إنشاء القسم",
         "error"
       );
     } finally {
@@ -2002,8 +1789,7 @@ export default function CourseBuilderPage() {
 
     if (
       installmentSettings.enabled &&
-      (installmentSettings.months < 2 ||
-        installmentSettings.amount <= 0)
+      (installmentSettings.months < 2 || installmentSettings.amount <= 0)
     ) {
       showToast("أدخل عدد شهور وقيمة قسط صحيحة", "error");
       return;
@@ -2026,18 +1812,13 @@ export default function CourseBuilderPage() {
         current
           ? {
               ...current,
-              is_installment:
-                installmentSettings.enabled,
-              installment_months:
-                installmentSettings.enabled
-                  ? Math.floor(
-                      installmentSettings.months
-                    )
-                  : null,
-              installment_amount:
-                installmentSettings.enabled
-                  ? installmentSettings.amount
-                  : null,
+              is_installment: installmentSettings.enabled,
+              installment_months: installmentSettings.enabled
+                ? Math.floor(installmentSettings.months)
+                : null,
+              installment_amount: installmentSettings.enabled
+                ? installmentSettings.amount
+                : null,
             }
           : current
       );
@@ -2045,9 +1826,7 @@ export default function CourseBuilderPage() {
       showToast("تم حفظ إعدادات التقسيط", "success");
     } catch (err) {
       showToast(
-        err instanceof Error
-          ? err.message
-          : "تعذر حفظ إعدادات التقسيط",
+        err instanceof Error ? err.message : "تعذر حفظ إعدادات التقسيط",
         "error"
       );
     } finally {
@@ -2056,25 +1835,20 @@ export default function CourseBuilderPage() {
   };
 
   const stats = useMemo(() => {
-    const lessons = sections.flatMap(
-      (section) => section.lessons ?? []
-    );
+    const lessons = sections.flatMap((section) => section.lessons ?? []);
 
     // تم التحويل من Bunny إلى VdoCipher: الحقل الآن vdocipher_video_id
-    const videos = lessons.filter(
-      (lesson) =>
-        Boolean(
-          (
-            lesson as Lesson & {
-              vdocipher_video_id?: string;
-            }
-          ).vdocipher_video_id
-        )
+    const videos = lessons.filter((lesson) =>
+      Boolean(
+        (
+          lesson as Lesson & {
+            vdocipher_video_id?: string;
+          }
+        ).vdocipher_video_id
+      )
     ).length;
 
-    const previews = lessons.filter(
-      (lesson) => lesson.is_preview
-    ).length;
+    const previews = lessons.filter((lesson) => lesson.is_preview).length;
 
     return {
       sections: sections.length,
@@ -2086,22 +1860,14 @@ export default function CourseBuilderPage() {
 
   if (loading) {
     return (
-      <div
-        dir="rtl"
-        className="min-h-screen bg-slate-50 p-4 sm:p-6"
-      >
+      <div dir="rtl" className="min-h-screen bg-slate-50 p-4 sm:p-6">
         <div className="mx-auto max-w-7xl animate-pulse space-y-5">
           <div className="h-32 rounded-3xl bg-slate-200" />
 
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-            {Array.from({ length: 4 }).map(
-              (_, index) => (
-                <div
-                  key={index}
-                  className="h-24 rounded-2xl bg-slate-200"
-                />
-              )
-            )}
+            {Array.from({ length: 4 }).map((_, index) => (
+              <div key={index} className="h-24 rounded-2xl bg-slate-200" />
+            ))}
           </div>
 
           <div className="h-96 rounded-3xl bg-slate-200" />
@@ -2143,10 +1909,7 @@ export default function CourseBuilderPage() {
   }
 
   return (
-    <div
-      dir="rtl"
-      className="min-h-screen bg-slate-50"
-    >
+    <div dir="rtl" className="min-h-screen bg-slate-50">
       <div className="mx-auto max-w-7xl px-4 py-5 sm:px-6 lg:px-8">
         {/* Header */}
         <div className="overflow-hidden rounded-3xl bg-gradient-to-br from-brand-900 via-brand-800 to-brand-500 text-white shadow-xl">
@@ -2170,11 +1933,7 @@ export default function CourseBuilderPage() {
                   className="inline-flex items-center gap-2 rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-xs font-semibold text-slate-300 transition hover:bg-white/10 hover:text-white disabled:opacity-50"
                 >
                   <RefreshCw
-                    className={`h-4 w-4 ${
-                      refreshing
-                        ? "animate-spin"
-                        : ""
-                    }`}
+                    className={`h-4 w-4 ${refreshing ? "animate-spin" : ""}`}
                   />
 
                   تحديث
@@ -2215,9 +1974,7 @@ export default function CourseBuilderPage() {
               </div>
 
               <div>
-                <p className="text-xs text-slate-400">
-                  الأقسام
-                </p>
+                <p className="text-xs text-slate-400">الأقسام</p>
 
                 <p className="text-xl font-black text-slate-900">
                   {stats.sections}
@@ -2233,9 +1990,7 @@ export default function CourseBuilderPage() {
               </div>
 
               <div>
-                <p className="text-xs text-slate-400">
-                  الدروس
-                </p>
+                <p className="text-xs text-slate-400">الدروس</p>
 
                 <p className="text-xl font-black text-slate-900">
                   {stats.lessons}
@@ -2251,9 +2006,7 @@ export default function CourseBuilderPage() {
               </div>
 
               <div>
-                <p className="text-xs text-slate-400">
-                  الفيديوهات
-                </p>
+                <p className="text-xs text-slate-400">الفيديوهات</p>
 
                 <p className="text-xl font-black text-slate-900">
                   {stats.videos}
@@ -2269,9 +2022,7 @@ export default function CourseBuilderPage() {
               </div>
 
               <div>
-                <p className="text-xs text-slate-400">
-                  معاينات مجانية
-                </p>
+                <p className="text-xs text-slate-400">معاينات مجانية</p>
 
                 <p className="text-xl font-black text-slate-900">
                   {stats.previews}
@@ -2286,9 +2037,7 @@ export default function CourseBuilderPage() {
           <div className="mb-5 rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
             <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
               <div>
-                <h2 className="font-black text-slate-900">
-                  نظام التقسيط
-                </h2>
+                <h2 className="font-black text-slate-900">نظام التقسيط</h2>
 
                 <p className="mt-1 text-sm text-slate-500">
                   افتح أقسام الكورس تدريجيًا بعد اعتماد كل قسط.
@@ -2300,13 +2049,10 @@ export default function CourseBuilderPage() {
                   type="checkbox"
                   checked={installmentSettings.enabled}
                   onChange={(event) =>
-                    setInstallmentSettings(
-                      (current) => ({
-                        ...current,
-                        enabled:
-                          event.target.checked,
-                      })
-                    )
+                    setInstallmentSettings((current) => ({
+                      ...current,
+                      enabled: event.target.checked,
+                    }))
                   }
                   className="h-4 w-4 accent-brand-600"
                 />
@@ -2316,47 +2062,41 @@ export default function CourseBuilderPage() {
 
             {installmentSettings.enabled && (
               <div className="mt-4 grid gap-4 sm:grid-cols-2">
-  <NumberStepper
-    label="عدد الشهور"
-    value={installmentSettings.months}
-    min={2}
-    max={36}
-    step={1}
-    suffix="شهر"
-    onChange={(value) =>
-      setInstallmentSettings(
-        (current) => ({
-          ...current,
-          months: value,
-        })
-      )
-    }
-  />
+                <NumberStepper
+                  label="عدد الشهور"
+                  value={installmentSettings.months}
+                  min={2}
+                  max={36}
+                  step={1}
+                  suffix="شهر"
+                  onChange={(value) =>
+                    setInstallmentSettings((current) => ({
+                      ...current,
+                      months: value,
+                    }))
+                  }
+                />
 
-  <NumberStepper
-    label="قيمة القسط الشهري"
-    value={installmentSettings.amount}
-    min={1}
-    step={50}
-    suffix="ج.م"
-    onChange={(value) =>
-      setInstallmentSettings(
-        (current) => ({
-          ...current,
-          amount: value,
-        })
-      )
-    }
-  />
-</div>
+                <NumberStepper
+                  label="قيمة القسط الشهري"
+                  value={installmentSettings.amount}
+                  min={1}
+                  step={50}
+                  suffix="ج.م"
+                  onChange={(value) =>
+                    setInstallmentSettings((current) => ({
+                      ...current,
+                      amount: value,
+                    }))
+                  }
+                />
+              </div>
             )}
 
             <button
               type="button"
               onClick={saveInstallmentSettings}
-              disabled={
-                savingInstallmentSettings
-              }
+              disabled={savingInstallmentSettings}
               className="mt-4 inline-flex items-center gap-2 rounded-xl bg-brand-600 px-4 py-2.5 text-sm font-bold text-white disabled:opacity-50"
             >
               {savingInstallmentSettings && (
@@ -2379,9 +2119,7 @@ export default function CourseBuilderPage() {
 
             <button
               type="button"
-              onClick={() =>
-                setAddingSection(true)
-              }
+              onClick={() => setAddingSection(true)}
               className="inline-flex items-center justify-center gap-2 rounded-xl bg-brand-600 px-4 py-3 text-sm font-bold text-white shadow-sm transition hover:bg-brand-700"
             >
               <Plus className="h-4 w-4" />
@@ -2394,9 +2132,7 @@ export default function CourseBuilderPage() {
             <div className="mb-5 rounded-2xl border border-brand-100 bg-white p-5 shadow-sm">
               <div className="mb-4 flex items-center justify-between">
                 <div>
-                  <h3 className="font-black text-slate-900">
-                    إضافة قسم جديد
-                  </h3>
+                  <h3 className="font-black text-slate-900">إضافة قسم جديد</h3>
 
                   <p className="mt-1 text-xs text-slate-500">
                     مثال: الوحدة الأولى — أساسيات التشريح
@@ -2405,9 +2141,7 @@ export default function CourseBuilderPage() {
 
                 <button
                   type="button"
-                  onClick={() =>
-                    setAddingSection(false)
-                  }
+                  onClick={() => setAddingSection(false)}
                   className="rounded-lg p-2 text-slate-400 hover:bg-slate-100"
                 >
                   <X className="h-5 w-5" />
@@ -2417,11 +2151,7 @@ export default function CourseBuilderPage() {
               <div className="flex flex-col gap-3 sm:flex-row">
                 <input
                   value={sectionTitle}
-                  onChange={(event) =>
-                    setSectionTitle(
-                      event.target.value
-                    )
-                  }
+                  onChange={(event) => setSectionTitle(event.target.value)}
                   placeholder="اسم القسم"
                   className="min-w-0 flex-1 rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm outline-none focus:border-brand-500 focus:ring-4 focus:ring-brand-500/10"
                   autoFocus
@@ -2429,10 +2159,7 @@ export default function CourseBuilderPage() {
 
                 <button
                   type="button"
-                  disabled={
-                    creatingSection ||
-                    !sectionTitle.trim()
-                  }
+                  disabled={creatingSection || !sectionTitle.trim()}
                   onClick={createNewSection}
                   className="inline-flex items-center justify-center gap-2 rounded-xl bg-brand-600 px-5 py-3 text-sm font-bold text-white disabled:cursor-not-allowed disabled:opacity-50"
                 >
@@ -2463,9 +2190,7 @@ export default function CourseBuilderPage() {
 
               <button
                 type="button"
-                onClick={() =>
-                  setAddingSection(true)
-                }
+                onClick={() => setAddingSection(true)}
                 className="mt-5 inline-flex items-center gap-2 rounded-xl bg-brand-600 px-5 py-3 text-sm font-bold text-white"
               >
                 <Plus className="h-4 w-4" />
@@ -2474,18 +2199,14 @@ export default function CourseBuilderPage() {
             </div>
           ) : (
             <div className="space-y-5">
-              {sections.map(
-                (section, index) => (
-                  <SectionBlock
-                    key={section.id}
-                    section={section}
-                    index={index}
-                    onRefresh={() =>
-                      loadData()
-                    }
-                  />
-                )
-              )}
+              {sections.map((section, index) => (
+                <SectionBlock
+                  key={section.id}
+                  section={section}
+                  index={index}
+                  onRefresh={() => loadData()}
+                />
+              ))}
             </div>
           )}
         </div>
@@ -2498,9 +2219,7 @@ export default function CourseBuilderPage() {
             </div>
 
             <div>
-              <h3 className="font-black text-slate-900">
-                تنظيم المحتوى الجديد
-              </h3>
+              <h3 className="font-black text-slate-900">تنظيم المحتوى الجديد</h3>
 
               <p className="mt-1 text-sm leading-7 text-slate-500">
                 كل درس أصبح له مساحة مستقلة لملفات الدرس، بحيث يستطيع الطالب الوصول إلى الملزمة والملفات المساعدة مباشرة بعد مشاهدة الدرس، بدل وضع كل الملفات في مكان واحد داخل الكورس.
