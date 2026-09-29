@@ -21,6 +21,7 @@ import {
   Layers,
   Loader2,
   Pencil,
+  Play,
   PlayCircle,
   Plus,
   RefreshCw,
@@ -39,6 +40,7 @@ import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
+import { Modal } from "@/components/ui/Modal";
 import { Skeleton } from "@/components/ui/Skeleton";
 import { EmptyState } from "@/components/ui/EmptyState";
 
@@ -62,6 +64,11 @@ import {
   isVideoUploading,
   type VideoUploadTask,
 } from "@/services/teacherCourses";
+
+import {
+  getLessonPlaybackUrl,
+  type VdoCipherPlaybackData,
+} from "@/services/videoPlayback";
 
 import { COLLEGE_LABELS } from "@/types";
 import { formatCurrency } from "@/utils/format";
@@ -161,6 +168,19 @@ function timeAgo(dateStr: string) {
 }
 
 /**
+ * بناء رابط تشغيل VdoCipher (iframe embed) من otp + playbackInfo.
+ * نفس الدالة المستخدمة في صفحة تفاصيل الكورس.
+ */
+function buildVdoCipherEmbedUrl(playbackData: VdoCipherPlaybackData): string {
+  const params = new URLSearchParams({
+    otp: playbackData.otp,
+    playbackInfo: playbackData.playbackInfo,
+  });
+
+  return `https://player.vdocipher.com/v2/?${params.toString()}`;
+}
+
+/**
  * يجلب الأقسام والدروس المضافة حديثًا من كل الكورسات.
  * لو عمود created_at غير موجود في أحد الجدولين، بيرجع قائمة فاضية بدون ما يكسر الصفحة.
  */
@@ -237,6 +257,14 @@ function LessonCard({
   const [description, setDescription] = useState(lesson.description ?? "");
   const [saving, setSaving] = useState(false);
 
+  // معاينة الفيديو
+  const [previewOpen, setPreviewOpen] = useState(false);
+  const [previewLoading, setPreviewLoading] = useState(false);
+  const [previewData, setPreviewData] = useState<VdoCipherPlaybackData | null>(
+    null
+  );
+  const [previewError, setPreviewError] = useState<string | null>(null);
+
   const hasVideo = Boolean(lesson.vdocipher_video_id);
 
   const isUploading =
@@ -251,6 +279,53 @@ function LessonCard({
       setDescription(lesson.description ?? "");
     }
   }, [lesson.title, lesson.description, editing]);
+
+  const closePreview = () => {
+    setPreviewOpen(false);
+    setPreviewData(null);
+    setPreviewError(null);
+    setPreviewLoading(false);
+  };
+
+  // لو الفيديو اتحذف أو اتغيّر والمعاينة مفتوحة، نقفلها
+  useEffect(() => {
+    if (previewOpen && !lesson.vdocipher_video_id) closePreview();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lesson.vdocipher_video_id]);
+
+  const openPreview = async () => {
+    const videoId = lesson.vdocipher_video_id;
+
+    if (!videoId) {
+      showToast("لا يوجد فيديو لهذا الدرس", "info");
+      return;
+    }
+
+    setPreviewOpen(true);
+    setPreviewData(null);
+    setPreviewError(null);
+    setPreviewLoading(true);
+
+    try {
+      // كل مرة نجيب OTP جديد لأنه بينتهي بسرعة
+      const playbackData = await getLessonPlaybackUrl(videoId);
+
+      if (!playbackData) {
+        throw new Error("لم يتم الحصول على بيانات تشغيل الفيديو");
+      }
+
+      setPreviewData(playbackData);
+    } catch (error) {
+      console.error("[Admin Preview] Video error:", error);
+      setPreviewError(errorMessage(error, "حدث خطأ أثناء تحميل الفيديو"));
+    } finally {
+      setPreviewLoading(false);
+    }
+  };
+
+  const previewEmbedUrl = previewData
+    ? buildVdoCipherEmbedUrl(previewData)
+    : null;
 
   const saveEdit = async () => {
     const cleanTitle = title.trim();
@@ -493,6 +568,18 @@ function LessonCard({
               تعديل
             </button>
 
+            {hasVideo && (
+              <button
+                type="button"
+                disabled={isUploading}
+                onClick={openPreview}
+                className="inline-flex items-center gap-2 rounded-xl bg-sky-50 px-3 py-2 text-xs font-semibold text-sky-700 transition hover:bg-sky-100 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                <PlayCircle className="h-3.5 w-3.5" />
+                معاينة الفيديو
+              </button>
+            )}
+
             <button
               type="button"
               onClick={togglePreview}
@@ -577,6 +664,80 @@ function LessonCard({
           {task.error}
         </div>
       )}
+
+      {/* Video preview player */}
+      <Modal
+        open={previewOpen}
+        onClose={closePreview}
+        title={lesson.title || "معاينة الفيديو"}
+      >
+        <div className="space-y-4">
+          {previewLoading ? (
+            <div className="flex aspect-video items-center justify-center rounded-2xl bg-black">
+              <div className="flex flex-col items-center gap-3 text-white">
+                <Loader2 className="h-8 w-8 animate-spin" />
+                <span className="text-sm">جاري تحميل الفيديو...</span>
+              </div>
+            </div>
+          ) : previewEmbedUrl ? (
+            <div className="overflow-hidden rounded-2xl bg-black shadow-2xl">
+              <iframe
+                key={previewEmbedUrl}
+                src={previewEmbedUrl}
+                title={lesson.title || "معاينة الفيديو"}
+                className="aspect-video w-full border-0"
+                allow="accelerometer; gyroscope; autoplay; encrypted-media; picture-in-picture"
+                allowFullScreen
+              />
+            </div>
+          ) : (
+            <div className="flex aspect-video items-center justify-center rounded-2xl bg-slate-950 px-4">
+              <div className="text-center text-white">
+                <Video className="mx-auto mb-3 h-10 w-10 opacity-70" />
+
+                <p className="text-sm text-white/70">
+                  {previewError || "لا يمكن تشغيل الفيديو حاليًا"}
+                </p>
+
+                <p className="mt-2 text-xs text-white/40">
+                  لو الفيديو لسه مرفوع حديثًا، ممكن يكون VdoCipher لسه بيعالجه.
+                  جرّب بعد دقيقة.
+                </p>
+
+                <button
+                  type="button"
+                  onClick={openPreview}
+                  className="mt-4 inline-flex items-center gap-2 rounded-xl bg-white/10 px-4 py-2 text-xs font-bold text-white transition hover:bg-white/20"
+                >
+                  <RefreshCw className="h-3.5 w-3.5" />
+                  المحاولة مرة أخرى
+                </button>
+              </div>
+            </div>
+          )}
+
+          <div className="rounded-xl bg-slate-50 p-4">
+            <div className="flex items-center gap-3">
+              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-brand-50">
+                <Play className="h-5 w-5 text-brand-600" />
+              </div>
+
+              <div className="min-w-0">
+                <h3 className="truncate font-bold text-slate-900">
+                  {lesson.title}
+                </h3>
+
+                <p className="mt-1 text-xs text-slate-500">
+                  معاينة الأدمن لفيديو الدرس
+                  {formatDuration(lesson.duration_seconds)
+                    ? ` · ${formatDuration(lesson.duration_seconds)}`
+                    : ""}
+                </p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </Modal>
     </div>
   );
 }
@@ -1454,17 +1615,23 @@ function NewActivityBanner({
 
             <div className="mt-1 flex flex-wrap items-center gap-1.5 text-[11px] font-bold">
               {counts.course > 0 && (
-                <span className={`rounded-full px-2 py-0.5 ${KIND_META.course.chipClass}`}>
+                <span
+                  className={`rounded-full px-2 py-0.5 ${KIND_META.course.chipClass}`}
+                >
                   {counts.course} كورس
                 </span>
               )}
               {counts.section > 0 && (
-                <span className={`rounded-full px-2 py-0.5 ${KIND_META.section.chipClass}`}>
+                <span
+                  className={`rounded-full px-2 py-0.5 ${KIND_META.section.chipClass}`}
+                >
                   {counts.section} قسم
                 </span>
               )}
               {counts.lesson > 0 && (
-                <span className={`rounded-full px-2 py-0.5 ${KIND_META.lesson.chipClass}`}>
+                <span
+                  className={`rounded-full px-2 py-0.5 ${KIND_META.lesson.chipClass}`}
+                >
                   {counts.lesson} درس
                 </span>
               )}
@@ -1523,7 +1690,9 @@ function NewActivityBanner({
                 {/* المسار: الكورس ‹ القسم ‹ الدرس */}
                 <div className="mt-1 flex flex-wrap items-center gap-1 text-xs text-slate-500">
                   <BookOpen className="h-3 w-3 shrink-0 text-slate-400" />
-                  <span className="max-w-[200px] truncate">{item.courseTitle}</span>
+                  <span className="max-w-[200px] truncate">
+                    {item.courseTitle}
+                  </span>
 
                   {item.kind !== "course" && item.sectionTitle && (
                     <>
