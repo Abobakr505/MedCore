@@ -1,5 +1,4 @@
 import { useEffect, useMemo, useState } from "react";
-import { Link } from "react-router-dom";
 import {
   Ticket,
   Search,
@@ -10,7 +9,6 @@ import {
   XCircle,
   UserRound,
   GraduationCap,
-  ChevronLeft,
   Eye,
   Trash2,
   X,
@@ -19,6 +17,7 @@ import {
   Tag,
   Flag,
   FileText,
+  Send,
 } from "lucide-react";
 
 import { Card } from "@/components/ui/Card";
@@ -30,15 +29,20 @@ import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import {
   fetchAllTickets,
   deleteTicket,
+  fetchTicketMessages,
+  sendTicketMessage,
+  updateTicketStatus,
 } from "@/services/support";
 
 import {
   TICKET_STATUS_LABELS,
   TICKET_CATEGORY_LABELS,
 } from "@/types";
+import type { TicketMessage } from "@/types";
 
 import { formatDateTime } from "@/utils/format";
 import { useToast } from "@/contexts/ToastContext";
+import { useAuth } from "@/contexts/AuthContext";
 
 const STATUS_COLORS: Record<
   string,
@@ -80,6 +84,7 @@ const FILTERS = [
 
 export default function TicketsAdminPage() {
   const { showToast } = useToast();
+  const { session } = useAuth();
 
   const [tickets, setTickets] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -91,6 +96,13 @@ export default function TicketsAdminPage() {
 
   const [deleteTarget, setDeleteTarget] = useState<any | null>(null);
   const [deleting, setDeleting] = useState(false);
+
+  // الردود وتغيير الحالة
+  const [messages, setMessages] = useState<TicketMessage[]>([]);
+  const [messagesLoading, setMessagesLoading] = useState(false);
+  const [replyText, setReplyText] = useState("");
+  const [sending, setSending] = useState(false);
+  const [statusSaving, setStatusSaving] = useState(false);
 
   useEffect(() => {
     setLoading(true);
@@ -104,6 +116,35 @@ export default function TicketsAdminPage() {
         setLoading(false);
       });
   }, [filter, showToast]);
+
+  // تحميل ردود التذكرة عند فتح التفاصيل
+  useEffect(() => {
+    if (!selectedTicket?.id) {
+      setMessages([]);
+      setReplyText("");
+      return;
+    }
+
+    let cancelled = false;
+
+    setMessagesLoading(true);
+
+    fetchTicketMessages(selectedTicket.id)
+      .then((data) => {
+        if (!cancelled) setMessages(data);
+      })
+      .catch(() => {
+        if (!cancelled) showToast("تعذر تحميل الردود", "error");
+      })
+      .finally(() => {
+        if (!cancelled) setMessagesLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedTicket?.id]);
 
   const filteredTickets = useMemo(() => {
     const query = search.trim().toLowerCase();
@@ -153,6 +194,67 @@ export default function TicketsAdminPage() {
 
       default:
         return Ticket;
+    }
+  };
+
+  // تحديث حالة التذكرة محليًا (في القائمة وفي المودال)
+  const applyStatus = (id: string, status: string) => {
+    setTickets((prev) =>
+      prev.map((t) => (t.id === id ? { ...t, status } : t))
+    );
+
+    setSelectedTicket((prev: any) =>
+      prev && prev.id === id ? { ...prev, status } : prev
+    );
+  };
+
+  const handleStatusChange = async (status: string) => {
+    if (!selectedTicket || selectedTicket.status === status) return;
+
+    try {
+      setStatusSaving(true);
+
+      await updateTicketStatus(selectedTicket.id, status);
+      applyStatus(selectedTicket.id, status);
+
+      showToast("تم تحديث حالة التذكرة", "success");
+    } catch (error) {
+      console.error("Update status error:", error);
+      showToast("تعذر تحديث الحالة", "error");
+    } finally {
+      setStatusSaving(false);
+    }
+  };
+
+  const handleSendReply = async () => {
+    const message = replyText.trim();
+
+    if (!message || !selectedTicket || !session?.user) return;
+
+    try {
+      setSending(true);
+
+      await sendTicketMessage(
+        selectedTicket.id,
+        session.user.id,
+        message
+      );
+
+      // أول رد على تذكرة مفتوحة يحوّلها تلقائيًا إلى "قيد المعالجة"
+      if (selectedTicket.status === "open") {
+        await updateTicketStatus(selectedTicket.id, "in_progress");
+        applyStatus(selectedTicket.id, "in_progress");
+      }
+
+      setReplyText("");
+      setMessages(await fetchTicketMessages(selectedTicket.id));
+
+      showToast("تم إرسال الرد للطالب", "success");
+    } catch (error) {
+      console.error("Send reply error:", error);
+      showToast("تعذر إرسال الرد", "error");
+    } finally {
+      setSending(false);
     }
   };
 
@@ -461,7 +563,7 @@ export default function TicketsAdminPage() {
                     </div>
 
                     <div className="flex flex-wrap gap-2">
-                      {/* Details */}
+                      {/* Details + Reply */}
                       <button
                         type="button"
                         onClick={() =>
@@ -470,9 +572,8 @@ export default function TicketsAdminPage() {
                         className="flex items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-3.5 py-2 text-xs font-bold text-slate-600 transition hover:border-brand-200 hover:bg-brand-50 hover:text-brand-600"
                       >
                         <Eye className="h-4 w-4" />
-                        تفاصيل
+                        تفاصيل والرد
                       </button>
-
 
                       {/* Delete */}
                       <button
@@ -517,7 +618,7 @@ export default function TicketsAdminPage() {
                   </h2>
 
                   <p className="mt-0.5 text-xs text-slate-400">
-                    مراجعة بيانات ومحتوى التذكرة
+                    مراجعة التذكرة والرد على صاحبها
                   </p>
                 </div>
               </div>
@@ -658,6 +759,106 @@ export default function TicketsAdminPage() {
                     </p>
                   </div>
                 </div>
+
+                {/* Change Status */}
+                <div>
+                  <div className="mb-2 flex items-center gap-2 text-xs font-bold text-slate-400">
+                    <CircleAlert className="h-4 w-4" />
+                    تغيير حالة التذكرة
+                  </div>
+
+                  <div className="flex flex-wrap gap-2">
+                    {FILTERS.filter((f) => f.value).map((item) => {
+                      const Icon = item.icon;
+                      const active =
+                        selectedTicket.status === item.value;
+
+                      return (
+                        <button
+                          key={item.value}
+                          type="button"
+                          disabled={statusSaving}
+                          onClick={() =>
+                            handleStatusChange(item.value)
+                          }
+                          className={`flex items-center gap-2 rounded-xl px-3.5 py-2 text-xs font-bold transition disabled:opacity-60 ${
+                            active
+                              ? "bg-brand-600 text-white shadow-md shadow-brand-500/20"
+                              : "border border-slate-200 bg-white text-slate-600 hover:border-brand-200 hover:bg-brand-50 hover:text-brand-600"
+                          }`}
+                        >
+                          <Icon className="h-4 w-4" />
+                          {item.label}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* Replies */}
+                <div>
+                  <div className="mb-2 flex items-center gap-2 text-xs font-bold text-slate-400">
+                    <MessageCircle className="h-4 w-4" />
+                    الردود ({messages.length})
+                  </div>
+
+                  {messagesLoading ? (
+                    <Skeleton className="mb-3 h-16 rounded-2xl" />
+                  ) : (
+                    messages.length > 0 && (
+                      <div className="mb-3 space-y-2">
+                        {messages.map((msg) => {
+                          const fromAdmin =
+                            msg.sender?.role === "admin";
+
+                          return (
+                            <div
+                              key={msg.id}
+                              className={`rounded-2xl p-3 ${
+                                fromAdmin
+                                  ? "bg-brand-50"
+                                  : "bg-slate-50"
+                              }`}
+                            >
+                              <p className="mb-1 text-[11px] font-bold text-slate-500">
+                                {fromAdmin
+                                  ? "الدعم الفني"
+                                  : msg.sender?.full_name ||
+                                    "صاحب التذكرة"}
+                              </p>
+
+                              <p className="whitespace-pre-wrap text-sm leading-6 text-slate-700">
+                                {msg.message}
+                              </p>
+
+                              <p className="mt-1 text-[11px] text-slate-400">
+                                {formatDateTime(msg.created_at)}
+                              </p>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )
+                  )}
+
+                  <textarea
+                    rows={4}
+                    value={replyText}
+                    onChange={(e) => setReplyText(e.target.value)}
+                    placeholder="اكتب ردك هنا..."
+                    className="w-full resize-none rounded-2xl border border-slate-200 bg-slate-50 p-3 text-sm leading-6 text-slate-700 outline-none transition placeholder:text-slate-400 focus:border-brand-400 focus:bg-white focus:ring-4 focus:ring-brand-500/10"
+                  />
+
+                  <button
+                    type="button"
+                    onClick={handleSendReply}
+                    disabled={sending || !replyText.trim()}
+                    className="mt-2 flex items-center justify-center gap-2 rounded-xl bg-brand-600 px-5 py-2.5 text-sm font-bold text-white transition hover:bg-brand-700 disabled:opacity-50"
+                  >
+                    <Send className="h-4 w-4" />
+                    {sending ? "جاري الإرسال..." : "إرسال الرد"}
+                  </button>
+                </div>
               </div>
             </div>
 
@@ -670,7 +871,6 @@ export default function TicketsAdminPage() {
               >
                 إغلاق
               </button>
-
 
               <button
                 type="button"

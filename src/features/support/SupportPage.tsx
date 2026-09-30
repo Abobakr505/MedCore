@@ -1,5 +1,4 @@
 import { useEffect, useState } from "react";
-import { Link } from "react-router-dom";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import {
@@ -8,12 +7,10 @@ import {
   MessageCircle,
   Clock3,
   CheckCircle2,
-  ChevronLeft,
   Ticket,
   X,
 } from "lucide-react";
 
-import { Card } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
@@ -26,8 +23,9 @@ import { useToast } from "@/contexts/ToastContext";
 import {
   fetchMyTickets,
   createTicket,
+  fetchTicketMessages,
 } from "@/services/support";
-import type { SupportTicket } from "@/types";
+import type { SupportTicket, TicketMessage } from "@/types";
 import {
   TICKET_STATUS_LABELS,
   TICKET_CATEGORY_LABELS,
@@ -63,6 +61,15 @@ export default function SupportPage() {
   const [loading, setLoading] = useState(true);
   const [modalOpen, setModalOpen] = useState(false);
 
+  // تفاصيل التذكرة والردود
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [messages, setMessages] = useState<TicketMessage[]>([]);
+  const [messagesLoading, setMessagesLoading] = useState(false);
+
+  // نجيب التذكرة المفتوحة من القائمة عشان الحالة تفضل محدثة
+  const selectedTicket =
+    tickets.find((ticket) => ticket.id === selectedId) ?? null;
+
   const {
     register,
     handleSubmit,
@@ -75,24 +82,19 @@ export default function SupportPage() {
     },
   });
 
-  const load = async () => {
+  const load = async (silent = false) => {
     if (!session?.user) return;
 
     try {
-      setLoading(true);
+      if (!silent) setLoading(true);
 
-      const data = await fetchMyTickets(
-        session.user.id
-      );
+      const data = await fetchMyTickets(session.user.id);
 
       setTickets(data);
     } catch {
-      showToast(
-        "تعذّر تحميل تذاكر الدعم",
-        "error"
-      );
+      showToast("تعذّر تحميل تذاكر الدعم", "error");
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   };
 
@@ -102,9 +104,7 @@ export default function SupportPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session?.user?.id]);
 
-  const onSubmit = async (
-    values: TicketFormValues
-  ) => {
+  const onSubmit = async (values: TicketFormValues) => {
     if (!session?.user) return;
 
     try {
@@ -115,20 +115,35 @@ export default function SupportPage() {
         values.category
       );
 
-      showToast(
-        "تم إنشاء التذكرة بنجاح",
-        "success"
-      );
+      showToast("تم إنشاء التذكرة بنجاح", "success");
 
       reset();
       setModalOpen(false);
 
       await load();
     } catch {
-      showToast(
-        "تعذّر إنشاء التذكرة",
-        "error"
-      );
+      showToast("تعذّر إنشاء التذكرة", "error");
+    }
+  };
+
+  const openTicket = async (ticket: SupportTicket) => {
+    setSelectedId(ticket.id);
+    setMessages([]);
+
+    try {
+      setMessagesLoading(true);
+
+      // نحدّث الحالة والردود مع بعض عشان يشوف آخر تغيير
+      const [freshMessages] = await Promise.all([
+        fetchTicketMessages(ticket.id),
+        load(true),
+      ]);
+
+      setMessages(freshMessages);
+    } catch {
+      showToast("تعذّر تحميل الردود", "error");
+    } finally {
+      setMessagesLoading(false);
     }
   };
 
@@ -244,7 +259,7 @@ export default function SupportPage() {
               </h2>
 
               <p className="mt-0.5 text-xs text-slate-400">
-                جميع طلبات الدعم الخاصة بك
+                اضغط على أي تذكرة لعرض التفاصيل وردود الدعم
               </p>
             </div>
 
@@ -259,30 +274,24 @@ export default function SupportPage() {
           <div className="p-3 sm:p-4">
             {loading ? (
               <div className="space-y-2.5">
-                {Array.from({ length: 5 }).map(
-                  (_, index) => (
-                    <Skeleton
-                      key={index}
-                      className="h-[76px] rounded-xl"
-                    />
-                  )
-                )}
+                {Array.from({ length: 5 }).map((_, index) => (
+                  <Skeleton
+                    key={index}
+                    className="h-[76px] rounded-xl"
+                  />
+                ))}
               </div>
             ) : tickets.length === 0 ? (
               <div className="py-12">
                 <EmptyState
-                  icon={
-                    <LifeBuoy className="h-6 w-6" />
-                  }
+                  icon={<LifeBuoy className="h-6 w-6" />}
                   title="لا توجد تذاكر دعم بعد"
                 />
 
                 <div className="mt-4 flex justify-center">
                   <Button
                     variant="outline"
-                    onClick={() =>
-                      setModalOpen(true)
-                    }
+                    onClick={() => setModalOpen(true)}
                     className="rounded-xl"
                   >
                     <Plus className="h-4 w-4" />
@@ -294,26 +303,24 @@ export default function SupportPage() {
               <div className="space-y-2">
                 {tickets.map((ticket) => {
                   const StatusIcon =
-                    STATUS_ICONS[
-                      ticket.status
-                    ] || Clock3;
+                    STATUS_ICONS[ticket.status] || Clock3;
 
                   return (
-<div
-  key={ticket.id}
-  className="group block w-full rounded-2xl border border-transparent transition hover:border-brand-100 hover:bg-brand-50/50"
->
-                      <div className="flex min-h-[76px] items-center gap-3 rounded-xl border border-transparent px-3 py-3 transition-all duration-200 hover:border-brand-100 hover:bg-brand-50/50 sm:px-4">
+                    <button
+                      key={ticket.id}
+                      type="button"
+                      onClick={() => openTicket(ticket)}
+                      className="group block w-full rounded-2xl border border-transparent text-right transition hover:border-brand-100 hover:bg-brand-50/50"
+                    >
+                      <div className="flex min-h-[76px] items-center gap-3 rounded-xl px-3 py-3 sm:px-4">
                         {/* Icon */}
                         <div
                           className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl transition-colors ${
-                            ticket.status ===
-                            "resolved"
+                            ticket.status === "resolved"
                               ? "bg-emerald-50 text-emerald-500"
-                              : ticket.status ===
-                                "closed"
-                              ? "bg-slate-100 text-slate-500"
-                              : "bg-brand-50 text-brand-500"
+                              : ticket.status === "closed"
+                                ? "bg-slate-100 text-slate-500"
+                                : "bg-brand-50 text-brand-500"
                           }`}
                         >
                           <MessageCircle className="h-4.5 w-4.5" />
@@ -327,19 +334,13 @@ export default function SupportPage() {
 
                           <div className="mt-1 flex items-center gap-1.5 overflow-hidden text-[11px] text-slate-400">
                             <span className="shrink-0">
-                              {
-                                TICKET_CATEGORY_LABELS[
-                                  ticket.category
-                                ]
-                              }
+                              {TICKET_CATEGORY_LABELS[ticket.category]}
                             </span>
 
                             <span>•</span>
 
                             <span className="truncate">
-                              {formatDateTime(
-                                ticket.created_at
-                              )}
+                              {formatDateTime(ticket.created_at)}
                             </span>
                           </div>
                         </div>
@@ -347,23 +348,14 @@ export default function SupportPage() {
                         {/* Status */}
                         <div className="flex shrink-0 items-center gap-2">
                           <Badge
-                            color={
-                              STATUS_COLORS[
-                                ticket.status
-                              ]
-                            }
+                            color={STATUS_COLORS[ticket.status]}
                           >
                             <StatusIcon className="mr-1 h-3 w-3" />
-                            {
-                              TICKET_STATUS_LABELS[
-                                ticket.status
-                              ]
-                            }
+                            {TICKET_STATUS_LABELS[ticket.status]}
                           </Badge>
-
                         </div>
                       </div>
-                    </div>
+                    </button>
                   );
                 })}
               </div>
@@ -371,6 +363,100 @@ export default function SupportPage() {
           </div>
         </div>
       </div>
+
+      {/* Ticket Details Modal */}
+      <Modal
+        open={!!selectedTicket}
+        onClose={() => setSelectedId(null)}
+        title="تفاصيل التذكرة"
+      >
+        {selectedTicket && (
+          <div className="space-y-4">
+            <div className="flex items-start justify-between gap-3">
+              <h3 className="text-base font-extrabold text-slate-800">
+                {selectedTicket.subject}
+              </h3>
+
+              <Badge color={STATUS_COLORS[selectedTicket.status]}>
+                {TICKET_STATUS_LABELS[selectedTicket.status]}
+              </Badge>
+            </div>
+
+            {(selectedTicket.status === "resolved" ||
+              selectedTicket.status === "closed") && (
+              <div className="flex items-center gap-2 rounded-xl bg-emerald-50 p-3 text-sm font-bold text-emerald-700">
+                <CheckCircle2 className="h-4 w-4" />
+                تم حل مشكلتك
+              </div>
+            )}
+
+            {selectedTicket.status === "in_progress" && (
+              <div className="flex items-center gap-2 rounded-xl bg-blue-50 p-3 text-sm font-bold text-blue-700">
+                <Clock3 className="h-4 w-4" />
+                فريق الدعم يعمل على مشكلتك حاليًا
+              </div>
+            )}
+
+            {selectedTicket.status === "open" && (
+              <div className="flex items-center gap-2 rounded-xl bg-amber-50 p-3 text-sm font-bold text-amber-700">
+                <Clock3 className="h-4 w-4" />
+                تم استلام تذكرتك وفي انتظار المراجعة
+              </div>
+            )}
+
+            <div className="rounded-xl bg-slate-50 p-3">
+              <p className="mb-1 text-xs font-bold text-slate-400">
+                مشكلتك
+              </p>
+
+              <p className="whitespace-pre-wrap text-sm leading-6 text-slate-600">
+                {selectedTicket.description}
+              </p>
+            </div>
+
+            <div>
+              <p className="mb-2 text-xs font-bold text-slate-400">
+                ردود الدعم الفني
+              </p>
+
+              {messagesLoading ? (
+                <Skeleton className="h-16 rounded-xl" />
+              ) : messages.length === 0 ? (
+                <p className="rounded-xl border border-dashed border-slate-200 p-4 text-center text-xs text-slate-400">
+                  لا يوجد رد حتى الآن
+                </p>
+              ) : (
+                <div className="space-y-2">
+                  {messages.map((msg) => {
+                    const fromSupport = msg.sender?.role === "admin";
+
+                    return (
+                      <div
+                        key={msg.id}
+                        className={`rounded-xl p-3 ${
+                          fromSupport ? "bg-brand-50" : "bg-slate-50"
+                        }`}
+                      >
+                        <p className="mb-1 text-[11px] font-bold text-slate-500">
+                          {fromSupport ? "الدعم الفني" : "أنت"}
+                        </p>
+
+                        <p className="whitespace-pre-wrap text-sm leading-6 text-slate-700">
+                          {msg.message}
+                        </p>
+
+                        <p className="mt-1 text-[11px] text-slate-400">
+                          {formatDateTime(msg.created_at)}
+                        </p>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+      </Modal>
 
       {/* Create Ticket Modal */}
       <Modal
@@ -411,29 +497,16 @@ export default function SupportPage() {
           />
 
           {/* Category */}
-          <Select
-            label="التصنيف"
-            {...register("category")}
-          >
-            <option value="technical">
-              مشكلة تقنية
-            </option>
+          <Select label="التصنيف" {...register("category")}>
+            <option value="technical">مشكلة تقنية</option>
 
-            <option value="payment">
-              استفسار عن دفع
-            </option>
+            <option value="payment">استفسار عن دفع</option>
 
-            <option value="course_content">
-              محتوى الكورس
-            </option>
+            <option value="course_content">محتوى الكورس</option>
 
-            <option value="account">
-              الحساب
-            </option>
+            <option value="account">الحساب</option>
 
-            <option value="other">
-              أخرى
-            </option>
+            <option value="other">أخرى</option>
           </Select>
 
           {/* Description */}
@@ -482,4 +555,3 @@ export default function SupportPage() {
     </div>
   );
 }
-
