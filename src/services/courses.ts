@@ -242,16 +242,24 @@ export async function fetchCourseBySlug(
 ========================================================= */
 
 export async function fetchCourseSections(
-  courseId: string
+  courseId: string,
+  options: { suspendedAt?: string | null } = {}
 ) {
   if (!courseId) {
     throw new Error("Course ID is required");
   }
-
-  const {
-    data,
-    error,
-  } = await supabase
+ 
+  const cutoff = options.suspendedAt
+    ? new Date(options.suspendedAt).getTime()
+    : null;
+ 
+  const isBeforeCutoff = (createdAt?: string | null) => {
+    if (cutoff === null) return true;
+    if (!createdAt) return true;
+    return new Date(createdAt).getTime() <= cutoff;
+  };
+ 
+  const { data, error } = await supabase
     .from("course_sections")
     .select(
       `
@@ -283,187 +291,147 @@ export async function fetchCourseSections(
       `
     )
     .eq("course_id", courseId)
-    .order("order_index", {
-      ascending: true,
-    });
-
+    .order("order_index", { ascending: true });
+ 
   if (error) {
-    console.error(
-      "fetchCourseSections error:",
-      error
-    );
-
+    console.error("fetchCourseSections error:", error);
     throw error;
   }
-
-  const sections = (data ?? []).map(
-    (section: any) => {
-      const lessons = [
-        ...(section.lessons ?? []),
-      ]
-        .sort(
-          (a: any, b: any) => {
-            const orderA = Number(
-              a.order_index ?? 0
-            );
-
-            const orderB = Number(
-              b.order_index ?? 0
-            );
-
-            /* أولًا: ترتيب الدروس */
+ 
+  const sections = (data ?? []).map((section: any) => {
+    const lessons = [...(section.lessons ?? [])]
+      /* استبعاد الدروس اللي اتضافت بعد الإيقاف */
+      .filter((lesson: any) => isBeforeCutoff(lesson.created_at))
+      .sort((a: any, b: any) => {
+        const orderA = Number(a.order_index ?? 0);
+        const orderB = Number(b.order_index ?? 0);
+ 
+        if (orderA !== orderB) {
+          return orderA - orderB;
+        }
+ 
+        const dateA = a.created_at ? new Date(a.created_at).getTime() : 0;
+        const dateB = b.created_at ? new Date(b.created_at).getTime() : 0;
+ 
+        return dateA - dateB;
+      })
+      .map((lesson: any) => {
+        const files = [...(lesson.lesson_files ?? [])]
+          /* استبعاد الملفات اللي اتضافت بعد الإيقاف */
+          .filter((file: any) => isBeforeCutoff(file.created_at))
+          .sort((a: any, b: any) => {
+            const orderA = Number(a.order_index ?? 0);
+            const orderB = Number(b.order_index ?? 0);
+ 
             if (orderA !== orderB) {
               return orderA - orderB;
             }
-
-            /* ثانيًا: الأقدم created_at */
-            const dateA = a.created_at
-              ? new Date(
-                  a.created_at
-                ).getTime()
-              : 0;
-
-            const dateB = b.created_at
-              ? new Date(
-                  b.created_at
-                ).getTime()
-              : 0;
-
+ 
+            const dateA = a.created_at ? new Date(a.created_at).getTime() : 0;
+            const dateB = b.created_at ? new Date(b.created_at).getTime() : 0;
+ 
             return dateA - dateB;
-          }
-        )
-        .map(
-          (lesson: any) => {
-            const files = [
-              ...(lesson.lesson_files ?? []),
-            ].sort(
-              (
-                a: any,
-                b: any
-              ) => {
-                const orderA =
-                  Number(
-                    a.order_index ?? 0
-                  );
-
-                const orderB =
-                  Number(
-                    b.order_index ?? 0
-                  );
-
-                if (
-                  orderA !== orderB
-                ) {
-                  return (
-                    orderA - orderB
-                  );
-                }
-
-                const dateA =
-                  a.created_at
-                    ? new Date(
-                        a.created_at
-                      ).getTime()
-                    : 0;
-
-                const dateB =
-                  b.created_at
-                    ? new Date(
-                        b.created_at
-                      ).getTime()
-                    : 0;
-
-                return (
-                  dateA - dateB
-                );
-              }
-            );
-
-            return {
-              ...lesson,
-              files,
-            };
-          }
-        );
-
-      return {
-        ...section,
-        lessons,
-      };
-    }
-  );
-
+          });
+ 
+        return {
+          ...lesson,
+          files,
+        };
+      });
+ 
+    return {
+      ...section,
+      lessons,
+    };
+  });
+ 
   return sections as CourseSection[];
 }
-
+ 
+/* =========================================================
+   Enrollment Access
+   يرجع حالة الوصول للطالب في الكورس:
+   - null: مش مشترك (أو الاشتراك ملغي / معلق)
+   - active: وصول كامل
+   - suspended: وصول للمحتوى اللي اتنشر قبل suspended_at بس
+========================================================= */
+ 
+export interface EnrollmentAccess {
+  status: "active" | "suspended";
+  suspended_at: string | null;
+}
+ 
+export async function fetchEnrollmentAccess(
+  courseId: string,
+  studentId: string
+): Promise<EnrollmentAccess | null> {
+  if (!courseId || !studentId) {
+    return null;
+  }
+ 
+  const { data, error } = await supabase
+    .from("enrollments")
+    .select("status, suspended_at")
+    .eq("course_id", courseId)
+    .eq("student_id", studentId)
+    .in("status", ["active", "suspended"])
+    .maybeSingle();
+ 
+  if (error) {
+    console.error("fetchEnrollmentAccess error:", error);
+    throw error;
+  }
+ 
+  return (data as EnrollmentAccess | null) ?? null;
+}
+ 
 /* =========================================================
    Check Student Enrollment
+   (الموقوف يعتبر مشترك، والفلترة بتتم في fetchCourseSections)
 ========================================================= */
-
+ 
 export async function isStudentEnrolled(
   courseId: string,
   studentId: string
 ) {
-  if (!courseId || !studentId) {
-    return false;
-  }
-
-  const {
-    data,
-    error,
-  } = await supabase
-    .from("enrollments")
-    .select("id, status")
-    .eq("course_id", courseId)
-    .eq("student_id", studentId)
-    .eq("status", "active")
-    .maybeSingle();
-
-  if (error) {
-    console.error(
-      "isStudentEnrolled error:",
-      error
-    );
-
-    throw error;
-  }
-
-  return !!data;
+  const access = await fetchEnrollmentAccess(courseId, studentId);
+  return !!access;
 }
-
+ 
 /* =========================================================
    Fetch Course Quizzes
 ========================================================= */
-
+ 
 export async function fetchCourseQuizzes(
-  courseId: string
+  courseId: string,
+  options: { suspendedAt?: string | null } = {}
 ) {
   if (!courseId) {
     throw new Error("Course ID is required");
   }
-
-  const {
-    data,
-    error,
-  } = await supabase
+ 
+  let query = supabase
     .from("quizzes")
     .select("*")
-    .eq("course_id", courseId)
-    .order("created_at", {
-      ascending: true,
-    });
-
+    .eq("course_id", courseId);
+ 
+  /* استبعاد الاختبارات اللي اتضافت بعد الإيقاف */
+  if (options.suspendedAt) {
+    query = query.lte("created_at", options.suspendedAt);
+  }
+ 
+  const { data, error } = await query.order("created_at", {
+    ascending: true,
+  });
+ 
   if (error) {
-    console.error(
-      "fetchCourseQuizzes error:",
-      error
-    );
-
+    console.error("fetchCourseQuizzes error:", error);
     throw error;
   }
-
+ 
   return data ?? [];
 }
+ 
 
 /* =========================================================
    Fetch Lesson Progress

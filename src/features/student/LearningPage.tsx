@@ -58,7 +58,10 @@ import {
   fetchLessonProgress,
   updateLessonProgress,
   fetchCourseQuizzes,
+  fetchEnrollmentAccess, // ← جديد
 } from "@/services/courses";
+ 
+
 import { fetchStudentInstallments } from "@/services/payments";
 
 import type {
@@ -627,7 +630,8 @@ export default function LearningPage() {
     useRef<HTMLDivElement | null>(
       null
     );
-
+const [suspendedAt, setSuspendedAt] = useState<string | null>(null);
+ 
   const [course, setCourse] =
     useState<Course | null>(null);
 
@@ -724,7 +728,7 @@ export default function LearningPage() {
     onSuspiciousActivity: handleSuspiciousActivity,
   });
 
-  /* ---------------------------------------------------------------------- */
+/* ---------------------------------------------------------------------- */
   /* Load course                                                             */
   /* ---------------------------------------------------------------------- */
 
@@ -748,9 +752,41 @@ export default function LearningPage() {
 
         setCourse(loadedCourse);
 
+        /* ------------------------------------------------------------------ */
+        /* المستخدم + حالة الاشتراك (لو موقوف نحدد وقت الإيقاف)                */
+        /* ------------------------------------------------------------------ */
+
+        const userResult =
+          await supabase.auth.getUser();
+
+        const user =
+          userResult.data.user;
+
+        let currentSuspendedAt: string | null = null;
+
+        if (user) {
+          const access =
+            await fetchEnrollmentAccess(
+              loadedCourse.id,
+              user.id
+            );
+
+          currentSuspendedAt =
+            access?.status === "suspended"
+              ? access.suspended_at
+              : null;
+        }
+
+        setSuspendedAt(currentSuspendedAt);
+
+        /* ------------------------------------------------------------------ */
+        /* الدروس                                                              */
+        /* ------------------------------------------------------------------ */
+
         const loadedSections =
           await fetchCourseSections(
-            loadedCourse.id
+            loadedCourse.id,
+            { suspendedAt: currentSuspendedAt }
           );
 
         const normalizedSections =
@@ -802,9 +838,14 @@ export default function LearningPage() {
           );
         }
 
+        /* ------------------------------------------------------------------ */
+        /* الاختبارات                                                          */
+        /* ------------------------------------------------------------------ */
+
         const loadedQuizzes =
           await fetchCourseQuizzes(
-            loadedCourse.id
+            loadedCourse.id,
+            { suspendedAt: currentSuspendedAt }
           );
 
         setQuizzes(
@@ -812,11 +853,9 @@ export default function LearningPage() {
             []) as Quiz[]
         );
 
-        const userResult =
-          await supabase.auth.getUser();
-
-        const user =
-          userResult.data.user;
+        /* ------------------------------------------------------------------ */
+        /* الأقساط + التقدم                                                    */
+        /* ------------------------------------------------------------------ */
 
         if (user) {
           if (loadedCourse.is_installment) {
@@ -882,42 +921,41 @@ export default function LearningPage() {
   /* Load lesson files                                                       */
   /* ---------------------------------------------------------------------- */
 
-  const loadLessonFiles = useCallback(
-    async (lessonId: string) => {
-      setFilesLoading(true);
-
-      try {
-        const {
-          data,
-          error,
-        } = await supabase
-          .from("lesson_files")
-          .select("*")
-          .eq("lesson_id", lessonId)
-          .order("order_index", {
-            ascending: true,
-          });
-
-        if (error) {
-          throw error;
-        }
-
-        setActiveLessonFiles(
-          (data ?? []) as LessonFile[]
-        );
-      } catch (error) {
-        console.error(
-          "Load lesson files error:",
-          error
-        );
-
-        setActiveLessonFiles([]);
-      } finally {
-        setFilesLoading(false);
+const loadLessonFiles = useCallback(
+  async (lessonId: string) => {
+    setFilesLoading(true);
+ 
+    try {
+      let query = supabase
+        .from("lesson_files")
+        .select("*")
+        .eq("lesson_id", lessonId);
+ 
+      // الملفات اللي اتضافت بعد الإيقاف متظهرش
+      if (suspendedAt) {
+        query = query.lte("created_at", suspendedAt);
       }
-    },
-    []
-  );
+ 
+      const { data, error } = await query.order("order_index", {
+        ascending: true,
+      });
+ 
+      if (error) {
+        throw error;
+      }
+ 
+      setActiveLessonFiles((data ?? []) as LessonFile[]);
+    } catch (error) {
+      console.error("Load lesson files error:", error);
+ 
+      setActiveLessonFiles([]);
+    } finally {
+      setFilesLoading(false);
+    }
+  },
+  [suspendedAt] // ← كانت []
+);
+ 
 
   /* ---------------------------------------------------------------------- */
   /* Get video playback data (VdoCipher: otp + playbackInfo)                 */
@@ -1501,7 +1539,25 @@ const markLessonCompleted = useCallback(
 
           {/* Content */}
           <main className="min-w-0 p-3 sm:p-5 lg:p-7">
+             
+{suspendedAt && (
+  <div className="mx-auto mb-4 flex max-w-5xl items-start gap-3 rounded-2xl border border-amber-200 bg-amber-50 p-4">
+    <AlertCircle className="mt-0.5 h-5 w-5 shrink-0 text-amber-600" />
+ 
+    <div>
+      <p className="text-sm font-black text-amber-900">
+        اشتراكك في هذا الكورس موقوف
+      </p>
+ 
+      <p className="mt-1 text-xs leading-6 text-amber-700">
+        تقدر تكمل الدروس والملفات الموجودة حتى الآن، لكن المحتوى الجديد اللي
+        يتضاف بعد الإيقاف مش هيظهر لك. تواصل مع الإدارة لإعادة تفعيل اشتراكك.
+      </p>
+    </div>
+  </div>
+)}
             {!activeLesson ? (
+              
               <div className="flex min-h-[70vh] items-center justify-center rounded-3xl border border-dashed border-slate-300 bg-white">
                 <div className="text-center">
                   <BookOpen className="mx-auto h-12 w-12 text-slate-300" />

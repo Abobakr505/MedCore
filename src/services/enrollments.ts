@@ -6,7 +6,7 @@ export async function fetchStudentEnrollments(studentId: string) {
     .from("enrollments")
     .select("*, course:courses(*, teacher:profiles!courses_teacher_id_fkey(full_name))")
     .eq("student_id", studentId)
-    .eq("status", "active")
+    .in("status", ["active", "suspended"])
     .order("enrolled_at", { ascending: false });
   if (error) throw error;
   return (data ?? []) as unknown as Enrollment[];
@@ -87,9 +87,12 @@ export type EnrollmentStatus = "active" | "pending" | "suspended" | "cancelled";
 export async function updateEnrollmentStatus(id: string, status: EnrollmentStatus) {
   const { data, error } = await supabase
     .from("enrollments")
-    .update({ status })
+    .update({
+      status,
+      suspended_at: status === "suspended" ? new Date().toISOString() : null,
+    })
     .eq("id", id)
-    .select("id, status")
+    .select("id, status, suspended_at")
     .maybeSingle();
 
   if (error) throw error;
