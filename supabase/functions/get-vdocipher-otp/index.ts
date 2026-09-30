@@ -3,6 +3,7 @@
 // يطلّع OTP لتشغيل فيديو من VdoCipher مع علامة مائية برقم تليفون الطالب.
 // - يتحقق من المستخدم
 // - يتحقق من صلاحية المشاهدة (معاينة مجانية / مشترك / صاحب الكورس / أدمن)
+// - الاشتراك الموقوف: يشاهد الدروس اللي اتنشرت قبل suspended_at فقط
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
@@ -92,7 +93,7 @@ Deno.serve(async (req) => {
     const { data: lesson, error: lessonError } = await admin
       .from("lessons")
       .select(
-        "id, is_preview, course_sections!inner(course_id, unlock_month, courses!inner(teacher_id))",
+        "id, created_at, is_preview, course_sections!inner(course_id, unlock_month, courses!inner(teacher_id))",
       )
       .eq("vdocipher_video_id", videoId)
       .maybeSingle();
@@ -108,11 +109,11 @@ Deno.serve(async (req) => {
     const course = first<any>(section?.courses);
     const courseId: string | undefined = section?.course_id;
 
-const { data: profile } = await admin
-  .from("profiles")
-  .select("role, phone, full_name") // ← ضفنا full_name
-  .eq("id", user.id)
-  .maybeSingle();
+    const { data: profile } = await admin
+      .from("profiles")
+      .select("role, phone, full_name")
+      .eq("id", user.id)
+      .maybeSingle();
 
     const isAdmin = profile?.role === "admin";
     const isOwner = course?.teacher_id === user.id;
@@ -122,10 +123,10 @@ const { data: profile } = await admin
     if (!canWatch && courseId) {
       const { data: enrollment, error: enrollError } = await admin
         .from("enrollments")
-        .select("id")
+        .select("id, status, suspended_at")
         .eq("course_id", courseId)
         .eq("student_id", user.id) // عدّل اسم العمود لو مختلف (مثلاً user_id)
-        .eq("status", "active")
+        .in("status", ["active", "suspended"])
         .limit(1)
         .maybeSingle();
 
@@ -134,7 +135,23 @@ const { data: profile } = await admin
         return json({ error: "Failed to verify enrollment" }, 500);
       }
 
-      canWatch = Boolean(enrollment);
+      if (enrollment) {
+        // الاشتراك الموقوف: ممنوع الدروس اللي اتنشرت بعد وقت الإيقاف
+        const lessonCreatedAt = (lesson as any).created_at;
+
+        const publishedAfterSuspension =
+          enrollment.status === "suspended" &&
+          enrollment.suspended_at &&
+          lessonCreatedAt &&
+          new Date(lessonCreatedAt).getTime() >
+            new Date(enrollment.suspended_at).getTime();
+
+        if (publishedAfterSuspension) {
+          return json({ error: "Forbidden" }, 403);
+        }
+
+        canWatch = true;
+      }
     }
 
     if (!canWatch) return json({ error: "Forbidden" }, 403);
@@ -144,22 +161,20 @@ const { data: profile } = await admin
     // ابعتلي جدول الأقساط/الدفع وأكمّله.
 
     // =========================
-    // 5) العلامة المائية (رقم التليفون)
+    // 5) العلامة المائية (الاسم + رقم التليفون)
     // =========================
-const name = String(profile?.full_name ?? "").trim();
+    const name = String(profile?.full_name ?? "").trim();
 
-const phone = String(
-  profile?.phone ||
-    user.phone ||
-    (user.user_metadata as any)?.phone ||
-    "",
-).trim();
+    const phone = String(
+      profile?.phone ||
+        user.phone ||
+        (user.user_metadata as any)?.phone ||
+        "",
+    ).trim();
 
-// الاسم - الرقم (ولو واحد منهم ناقص يعرض الموجود بس)
-const watermarkText =
-  [name, phone].filter(Boolean).join(" - ") ||
-  user.email ||
-  user.id;
+    // الاسم - الرقم (ولو واحد منهم ناقص يعرض الموجود بس)
+    const watermarkText =
+      [name, phone].filter(Boolean).join(" - ") || user.email || user.id;
 
     const annotate = JSON.stringify([
       // متحرك
@@ -232,4 +247,4 @@ const watermarkText =
       500,
     );
   }
-}); 
+});
