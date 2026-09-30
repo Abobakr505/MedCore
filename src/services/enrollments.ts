@@ -81,3 +81,20 @@ export async function enrollFreeCourse(studentId: string, courseId: string) {
 
   if (error) throw error;
 }
+
+export type EnrollmentStatus = "active" | "pending" | "suspended" | "cancelled";
+
+export async function updateEnrollmentStatus(id: string, status: EnrollmentStatus) {
+  const { data, error } = await supabase
+    .from("enrollments")
+    .update({ status })
+    .eq("id", id)
+    .select("id, status")
+    .maybeSingle();
+
+  if (error) throw error;
+  if (!data) {
+    throw new Error("لم يتم تحديث الاشتراك، تأكد من صلاحيات الأدمن (RLS)");
+  }
+  return data;
+}

@@ -10,6 +10,11 @@ import {
   Bell,
   X,
   ChevronDown,
+  PauseCircle,
+  Ban,
+  PlayCircle,
+  Loader2,
+  AlertTriangle,
 } from "lucide-react";
 
 import { Card } from "@/components/ui/Card";
@@ -17,7 +22,11 @@ import { Badge } from "@/components/ui/Badge";
 import { Skeleton } from "@/components/ui/Skeleton";
 import { EmptyState } from "@/components/ui/EmptyState";
 
-import { fetchAllEnrollments } from "@/services/enrollments";
+import {
+  fetchAllEnrollments,
+  updateEnrollmentStatus,
+  type EnrollmentStatus,
+} from "@/services/enrollments";
 
 import { ENROLLMENT_STATUS_LABELS } from "@/types";
 
@@ -40,6 +49,99 @@ const STATUS_ICONS: Record<string, typeof CheckCircle2> = {
   pending: Clock3,
   suspended: XCircle,
   cancelled: XCircle,
+};
+
+// احتياطي لو ENROLLMENT_STATUS_LABELS مفيهاش الحالة
+const FALLBACK_LABELS: Record<string, string> = {
+  active: "نشط",
+  pending: "معلق",
+  suspended: "موقوف",
+  cancelled: "ملغي",
+};
+
+function statusLabel(status: string) {
+  return (
+    (ENROLLMENT_STATUS_LABELS as Record<string, string>)[status] ||
+    FALLBACK_LABELS[status] ||
+    status
+  );
+}
+
+type Tone = "amber" | "red" | "emerald";
+
+const ACTIONS: Record<
+  EnrollmentStatus,
+  {
+    label: string;
+    icon: typeof PauseCircle;
+    tone: Tone;
+    confirmTitle: string;
+    confirmText: (student: string, course: string) => string;
+    confirmButton: string;
+    success: string;
+  }
+> = {
+  suspended: {
+    label: "إيقاف",
+    icon: PauseCircle,
+    tone: "amber",
+    confirmTitle: "إيقاف الاشتراك؟",
+    confirmText: (s, c) =>
+      `سيتم إيقاف اشتراك "${s}" في كورس "${c}"، ولن يستطيع الطالب الدخول للكورس حتى تعيد تفعيله.`,
+    confirmButton: "نعم، أوقف الاشتراك",
+    success: "تم إيقاف الاشتراك",
+  },
+  cancelled: {
+    label: "إلغاء",
+    icon: Ban,
+    tone: "red",
+    confirmTitle: "إلغاء الاشتراك؟",
+    confirmText: (s, c) =>
+      `سيتم إلغاء اشتراك "${s}" في كورس "${c}". تقدر ترجّع تفعيله بعدين لو احتجت.`,
+    confirmButton: "نعم، ألغِ الاشتراك",
+    success: "تم إلغاء الاشتراك",
+  },
+  active: {
+    label: "تفعيل",
+    icon: PlayCircle,
+    tone: "emerald",
+    confirmTitle: "تفعيل الاشتراك؟",
+    confirmText: (s, c) =>
+      `سيتم تفعيل اشتراك "${s}" في كورس "${c}" ويقدر الطالب يدخل الكورس مرة أخرى.`,
+    confirmButton: "نعم، فعّل الاشتراك",
+    success: "تم تفعيل الاشتراك",
+  },
+  pending: {
+    label: "تعليق",
+    icon: Clock3,
+    tone: "amber",
+    confirmTitle: "تعليق الاشتراك؟",
+    confirmText: (s, c) => `سيتم تعليق اشتراك "${s}" في كورس "${c}".`,
+    confirmButton: "نعم، علّق الاشتراك",
+    success: "تم تعليق الاشتراك",
+  },
+};
+
+// الإجراءات المتاحة لكل حالة
+const AVAILABLE_ACTIONS: Record<string, EnrollmentStatus[]> = {
+  active: ["suspended", "cancelled"],
+  pending: ["active", "cancelled"],
+  suspended: ["active", "cancelled"],
+  cancelled: ["active"],
+};
+
+const TONE_CLASSES: Record<Tone, string> = {
+  amber:
+    "bg-amber-50 text-amber-700 ring-amber-200 hover:bg-amber-100 hover:text-amber-800",
+  red: "bg-red-50 text-red-700 ring-red-200 hover:bg-red-100 hover:text-red-800",
+  emerald:
+    "bg-emerald-50 text-emerald-700 ring-emerald-200 hover:bg-emerald-100 hover:text-emerald-800",
+};
+
+const CONFIRM_BUTTON_CLASSES: Record<Tone, string> = {
+  amber: "bg-amber-500 hover:bg-amber-600 focus:ring-amber-500/30",
+  red: "bg-red-500 hover:bg-red-600 focus:ring-red-500/30",
+  emerald: "bg-emerald-500 hover:bg-emerald-600 focus:ring-emerald-500/30",
 };
 
 function timeAgo(dateStr: string) {
@@ -71,6 +173,17 @@ export default function EnrollmentsAdminPage() {
     }
   });
 
+  // إجراءات الإيقاف/الإلغاء/التفعيل
+  const [confirm, setConfirm] = useState<{
+    row: any;
+    status: EnrollmentStatus;
+  } | null>(null);
+  const [busyId, setBusyId] = useState<string | null>(null);
+  const [toast, setToast] = useState<{
+    type: "success" | "error";
+    message: string;
+  } | null>(null);
+
   const load = useCallback((silent = false) => {
     if (!silent) setLoading(true);
 
@@ -89,12 +202,20 @@ export default function EnrollmentsAdminPage() {
     return () => clearInterval(id);
   }, [load]);
 
+  // إخفاء رسالة النتيجة تلقائياً
+  useEffect(() => {
+    if (!toast) return;
+    const id = setTimeout(() => setToast(null), 3500);
+    return () => clearTimeout(id);
+  }, [toast]);
+
   const stats = useMemo(() => {
     return {
       total: rows.length,
       active: rows.filter((r) => r.status === "active").length,
       pending: rows.filter((r) => r.status === "pending").length,
       suspended: rows.filter((r) => r.status === "suspended").length,
+      cancelled: rows.filter((r) => r.status === "cancelled").length,
     };
   }, [rows]);
 
@@ -129,6 +250,37 @@ export default function EnrollmentsAdminPage() {
     }
   };
 
+  const requestAction = (row: any, status: EnrollmentStatus) => {
+    setConfirm({ row, status });
+  };
+
+  const runAction = async () => {
+    if (!confirm) return;
+
+    const { row, status } = confirm;
+    setBusyId(row.id);
+
+    try {
+      await updateEnrollmentStatus(row.id, status);
+
+      setRows((prev) =>
+        prev.map((r) => (r.id === row.id ? { ...r, status } : r))
+      );
+      setToast({ type: "success", message: ACTIONS[status].success });
+    } catch (err) {
+      setToast({
+        type: "error",
+        message:
+          err instanceof Error && err.message
+            ? err.message
+            : "تعذر تحديث الاشتراك، حاول مرة أخرى",
+      });
+    } finally {
+      setBusyId(null);
+      setConfirm(null);
+    }
+  };
+
   const filteredRows = useMemo(() => {
     const query = search.trim().toLowerCase();
 
@@ -156,6 +308,7 @@ export default function EnrollmentsAdminPage() {
     { value: "active", label: "نشطة", count: stats.active },
     { value: "pending", label: "معلقة", count: stats.pending },
     { value: "suspended", label: "موقوفة", count: stats.suspended },
+    { value: "cancelled", label: "ملغاة", count: stats.cancelled },
   ];
 
   const visibleNew = bannerExpanded
@@ -231,7 +384,7 @@ export default function EnrollmentsAdminPage() {
                     <Badge color={STATUS_COLORS[row.status] || "slate"}>
                       <span className="flex items-center gap-1">
                         <StatusIcon className="h-3 w-3" />
-                        {ENROLLMENT_STATUS_LABELS[row.status] || row.status}
+                        {statusLabel(row.status)}
                       </span>
                     </Badge>
 
@@ -286,13 +439,13 @@ export default function EnrollmentsAdminPage() {
               </div>
 
               <p className="mt-2 text-sm leading-6 text-slate-500">
-                متابعة اشتراكات الطلاب في الكورسات ومعرفة حالة كل اشتراك
-                بشكل سريع.
+                متابعة اشتراكات الطلاب في الكورسات، وإيقاف أو إلغاء أو تفعيل أي
+                اشتراك بسرعة.
               </p>
             </div>
           </div>
 
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
             <MiniStat
               icon={<Users className="h-4 w-4" />}
               label="الإجمالي"
@@ -311,6 +464,13 @@ export default function EnrollmentsAdminPage() {
               label="معلقة"
               value={stats.pending}
               iconClass="bg-amber-50 text-amber-600"
+            />
+
+            <MiniStat
+              icon={<PauseCircle className="h-4 w-4" />}
+              label="موقوفة / ملغاة"
+              value={stats.suspended + stats.cancelled}
+              iconClass="bg-red-50 text-red-600"
             />
           </div>
         </div>
@@ -430,6 +590,10 @@ export default function EnrollmentsAdminPage() {
                     <th className="px-5 py-4 text-xs font-extrabold text-slate-500">
                       الحالة
                     </th>
+
+                    <th className="px-5 py-4 text-xs font-extrabold text-slate-500">
+                      الإجراءات
+                    </th>
                   </tr>
                 </thead>
 
@@ -494,10 +658,17 @@ export default function EnrollmentsAdminPage() {
                             <span className="flex items-center gap-1.5">
                               <StatusIcon className="h-3.5 w-3.5" />
 
-                              {ENROLLMENT_STATUS_LABELS[row.status] ||
-                                row.status}
+                              {statusLabel(row.status)}
                             </span>
                           </Badge>
+                        </td>
+
+                        <td className="px-5 py-4">
+                          <RowActions
+                            row={row}
+                            busy={busyId === row.id}
+                            onAction={requestAction}
+                          />
                         </td>
                       </tr>
                     );
@@ -546,7 +717,7 @@ export default function EnrollmentsAdminPage() {
                     <Badge color={STATUS_COLORS[row.status] || "slate"}>
                       <span className="flex items-center gap-1">
                         <StatusIcon className="h-3.5 w-3.5" />
-                        {ENROLLMENT_STATUS_LABELS[row.status] || row.status}
+                        {statusLabel(row.status)}
                       </span>
                     </Badge>
                   </div>
@@ -574,6 +745,15 @@ export default function EnrollmentsAdminPage() {
                       </p>
                     </div>
                   </div>
+
+                  <div className="mt-3">
+                    <RowActions
+                      row={row}
+                      busy={busyId === row.id}
+                      onAction={requestAction}
+                      fullWidth
+                    />
+                  </div>
                 </Card>
               );
             })}
@@ -586,6 +766,128 @@ export default function EnrollmentsAdminPage() {
           عرض {filteredRows.length} من أصل {rows.length} اشتراك
         </p>
       )}
+
+      {/* Confirm dialog */}
+      {confirm && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4"
+          onClick={() => busyId === null && setConfirm(null)}
+        >
+          <div
+            role="dialog"
+            aria-modal="true"
+            className="w-full max-w-md rounded-3xl bg-white p-6 shadow-xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-start gap-3">
+              <div
+                className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl ring-1 ${
+                  TONE_CLASSES[ACTIONS[confirm.status].tone]
+                }`}
+              >
+                <AlertTriangle className="h-5 w-5" />
+              </div>
+
+              <div>
+                <h3 className="text-base font-extrabold text-slate-900">
+                  {ACTIONS[confirm.status].confirmTitle}
+                </h3>
+
+                <p className="mt-1.5 text-sm leading-6 text-slate-500">
+                  {ACTIONS[confirm.status].confirmText(
+                    confirm.row.student?.full_name || "طالب غير معروف",
+                    confirm.row.course?.title || "كورس غير معروف"
+                  )}
+                </p>
+              </div>
+            </div>
+
+            <div className="mt-6 flex flex-col-reverse gap-2 sm:flex-row sm:justify-start">
+              <button
+                type="button"
+                disabled={busyId !== null}
+                onClick={runAction}
+                className={`flex items-center justify-center gap-2 rounded-xl px-5 py-2.5 text-sm font-bold text-white outline-none transition focus:ring-4 disabled:opacity-60 ${
+                  CONFIRM_BUTTON_CLASSES[ACTIONS[confirm.status].tone]
+                }`}
+              >
+                {busyId !== null && <Loader2 className="h-4 w-4 animate-spin" />}
+                {ACTIONS[confirm.status].confirmButton}
+              </button>
+
+              <button
+                type="button"
+                disabled={busyId !== null}
+                onClick={() => setConfirm(null)}
+                className="rounded-xl bg-slate-100 px-5 py-2.5 text-sm font-bold text-slate-600 transition hover:bg-slate-200 disabled:opacity-60"
+              >
+                تراجع
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Toast */}
+      {toast && (
+        <div
+          role="status"
+          className={`fixed bottom-6 left-1/2 z-50 flex -translate-x-1/2 items-center gap-2 rounded-2xl px-4 py-3 text-sm font-bold text-white shadow-lg ${
+            toast.type === "success" ? "bg-emerald-600" : "bg-red-600"
+          }`}
+        >
+          {toast.type === "success" ? (
+            <CheckCircle2 className="h-4 w-4" />
+          ) : (
+            <XCircle className="h-4 w-4" />
+          )}
+          {toast.message}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function RowActions({
+  row,
+  busy,
+  onAction,
+  fullWidth = false,
+}: {
+  row: any;
+  busy: boolean;
+  onAction: (row: any, status: EnrollmentStatus) => void;
+  fullWidth?: boolean;
+}) {
+  const available = AVAILABLE_ACTIONS[row.status] ?? [];
+
+  if (available.length === 0) return null;
+
+  return (
+    <div className={`flex gap-2 ${fullWidth ? "" : "flex-wrap"}`}>
+      {available.map((status) => {
+        const action = ACTIONS[status];
+        const Icon = action.icon;
+
+        return (
+          <button
+            key={status}
+            type="button"
+            disabled={busy}
+            onClick={() => onAction(row, status)}
+            className={`flex items-center justify-center gap-1.5 rounded-xl px-3 py-2 text-xs font-bold ring-1 transition disabled:cursor-not-allowed disabled:opacity-50 ${
+              fullWidth ? "flex-1" : ""
+            } ${TONE_CLASSES[action.tone]}`}
+          >
+            {busy ? (
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            ) : (
+              <Icon className="h-3.5 w-3.5" />
+            )}
+            {action.label}
+          </button>
+        );
+      })}
     </div>
   );
 }
