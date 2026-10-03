@@ -5,12 +5,13 @@ import {
   CheckCircle2,
   Search,
   GraduationCap,
-  UserRound,
   Mail,
   CalendarDays,
   UserCheck,
   UserX,
   Clock3,
+  KeyRound,
+  Trash2,
 } from "lucide-react";
 
 import { Badge } from "@/components/ui/Badge";
@@ -19,11 +20,18 @@ import { Card } from "@/components/ui/Card";
 import { Skeleton } from "@/components/ui/Skeleton";
 import { EmptyState } from "@/components/ui/EmptyState";
 
+import {
+  ChangePasswordModal,
+  DeleteUserModal,
+} from "@/components/admin/UserSecurityModals";
+
 import { useToast } from "@/contexts/ToastContext";
 
 import {
   fetchUsersByRole,
   updateUserStatus,
+  adminSetUserPassword,
+  adminDeleteUser,
 } from "@/services/admin";
 
 import type { Profile } from "@/types";
@@ -31,10 +39,7 @@ import { COLLEGE_LABELS } from "@/types";
 
 import { formatDate } from "@/utils/format";
 
-const STATUS_COLORS: Record<
-  string,
-  "green" | "red" | "amber"
-> = {
+const STATUS_COLORS: Record<string, "green" | "red" | "amber"> = {
   active: "green",
   suspended: "red",
   pending_verification: "amber",
@@ -54,6 +59,9 @@ export default function StudentsAdminPage() {
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState("all");
   const [processingId, setProcessingId] = useState<string | null>(null);
+
+  const [passwordTarget, setPasswordTarget] = useState<Profile | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<Profile | null>(null);
 
   const load = async () => {
     setLoading(true);
@@ -76,12 +84,9 @@ export default function StudentsAdminPage() {
     () => ({
       total: students.length,
       active: students.filter((s) => s.status === "active").length,
-      suspended: students.filter(
-        (s) => s.status === "suspended"
-      ).length,
-      pending: students.filter(
-        (s) => s.status === "pending_verification"
-      ).length,
+      suspended: students.filter((s) => s.status === "suspended").length,
+      pending: students.filter((s) => s.status === "pending_verification")
+        .length,
     }),
     [students]
   );
@@ -90,21 +95,15 @@ export default function StudentsAdminPage() {
     const query = search.trim().toLowerCase();
 
     return students.filter((student) => {
-      const matchesFilter =
-        filter === "all" || student.status === filter;
+      const matchesFilter = filter === "all" || student.status === filter;
 
       if (!matchesFilter) return false;
 
       if (!query) return true;
 
-      const name =
-        student.full_name?.toLowerCase() || "";
-
-      const email =
-        student.email?.toLowerCase() || "";
-
-      const college =
-        COLLEGE_LABELS[student.college]?.toLowerCase() || "";
+      const name = student.full_name?.toLowerCase() || "";
+      const email = student.email?.toLowerCase() || "";
+      const college = COLLEGE_LABELS[student.college]?.toLowerCase() || "";
 
       return (
         name.includes(query) ||
@@ -115,10 +114,7 @@ export default function StudentsAdminPage() {
   }, [students, search, filter]);
 
   const toggleStatus = async (student: Profile) => {
-    const newStatus =
-      student.status === "suspended"
-        ? "active"
-        : "suspended";
+    const newStatus = student.status === "suspended" ? "active" : "suspended";
 
     setProcessingId(student.id);
 
@@ -140,22 +136,30 @@ export default function StudentsAdminPage() {
     }
   };
 
+  const handleChangePassword = async (password: string) => {
+    if (!passwordTarget) return;
+
+    await adminSetUserPassword(passwordTarget.id, password);
+
+    showToast("تم تغيير كلمة مرور الطالب بنجاح", "success");
+    setPasswordTarget(null);
+  };
+
+  const handleDelete = async () => {
+    if (!deleteTarget) return;
+
+    const id = deleteTarget.id;
+    await adminDeleteUser(id, "student");
+
+    setStudents((prev) => prev.filter((s) => s.id !== id));
+    showToast("تم حذف حساب الطالب نهائيًا", "success");
+    setDeleteTarget(null);
+  };
+
   const filters = [
-    {
-      value: "all",
-      label: "الكل",
-      count: stats.total,
-    },
-    {
-      value: "active",
-      label: "نشط",
-      count: stats.active,
-    },
-    {
-      value: "suspended",
-      label: "موقوف",
-      count: stats.suspended,
-    },
+    { value: "all", label: "الكل", count: stats.total },
+    { value: "active", label: "نشط", count: stats.active },
+    { value: "suspended", label: "موقوف", count: stats.suspended },
     {
       value: "pending_verification",
       label: "بانتظار التفعيل",
@@ -188,14 +192,14 @@ export default function StudentsAdminPage() {
               </div>
 
               <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-500">
-                إدارة حسابات الطلاب، متابعة حالاتهم والتحكم في إمكانية
-                الوصول إلى المنصة.
+                إدارة حسابات الطلاب، متابعة حالاتهم والتحكم في إمكانية الوصول
+                إلى المنصة.
               </p>
             </div>
           </div>
 
           {/* Quick stats */}
-          <div className="grid grid-cols-3 gap-3  ">
+          <div className="grid grid-cols-3 gap-3">
             <MiniStat
               icon={<UserCheck className="h-4 w-4" />}
               label="نشط"
@@ -208,7 +212,6 @@ export default function StudentsAdminPage() {
               value={stats.suspended}
               iconClass="bg-red-50 text-red-600"
             />
-
             <MiniStat
               icon={<Clock3 className="h-4 w-4" />}
               label="معلق"
@@ -321,19 +324,15 @@ export default function StudentsAdminPage() {
                     <th className="px-5 py-4 text-xs font-extrabold text-slate-500">
                       الطالب
                     </th>
-
                     <th className="px-5 py-4 text-xs font-extrabold text-slate-500">
                       الكلية
                     </th>
-
                     <th className="px-5 py-4 text-xs font-extrabold text-slate-500">
                       تاريخ التسجيل
                     </th>
-
                     <th className="px-5 py-4 text-xs font-extrabold text-slate-500">
                       الحالة
                     </th>
-
                     <th className="px-5 py-4 text-xs font-extrabold text-slate-500">
                       إجراء
                     </th>
@@ -350,15 +349,13 @@ export default function StudentsAdminPage() {
                       <td className="px-5 py-4">
                         <div className="flex items-center gap-3">
                           <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-brand-50 font-extrabold text-brand-600">
-                            {student.full_name
-                              ?.charAt(0)
-                              ?.toUpperCase() || "؟"}
+                            {student.full_name?.charAt(0)?.toUpperCase() ||
+                              "؟"}
                           </div>
 
                           <div className="min-w-0">
                             <p className="truncate font-extrabold text-slate-800">
-                              {student.full_name ||
-                                "طالب غير معروف"}
+                              {student.full_name || "طالب غير معروف"}
                             </p>
 
                             <div className="mt-1 flex items-center gap-1.5 text-xs text-slate-400">
@@ -375,8 +372,7 @@ export default function StudentsAdminPage() {
                       {/* College */}
                       <td className="px-5 py-4">
                         <span className="rounded-lg bg-slate-100 px-3 py-1.5 text-xs font-bold text-slate-600">
-                          {COLLEGE_LABELS[student.college] ||
-                            "غير محددة"}
+                          {COLLEGE_LABELS[student.college] || "غير محددة"}
                         </span>
                       </td>
 
@@ -391,49 +387,60 @@ export default function StudentsAdminPage() {
                       {/* Status */}
                       <td className="px-5 py-4">
                         <Badge
-                          color={
-                            STATUS_COLORS[student.status] ||
-                            "amber"
-                          }
+                          color={STATUS_COLORS[student.status] || "amber"}
                         >
-                          {STATUS_LABELS[student.status] ||
-                            student.status}
+                          {STATUS_LABELS[student.status] || student.status}
                         </Badge>
                       </td>
 
                       {/* Action */}
                       <td className="px-5 py-4">
-                        {student.status !==
-                        "pending_verification" ? (
-                          <Button
-                            size="sm"
-                            variant={
-                              student.status === "suspended"
-                                ? "secondary"
-                                : "outline"
-                            }
-                            isLoading={
-                              processingId === student.id
-                            }
-                            onClick={() =>
-                              toggleStatus(student)
-                            }
-                          >
-                            {student.status === "suspended" ? (
-                              <CheckCircle2 className="h-3.5 w-3.5" />
-                            ) : (
-                              <Ban className="h-3.5 w-3.5 text-red-500" />
-                            )}
+                        <div className="flex flex-wrap items-center gap-2">
+                          {student.status !== "pending_verification" ? (
+                            <Button
+                              size="sm"
+                              variant={
+                                student.status === "suspended"
+                                  ? "secondary"
+                                  : "outline"
+                              }
+                              isLoading={processingId === student.id}
+                              onClick={() => toggleStatus(student)}
+                            >
+                              {student.status === "suspended" ? (
+                                <CheckCircle2 className="h-3.5 w-3.5" />
+                              ) : (
+                                <Ban className="h-3.5 w-3.5 text-red-500" />
+                              )}
 
-                            {student.status === "suspended"
-                              ? "تفعيل"
-                              : "إيقاف"}
-                          </Button>
-                        ) : (
-                          <span className="text-xs font-medium text-slate-400">
-                            بانتظار التفعيل
-                          </span>
-                        )}
+                              {student.status === "suspended"
+                                ? "تفعيل"
+                                : "إيقاف"}
+                            </Button>
+                          ) : (
+                            <span className="text-xs font-medium text-slate-400">
+                              بانتظار التفعيل
+                            </span>
+                          )}
+
+                          <button
+                            type="button"
+                            title="تغيير كلمة المرور"
+                            onClick={() => setPasswordTarget(student)}
+                            className="flex h-9 w-9 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-500 transition hover:border-brand-200 hover:bg-brand-50 hover:text-brand-600"
+                          >
+                            <KeyRound className="h-4 w-4" />
+                          </button>
+
+                          <button
+                            type="button"
+                            title="حذف الحساب نهائيًا"
+                            onClick={() => setDeleteTarget(student)}
+                            className="flex h-9 w-9 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-500 transition hover:border-red-200 hover:bg-red-50 hover:text-red-600"
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   ))}
@@ -461,17 +468,14 @@ export default function StudentsAdminPage() {
 
                 <div className="flex items-start gap-3">
                   <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-brand-50 font-extrabold text-brand-600">
-                    {student.full_name
-                      ?.charAt(0)
-                      ?.toUpperCase() || "؟"}
+                    {student.full_name?.charAt(0)?.toUpperCase() || "؟"}
                   </div>
 
                   <div className="min-w-0 flex-1">
                     <div className="flex items-start justify-between gap-2">
                       <div className="min-w-0">
                         <p className="truncate font-extrabold text-slate-800">
-                          {student.full_name ||
-                            "طالب غير معروف"}
+                          {student.full_name || "طالب غير معروف"}
                         </p>
 
                         <p className="mt-1 truncate text-xs text-slate-400">
@@ -480,13 +484,9 @@ export default function StudentsAdminPage() {
                       </div>
 
                       <Badge
-                        color={
-                          STATUS_COLORS[student.status] ||
-                          "amber"
-                        }
+                        color={STATUS_COLORS[student.status] || "amber"}
                       >
-                        {STATUS_LABELS[student.status] ||
-                          student.status}
+                        {STATUS_LABELS[student.status] || student.status}
                       </Badge>
                     </div>
                   </div>
@@ -500,8 +500,7 @@ export default function StudentsAdminPage() {
                     </div>
 
                     <p className="mt-1 truncate text-sm font-bold text-slate-700">
-                      {COLLEGE_LABELS[student.college] ||
-                        "غير محددة"}
+                      {COLLEGE_LABELS[student.college] || "غير محددة"}
                     </p>
                   </div>
 
@@ -517,18 +516,13 @@ export default function StudentsAdminPage() {
                   </div>
                 </div>
 
-                {student.status !==
-                  "pending_verification" && (
+                {student.status !== "pending_verification" && (
                   <Button
                     size="sm"
                     variant={
-                      student.status === "suspended"
-                        ? "secondary"
-                        : "outline"
+                      student.status === "suspended" ? "secondary" : "outline"
                     }
-                    isLoading={
-                      processingId === student.id
-                    }
+                    isLoading={processingId === student.id}
                     onClick={() => toggleStatus(student)}
                     className="mt-3 w-full"
                   >
@@ -543,6 +537,26 @@ export default function StudentsAdminPage() {
                       : "إيقاف حساب الطالب"}
                   </Button>
                 )}
+
+                <div className="mt-2 grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setPasswordTarget(student)}
+                    className="inline-flex items-center justify-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-600 transition hover:border-brand-200 hover:bg-brand-50 hover:text-brand-700"
+                  >
+                    <KeyRound className="h-4 w-4" />
+                    كلمة المرور
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setDeleteTarget(student)}
+                    className="inline-flex items-center justify-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-600 transition hover:border-red-200 hover:bg-red-50 hover:text-red-600"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                    حذف الحساب
+                  </button>
+                </div>
               </Card>
             ))}
           </div>
@@ -553,6 +567,27 @@ export default function StudentsAdminPage() {
         <p className="text-center text-xs text-slate-400">
           عرض {filteredStudents.length} من أصل {students.length} طالب
         </p>
+      )}
+
+      {/* Modals */}
+      {passwordTarget && (
+        <ChangePasswordModal
+          name={passwordTarget.full_name || "طالب غير معروف"}
+          email={passwordTarget.email}
+          roleLabel="الطالب"
+          onClose={() => setPasswordTarget(null)}
+          onSubmit={handleChangePassword}
+        />
+      )}
+
+      {deleteTarget && (
+        <DeleteUserModal
+          name={deleteTarget.full_name || "طالب غير معروف"}
+          email={deleteTarget.email}
+          roleLabel="الطالب"
+          onClose={() => setDeleteTarget(null)}
+          onConfirm={handleDelete}
+        />
       )}
     </div>
   );
@@ -577,13 +612,9 @@ function MiniStat({
         {icon}
       </div>
 
-      <p className="text-lg font-extrabold text-slate-900">
-        {value}
-      </p>
+      <p className="text-lg font-extrabold text-slate-900">{value}</p>
 
-      <p className="text-[11px] font-medium text-slate-400">
-        {label}
-      </p>
+      <p className="text-[11px] font-medium text-slate-400">{label}</p>
     </div>
   );
 }

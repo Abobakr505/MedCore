@@ -10,6 +10,8 @@ import {
   UserX,
   Clock3,
   Users,
+  KeyRound,
+  Trash2,
 } from "lucide-react";
 
 import { Badge } from "@/components/ui/Badge";
@@ -18,12 +20,19 @@ import { Card } from "@/components/ui/Card";
 import { Skeleton } from "@/components/ui/Skeleton";
 import { EmptyState } from "@/components/ui/EmptyState";
 
+import {
+  ChangePasswordModal,
+  DeleteUserModal,
+} from "@/components/admin/UserSecurityModals";
+
 import { useToast } from "@/contexts/ToastContext";
 
 import {
   fetchUsersByRole,
   updateUserStatus,
   fetchTeacherSubscriberCounts,
+  adminSetUserPassword,
+  adminDeleteUser,
 } from "@/services/admin";
 
 import type { Profile } from "@/types";
@@ -54,6 +63,9 @@ export default function TeachersAdminPage() {
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState("all");
   const [processingId, setProcessingId] = useState<string | null>(null);
+
+  const [passwordTarget, setPasswordTarget] = useState<Profile | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<Profile | null>(null);
 
   const load = async () => {
     setLoading(true);
@@ -174,6 +186,31 @@ export default function TeachersAdminPage() {
     } finally {
       setProcessingId(null);
     }
+  };
+
+  const handleChangePassword = async (password: string) => {
+    if (!passwordTarget) return;
+
+    await adminSetUserPassword(passwordTarget.id, password);
+
+    showToast("تم تغيير كلمة مرور المعلم بنجاح", "success");
+    setPasswordTarget(null);
+  };
+
+  const handleDelete = async () => {
+    if (!deleteTarget) return;
+
+    const id = deleteTarget.id;
+    await adminDeleteUser(id, "teacher");
+
+    setTeachers((prev) => prev.filter((t) => t.id !== id));
+    showToast("تم حذف حساب المعلم نهائيًا", "success");
+    setDeleteTarget(null);
+
+    // تحديث عدد المشتركين بعد حذف كورسات المعلم
+    fetchTeacherSubscriberCounts()
+      .then(setSubscriberCounts)
+      .catch(() => {});
   };
 
   const filters = [
@@ -353,23 +390,18 @@ export default function TeachersAdminPage() {
                     <th className="px-5 py-4 text-xs font-extrabold text-slate-500">
                       المعلم
                     </th>
-
                     <th className="px-5 py-4 text-xs font-extrabold text-slate-500">
                       الكلية
                     </th>
-
                     <th className="px-5 py-4 text-xs font-extrabold text-slate-500">
                       المشتركون
                     </th>
-
                     <th className="px-5 py-4 text-xs font-extrabold text-slate-500">
                       تاريخ التسجيل
                     </th>
-
                     <th className="px-5 py-4 text-xs font-extrabold text-slate-500">
                       الحالة
                     </th>
-
                     <th className="px-5 py-4 text-xs font-extrabold text-slate-500">
                       إجراء
                     </th>
@@ -442,48 +474,70 @@ export default function TeachersAdminPage() {
 
                       {/* Action */}
                       <td className="px-5 py-4">
-                        {teacher.status === "pending_verification" ? (
-                          <div className="flex items-center gap-2">
-                            <Button
-                              size="sm"
-                              variant="secondary"
-                              isLoading={processingId === teacher.id}
-                              onClick={() => approveTeacher(teacher)}
-                            >
-                              <CheckCircle2 className="h-3.5 w-3.5" />
-                              قبول
-                            </Button>
+                        <div className="flex flex-wrap items-center gap-2">
+                          {teacher.status === "pending_verification" ? (
+                            <>
+                              <Button
+                                size="sm"
+                                variant="secondary"
+                                isLoading={processingId === teacher.id}
+                                onClick={() => approveTeacher(teacher)}
+                              >
+                                <CheckCircle2 className="h-3.5 w-3.5" />
+                                قبول
+                              </Button>
 
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                isLoading={processingId === teacher.id}
+                                onClick={() => rejectTeacher(teacher)}
+                              >
+                                <Ban className="h-3.5 w-3.5 text-red-500" />
+                                رفض
+                              </Button>
+                            </>
+                          ) : (
                             <Button
                               size="sm"
-                              variant="outline"
+                              variant={
+                                teacher.status === "suspended"
+                                  ? "secondary"
+                                  : "outline"
+                              }
                               isLoading={processingId === teacher.id}
-                              onClick={() => rejectTeacher(teacher)}
+                              onClick={() => toggleStatus(teacher)}
                             >
-                              <Ban className="h-3.5 w-3.5 text-red-500" />
-                              رفض
+                              {teacher.status === "suspended" ? (
+                                <CheckCircle2 className="h-3.5 w-3.5" />
+                              ) : (
+                                <Ban className="h-3.5 w-3.5 text-red-500" />
+                              )}
+
+                              {teacher.status === "suspended"
+                                ? "تفعيل"
+                                : "إيقاف"}
                             </Button>
-                          </div>
-                        ) : (
-                          <Button
-                            size="sm"
-                            variant={
-                              teacher.status === "suspended"
-                                ? "secondary"
-                                : "outline"
-                            }
-                            isLoading={processingId === teacher.id}
-                            onClick={() => toggleStatus(teacher)}
+                          )}
+
+                          <button
+                            type="button"
+                            title="تغيير كلمة المرور"
+                            onClick={() => setPasswordTarget(teacher)}
+                            className="flex h-9 w-9 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-500 transition hover:border-purple-200 hover:bg-purple-50 hover:text-purple-600"
                           >
-                            {teacher.status === "suspended" ? (
-                              <CheckCircle2 className="h-3.5 w-3.5" />
-                            ) : (
-                              <Ban className="h-3.5 w-3.5 text-red-500" />
-                            )}
+                            <KeyRound className="h-4 w-4" />
+                          </button>
 
-                            {teacher.status === "suspended" ? "تفعيل" : "إيقاف"}
-                          </Button>
-                        )}
+                          <button
+                            type="button"
+                            title="حذف الحساب نهائيًا"
+                            onClick={() => setDeleteTarget(teacher)}
+                            className="flex h-9 w-9 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-500 transition hover:border-red-200 hover:bg-red-50 hover:text-red-600"
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   ))}
@@ -523,7 +577,9 @@ export default function TeachersAdminPage() {
                         </p>
                       </div>
 
-                      <Badge color={STATUS_COLORS[teacher.status] || "amber"}>
+                      <Badge
+                        color={STATUS_COLORS[teacher.status] || "amber"}
+                      >
                         {STATUS_LABELS[teacher.status] || teacher.status}
                       </Badge>
                     </div>
@@ -608,6 +664,26 @@ export default function TeachersAdminPage() {
                       : "إيقاف حساب المعلم"}
                   </Button>
                 )}
+
+                <div className="mt-2 grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setPasswordTarget(teacher)}
+                    className="inline-flex items-center justify-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-600 transition hover:border-purple-200 hover:bg-purple-50 hover:text-purple-700"
+                  >
+                    <KeyRound className="h-4 w-4" />
+                    كلمة المرور
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setDeleteTarget(teacher)}
+                    className="inline-flex items-center justify-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-600 transition hover:border-red-200 hover:bg-red-50 hover:text-red-600"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                    حذف الحساب
+                  </button>
+                </div>
               </Card>
             ))}
           </div>
@@ -618,6 +694,27 @@ export default function TeachersAdminPage() {
         <p className="text-center text-xs text-slate-400">
           عرض {filteredTeachers.length} من أصل {teachers.length} معلم
         </p>
+      )}
+
+      {/* Modals */}
+      {passwordTarget && (
+        <ChangePasswordModal
+          name={passwordTarget.full_name || "معلم غير معروف"}
+          email={passwordTarget.email}
+          roleLabel="المعلم"
+          onClose={() => setPasswordTarget(null)}
+          onSubmit={handleChangePassword}
+        />
+      )}
+
+      {deleteTarget && (
+        <DeleteUserModal
+          name={deleteTarget.full_name || "معلم غير معروف"}
+          email={deleteTarget.email}
+          roleLabel="المعلم"
+          onClose={() => setDeleteTarget(null)}
+          onConfirm={handleDelete}
+        />
       )}
     </div>
   );

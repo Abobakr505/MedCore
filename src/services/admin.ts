@@ -20,6 +20,64 @@ export async function updateUserStatus(userId: string, status: string) {
   if (error) throw error;
 }
 
+/* ------------------------------------------------------------------ */
+/* إدارة أمان المستخدمين (تغيير كلمة السر / الحذف النهائي)             */
+/* تتم عبر Edge Function لأنها تحتاج Service Role Key                  */
+/* ------------------------------------------------------------------ */
+
+async function invokeAdminAction(body: {
+  action: "set_password" | "delete_user";
+  userId: string;
+  password?: string;
+}) {
+  const { data, error } = await supabase.functions.invoke(
+    "admin-manage-user",
+    { body }
+  );
+
+  if (error) {
+    let message = "حدث خطأ غير متوقع";
+    try {
+      const res = await (error as any).context?.json?.();
+      if (res?.error) message = res.error;
+    } catch {
+      /* ignore */
+    }
+    throw new Error(message);
+  }
+
+  if (data?.error) throw new Error(data.error);
+
+  return data;
+}
+
+export async function adminSetUserPassword(userId: string, password: string) {
+  return invokeAdminAction({ action: "set_password", userId, password });
+}
+
+export async function adminDeleteUser(
+  userId: string,
+  role?: "student" | "teacher"
+) {
+  // المعلم: احذف فيديوهات كورساته من VdoCipher أولاً لتجنب فيديوهات يتيمة.
+  // لو فشل الحذف سيرمي Error ولن يُحذف الحساب.
+  if (role === "teacher") {
+    const { data: courses, error } = await supabase
+      .from("courses")
+      .select("id")
+      .eq("teacher_id", userId);
+    if (error) throw error;
+
+    for (const c of courses ?? []) {
+      await deleteCourseVideosVdoCipher(c.id);
+    }
+  }
+
+  return invokeAdminAction({ action: "delete_user", userId });
+}
+
+/* ------------------------------------------------------------------ */
+
 export async function fetchAllCoursesAdmin() {
   const { data, error } = await supabase
     .from("courses")
@@ -47,6 +105,7 @@ export async function fetchAllCoursesAdmin() {
     students_count: counts[i],
   }));
 }
+
 export async function adminDeleteCourse(courseId: string) {
   // 1) احذف كل فيديوهات الكورس من VdoCipher أولاً.
   //    لو فشل الحذف هيرمي Error ولن يتم حذف الكورس (عشان ما يفضلش فيديوهات يتيمة).
@@ -249,7 +308,6 @@ export async function fetchTeacherPerformance(
     .sort((a, b) => b.revenue - a.revenue)
     .slice(0, limit);
 }
-
 
 export async function fetchTeacherSubscriberCounts(): Promise<
   Record<string, number>
