@@ -28,7 +28,6 @@ import { useAuth } from "@/contexts/AuthContext";
 
 const PAGE_SIZE = 9;
 type SortOption =
-  | "rating"
   | "newest"
   | "oldest"
   | "price_asc"
@@ -48,7 +47,6 @@ const sortLabels: Record<string, string> = {
   price_asc: "السعر: الأقل",
   price_desc: "السعر: الأعلى",
   popular: "الأكثر طلبًا",
-  rating: "الأعلى تقييمًا",
 };
 
 export default function CoursesListPage() {
@@ -68,7 +66,6 @@ export default function CoursesListPage() {
 const sortParam = searchParams.get("sort");
 
 const sort: SortOption =
-  sortParam === "rating" ||
   sortParam === "newest" ||
   sortParam === "oldest" ||
   sortParam === "price_asc" ||
@@ -425,7 +422,6 @@ const resetFilters = () => {
               <option value="price_asc">السعر: الأقل إلى الأعلى</option>
               <option value="price_desc">السعر: الأعلى إلى الأقل</option>
               <option value="popular">الأكثر طلبًا</option>
-              <option value="rating">الأعلى تقييمًا</option>
             </Select>
 
             <Button
