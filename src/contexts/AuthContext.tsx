@@ -1,4 +1,11 @@
-import { createContext, useContext, useEffect, useState, useCallback } from "react";
+import {
+  createContext,
+  useContext,
+  useEffect,
+  useState,
+  useCallback,
+  useRef,
+} from "react";
 import type { ReactNode } from "react";
 import type { Session } from "@supabase/supabase-js";
 import { supabase, getDeviceIdentifier, getDeviceName } from "@/lib/supabase";
@@ -43,6 +50,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true);
   const [deviceBlocked, setDeviceBlocked] = useState(false);
 
+  // يمنع تشغيل فحصين للجهاز في نفس الوقت
+  const deviceCheckInFlight = useRef<Promise<void> | null>(null);
+  // أثناء signIn نمنع الـ listener من فحص الجهاز، signIn نفسها هتعمل الفحص بعد التحقق من حالة الحساب
+  const signInInProgress = useRef(false);
+
   const loadProfile = useCallback(async (userId: string) => {
     const { data, error } = await supabase
       .from("profiles")
@@ -56,38 +68,64 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return null;
   }, []);
 
-  const checkDevice = useCallback(async () => {
-    const { data, error } = await supabase.rpc("check_or_register_device", {
-      p_device_identifier: getDeviceIdentifier(),
-      p_device_name: getDeviceName(),
-    });
-    if (!error && data) {
-      const result = data as unknown as DeviceCheckResult;
-      setDeviceBlocked(!result.allowed);
-    }
+  const checkDevice = useCallback((): Promise<void> => {
+    // لو فيه فحص شغال، استنى نفس النتيجة بدل ما تبدأ فحص جديد
+    if (deviceCheckInFlight.current) return deviceCheckInFlight.current;
+
+    const promise = (async () => {
+      try {
+        const { data, error } = await supabase.rpc("check_or_register_device", {
+          p_device_identifier: getDeviceIdentifier(),
+          p_device_name: getDeviceName(),
+        });
+
+        if (error || !data) {
+          // خطأ تقني: متحجبش المستخدم ومتغيّرش الحالة
+          console.error("device check failed:", error);
+          return;
+        }
+
+        const result = data as unknown as DeviceCheckResult;
+        // الحجب فقط لو السيرفر قال "مرفوض" صراحة، وبيتشال لو الفحص التالي نجح
+        setDeviceBlocked(result.allowed === false);
+      } catch (err) {
+        console.error("device check exception:", err);
+      } finally {
+        deviceCheckInFlight.current = null;
+      }
+    })();
+
+    deviceCheckInFlight.current = promise;
+    return promise;
   }, []);
 
   useEffect(() => {
     let mounted = true;
 
-    supabase.auth.getSession().then(async ({ data }) => {
+    const { data: listener } = supabase.auth.onAuthStateChange((event, newSession) => {
       if (!mounted) return;
-      setSession(data.session);
-      if (data.session?.user) {
-        await loadProfile(data.session.user.id);
-        await checkDevice();
-      }
-      setLoading(false);
-    });
 
-    const { data: listener } = supabase.auth.onAuthStateChange(async (_event, newSession) => {
       setSession(newSession);
+
+      // أثناء تسجيل الدخول، signIn هي اللي بتتكفل بالبروفايل وفحص الجهاز
+      if (signInInProgress.current) return;
+
       if (newSession?.user) {
-        await loadProfile(newSession.user.id);
-        await checkDevice();
+        // نعمل الشغل بس عند تحميل الصفحة أو تسجيل الدخول،
+        // ونتجاهل TOKEN_REFRESHED وغيرها عشان منكررش الفحص
+        if (event !== "INITIAL_SESSION" && event !== "SIGNED_IN") return;
+
+        // مهم: متعملش await لـ supabase مباشرة داخل الـ callback (ممكن يسبب deadlock)
+        setTimeout(async () => {
+          if (!mounted) return;
+          await loadProfile(newSession.user.id);
+          await checkDevice();
+          if (mounted) setLoading(false);
+        }, 0);
       } else {
         setProfile(null);
         setDeviceBlocked(false);
+        setLoading(false);
       }
     });
 
@@ -122,7 +160,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         return { error: "من فضلك أدخل رقم الهاتف" };
       }
 
-      const { data, error } = await supabase.auth.signUp({
+      const { error } = await supabase.auth.signUp({
         email: email.trim().toLowerCase(),
         password,
         options: {
@@ -187,50 +225,60 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       return { error: result.message || "حدث خطأ غير متوقع، يرجى المحاولة مرة أخرى" };
     }
 
-    // الدخول نجح على مستوى الـ Edge Function، دلوقتي نحط الـ session في عميل Supabase المحلي
-    const { error: setSessionError } = await supabase.auth.setSession({
-      access_token: result.session.access_token,
-      refresh_token: result.session.refresh_token,
-    });
+    // نمنع الـ listener من فحص الجهاز لحد ما نتأكد من حالة الحساب
+    signInInProgress.current = true;
 
-    if (setSessionError) {
-      console.error("SET SESSION ERROR:", setSessionError);
-      return { error: "حدث خطأ غير متوقع، يرجى المحاولة مرة أخرى" };
+    try {
+      // الدخول نجح على مستوى الـ Edge Function، دلوقتي نحط الـ session في عميل Supabase المحلي
+      const { error: setSessionError } = await supabase.auth.setSession({
+        access_token: result.session.access_token,
+        refresh_token: result.session.refresh_token,
+      });
+
+      if (setSessionError) {
+        console.error("SET SESSION ERROR:", setSessionError);
+        return { error: "حدث خطأ غير متوقع، يرجى المحاولة مرة أخرى" };
+      }
+
+      // نجيب البروفايل عشان نتأكد من حالة الحساب قبل ما نسمح بالدخول
+      const userProfile = await loadProfile(result.user.id);
+
+      if (userProfile?.status === "pending_verification") {
+        await supabase.auth.signOut();
+        setSession(null);
+        setProfile(null);
+        return {
+          error:
+            "حسابك كمعلم لسه قيد المراجعة من الإدارة. هيتم إشعارك بمجرد الموافقة عليه.",
+          reason: "pending_verification",
+        };
+      }
+
+      if (userProfile?.status === "suspended") {
+        await supabase.auth.signOut();
+        setSession(null);
+        setProfile(null);
+        return {
+          error: "تم إيقاف هذا الحساب. تواصل مع الإدارة لمزيد من التفاصيل.",
+          reason: "suspended",
+        };
+      }
+
+      // الحساب سليم: نفحص الجهاز مرة واحدة فقط
+      await checkDevice();
+      setLoading(false);
+
+      return { error: null };
+    } finally {
+      signInInProgress.current = false;
     }
-
-    // نجيب البروفايل عشان نتأكد من حالة الحساب قبل ما نسمح بالدخول
-    const userProfile = await loadProfile(result.user.id);
-
-    if (userProfile?.status === "pending_verification") {
-      await supabase.auth.signOut();
-      setSession(null);
-      setProfile(null);
-      return {
-        error:
-          "حسابك كمعلم لسه قيد المراجعة من الإدارة. هيتم إشعارك بمجرد الموافقة عليه.",
-        reason: "pending_verification",
-      };
-    }
-
-    if (userProfile?.status === "suspended") {
-      await supabase.auth.signOut();
-      setSession(null);
-      setProfile(null);
-      return {
-        error: "تم إيقاف هذا الحساب. تواصل مع الإدارة لمزيد من التفاصيل.",
-        reason: "suspended",
-      };
-    }
-
-    await checkDevice();
-
-    return { error: null };
   };
 
   const signOut = async () => {
     await supabase.auth.signOut();
     setProfile(null);
     setSession(null);
+    setDeviceBlocked(false);
   };
 
   const refreshProfile = async () => {
