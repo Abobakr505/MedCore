@@ -185,22 +185,21 @@ function buildVdoCipherEmbedUrl(playbackData: VdoCipherPlaybackData): string {
  * لو عمود created_at غير موجود في أحد الجدولين، بيرجع قائمة فاضية بدون ما يكسر الصفحة.
  */
 async function fetchRecentContent(sinceIso: string): Promise<RecentContent> {
-  const [sectionsRes, lessonsRes] = await Promise.all([
-    supabase
-      .from("sections")
-      .select("id, title, course_id, created_at")
-      .gte("created_at", sinceIso)
-      .order("created_at", { ascending: false }),
+const [sectionsRes, lessonsRes] = await Promise.all([
+  supabase
+    .from("course_sections")
+    .select("id, title, course_id, created_at")
+    .gte("created_at", sinceIso)
+    .order("created_at", { ascending: false }),
 
-    supabase
-      .from("lessons")
-      .select(
-        "id, title, created_at, vdocipher_video_id, section:sections(id, title, course_id)"
-      )
-      .gte("created_at", sinceIso)
-      .order("created_at", { ascending: false }),
-  ]);
-
+  supabase
+    .from("lessons")
+    .select(
+      "id, title, created_at, vdocipher_video_id, section:course_sections(id, title, course_id)"
+    )
+    .gte("created_at", sinceIso)
+    .order("created_at", { ascending: false }),
+]);
   return {
     sections: sectionsRes.error ? [] : sectionsRes.data ?? [],
     lessons: lessonsRes.error ? [] : lessonsRes.data ?? [],

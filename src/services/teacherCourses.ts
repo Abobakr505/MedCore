@@ -335,19 +335,29 @@ export async function createLesson(params: {
   sectionId: string;
   title: string;
   description: string;
-  orderIndex: number;
+  orderIndex?: number; // بقى اختياري ويتجاهل لو بعتناه
   isPreview: boolean;
 }) {
-  const {
-    data,
-    error,
-  } = await supabase
+  const { data: last, error: lastError } = await supabase
+    .from("lessons")
+    .select("order_index")
+    .eq("section_id", params.sectionId)
+    .not("order_index", "is", null)
+    .order("order_index", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (lastError) throw lastError;
+
+  const nextOrder = (last?.order_index ?? -1) + 1;
+
+  const { data, error } = await supabase
     .from("lessons")
     .insert({
       section_id: params.sectionId,
       title: params.title,
       description: params.description,
-      order_index: params.orderIndex,
+      order_index: nextOrder,
       is_preview: params.isPreview,
     })
     .select()
