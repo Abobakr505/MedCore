@@ -15,6 +15,7 @@ import { EmptyState } from "@/components/ui/EmptyState";
 import { Skeleton } from "@/components/ui/Skeleton";
 import { fetchCart, removeFromCart } from "@/services/cart";
 import { useAuth } from "@/contexts/AuthContext";
+import { useCart } from "@/contexts/CartContext";
 import { useToast } from "@/contexts/ToastContext";
 import type { CartItem } from "@/types";
 import { formatCurrency } from "@/utils/format";
@@ -23,6 +24,7 @@ import { getPublicUrl } from "@/lib/supabase";
 export default function CartPage() {
   const { session } = useAuth();
   const { showToast } = useToast();
+  const { setCount, adjust } = useCart();
   const navigate = useNavigate();
 
   const [items, setItems] = useState<CartItem[]>([]);
@@ -35,7 +37,9 @@ export default function CartPage() {
     setLoading(true);
 
     try {
-      setItems(await fetchCart(session.user.id));
+      const data = await fetchCart(session.user.id);
+      setItems(data);
+      setCount(data.length); // مزامنة العدّاد في الهيدر
     } catch {
       showToast("تعذّر تحميل السلة", "error");
     } finally {
@@ -56,6 +60,7 @@ export default function CartPage() {
       await removeFromCart(id);
 
       setItems((prev) => prev.filter((item) => item.id !== id));
+      adjust(-1); // العدّاد في الهيدر يتحدّث فورًا
 
       showToast("تم حذف الكورس من السلة", "success");
     } catch {
@@ -273,4 +278,3 @@ export default function CartPage() {
     </div>
   );
 }
-
