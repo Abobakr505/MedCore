@@ -363,7 +363,7 @@ const onSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
           transition={{ duration: 0.7 }}
           className="relative mt-16 overflow-hidden rounded-[30px] bg-slate-950 p-7 text-center text-white shadow-2xl sm:p-10"
         >
-          <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,rgba(34,197,94,0.12),transparent_55%)]" />
+          <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,#3b83f687,transparent_55%)]" />
 
           <div className="relative">
             <Sparkles className="mx-auto h-7 w-7 text-brand-300" />
