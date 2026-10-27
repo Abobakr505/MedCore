@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import {
   UploadCloud,
@@ -41,14 +41,35 @@ const PAYMENT_INFO = {
 /** الحد الأقصى للملف قبل الضغط (الصور بتتضغط تلقائيًا قبل الرفع) */
 const MAX_FILE_SIZE = 15 * 1024 * 1024; // 15MB
 
-const ALLOWED_TYPES = [
-  "image/jpeg",
-  "image/png",
-  "image/webp",
-  "image/heic",
-  "image/heif",
-  "application/pdf",
+/**
+ * accept: قائمة MIME types صريحة بدل "image/*,.pdf".
+ * الخلط بين image/* وامتداد .pdf بيعمل مشاكل في منتقي الملفات على بعض أجهزة أندرويد.
+ */
+const FILE_ACCEPT =
+  "image/jpeg,image/png,image/webp,image/heic,image/heif,application/pdf";
+
+const ALLOWED_EXTENSIONS = [
+  "jpg",
+  "jpeg",
+  "png",
+  "webp",
+  "heic",
+  "heif",
+  "pdf",
 ];
+
+/** تحقق متسامح من نوع الملف (بعض أجهزة أندرويد بترجّع type غريب أو فاضي) */
+function isAllowedFile(file: File): boolean {
+  const type = (file.type || "").toLowerCase();
+
+  if (type.startsWith("image/") || type === "application/pdf") {
+    return true;
+  }
+
+  // type فاضي أو غير معروف -> نعتمد على الامتداد
+  const ext = file.name.split(".").pop()?.toLowerCase() ?? "";
+  return ALLOWED_EXTENSIONS.includes(ext);
+}
 
 type PaymentMethod = "etisalat" | "instapay";
 type PurchaseMode = "full" | "installment";
@@ -108,6 +129,9 @@ export default function CheckoutPage() {
 
   // بيتغير مع كل فتح للمودال عشان الـ input يتصفّر
   const [inputKey, setInputKey] = useState(0);
+
+  // مرجع للـ input عشان نفتح المنتقي بشكل موثوق على أندرويد
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   // =========================
   // Load Cart
@@ -181,17 +205,22 @@ export default function CheckoutPage() {
   };
 
   // =========================
-  // File selection (validation)
+  // File picker
   // =========================
+
+  const openFilePicker = () => {
+    if (submitting) return;
+    fileInputRef.current?.click();
+  };
 
   const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     const selected = event.target.files?.[0] ?? null;
 
-    // نصفّر الـ input عشان نقدر نختار نفس الملف تاني
-    event.target.value = "";
+    // مهم: ماينفعش نصفّر event.target.value هنا.
+    // على بعض أجهزة أندرويد ده بيبوّظ الـ File المحفوظ فالرفع بيفشل.
+    // التصفير بيتم في onClick للـ input قبل فتح المنتقي.
 
     if (!selected) {
-      setFile(null);
       return;
     }
 
@@ -200,8 +229,7 @@ export default function CheckoutPage() {
       return;
     }
 
-    // بعض الأجهزة بترجّع type فاضي، فبنسمح بيه ونعتمد على الامتداد/الضغط
-    if (selected.type && !ALLOWED_TYPES.includes(selected.type.toLowerCase())) {
+    if (!isAllowedFile(selected)) {
       showToast("نوع الملف غير مدعوم، ارفع صورة أو PDF", "error");
       return;
     }
@@ -677,7 +705,18 @@ export default function CheckoutPage() {
             </div>
 
             {/* Upload */}
-            <label className="mt-5 flex cursor-pointer flex-col items-center justify-center gap-3 rounded-2xl border-2 border-dashed border-slate-200 bg-slate-50 p-8 text-center transition hover:border-brand-300 hover:bg-brand-50/30">
+            <div
+              role="button"
+              tabIndex={0}
+              onClick={openFilePicker}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault();
+                  openFilePicker();
+                }
+              }}
+              className="mt-5 flex cursor-pointer flex-col items-center justify-center gap-3 rounded-2xl border-2 border-dashed border-slate-200 bg-slate-50 p-8 text-center transition hover:border-brand-300 hover:bg-brand-50/30"
+            >
               <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-brand-100 text-brand-600">
                 <UploadCloud className="h-7 w-7" />
               </div>
@@ -689,15 +728,26 @@ export default function CheckoutPage() {
 
                 <p className="mt-1 text-xs text-slate-400">JPG / PNG / PDF</p>
               </div>
+            </div>
 
-              <input
-                key={inputKey}
-                type="file"
-                accept="image/*,.pdf"
-                className="hidden"
-                onChange={handleFileChange}
-              />
-            </label>
+            {/*
+              الـ input برّه الـ label وبـ sr-only بدل hidden (display:none)
+              لأن بعض متصفحات أندرويد/الـ WebView مش بتفتح input مخفي بـ display:none
+            */}
+            <input
+              key={inputKey}
+              ref={fileInputRef}
+              type="file"
+              accept={FILE_ACCEPT}
+              className="sr-only"
+              tabIndex={-1}
+              onClick={(e) => {
+                // نصفّر القيمة قبل فتح المنتقي (مش بعد الاختيار)
+                // عشان نقدر نختار نفس الملف تاني من غير ما نبوّظ الـ File
+                (e.currentTarget as HTMLInputElement).value = "";
+              }}
+              onChange={handleFileChange}
+            />
 
             {/* Submit */}
             <Button
