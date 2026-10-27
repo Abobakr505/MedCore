@@ -22,7 +22,7 @@ export function Modal({ open, onClose, title, children, maxWidth = "max-w-lg" }:
           onClick={onClose}
         >
           <motion.div
-            className={`w-full ${maxWidth} rounded-2xl bg-white p-6 shadow-2xl`}
+            className={`w-full ${maxWidth} rounded-2xl bg-white p-6 shadow-2xl dark:bg-slate-900 dark:shadow-black/50`}
             initial={{ opacity: 0, scale: 0.95, y: 10 }}
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.95, y: 10 }}
@@ -30,8 +30,8 @@ export function Modal({ open, onClose, title, children, maxWidth = "max-w-lg" }:
           >
             {title && (
               <div className="mb-4 flex items-center justify-between">
-                <h3 className="text-lg font-bold text-slate-800">{title}</h3>
-                <button onClick={onClose} className="text-slate-400 hover:text-slate-600">
+                <h3 className="text-lg font-bold text-slate-800 dark:text-slate-100">{title}</h3>
+                <button onClick={onClose} className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200">
                   <X className="w-5 h-5" />
                 </button>
               </div>

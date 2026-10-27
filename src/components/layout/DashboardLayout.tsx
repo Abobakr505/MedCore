@@ -22,7 +22,6 @@ import {
   Settings,
   BarChart3,
   ChevronLeft,
-  Bell,
   Sparkles,
   Mail,
   ShoppingCart,
@@ -31,6 +30,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import clsx from "clsx";
 import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/lib/supabase";
+import { ThemeToggle } from "@/components/ui/ThemeToggle";
 
 interface NavItem {
   to: string;
@@ -54,7 +54,7 @@ const TEACHER_NAV: NavItem[] = [
   { to: "/app/teacher/courses", label: "كورساتي", icon: BookOpen },
   { to: "/app/teacher/students", label: "طلابي", icon: GraduationCap },
   { to: "/app/teacher/payments", label: "مراجعة المدفوعات", icon: Receipt },
-    { to: "/app/student/support", label: "الدعم الفني", icon: LifeBuoy },
+  { to: "/app/student/support", label: "الدعم الفني", icon: LifeBuoy },
   { to: "/app/teacher/profile", label: "الملف الشخصي", icon: UserCircle },
 ];
 
@@ -67,7 +67,7 @@ const ADMIN_NAV: NavItem[] = [
   { to: "/app/admin/enrollments", label: "الاشتراكات", icon: ListChecks },
   { to: "/app/admin/tickets", label: "الشكاوى والدعم", icon: Ticket },
   { to: "/app/admin/devices", label: "الأجهزة", icon: Smartphone },
-  { to: "/app/admin/messages",label: "رسائل التواصل",  icon: Mail },
+  { to: "/app/admin/messages", label: "رسائل التواصل", icon: Mail },
   { to: "/app/admin/reports", label: "التقارير", icon: BarChart3 },
   { to: "/app/admin/settings", label: "الإعدادات", icon: Settings },
 ];
@@ -75,9 +75,10 @@ const ADMIN_NAV: NavItem[] = [
 export function DashboardLayout() {
   const { profile, signOut } = useAuth();
   const [open, setOpen] = useState(false);
+  const [cartCount, setCartCount] = useState(0);
   const navigate = useNavigate();
   const location = useLocation();
-const [cartCount, setCartCount] = useState(0);
+
   const nav =
     profile?.role === "admin"
       ? ADMIN_NAV
@@ -103,48 +104,49 @@ const [cartCount, setCartCount] = useState(0);
         ? location.pathname === "/app/home"
         : location.pathname.startsWith(item.to)
     )?.label || "نظرة عامة";
-useEffect(() => {
-  if (!profile?.id || profile.role !== "student") {
-    setCartCount(0);
-    return;
-  }
 
-  const loadCartCount = async () => {
-    const { count, error } = await supabase
-      .from("cart_items")
-      .select("*", { count: "exact", head: true })
-      .eq("student_id", profile.id);
-
-    if (error) {
-      console.error("CART COUNT ERROR:", error);
+  useEffect(() => {
+    if (!profile?.id || profile.role !== "student") {
       setCartCount(0);
       return;
     }
 
-    setCartCount(count ?? 0);
-  };
+    const loadCartCount = async () => {
+      const { count, error } = await supabase
+        .from("cart_items")
+        .select("*", { count: "exact", head: true })
+        .eq("student_id", profile.id);
 
-  loadCartCount();
+      if (error) {
+        console.error("CART COUNT ERROR:", error);
+        setCartCount(0);
+        return;
+      }
 
-  // تحديث العدد عند الرجوع للصفحة
-  const handleCartUpdate = () => {
+      setCartCount(count ?? 0);
+    };
+
     loadCartCount();
-  };
 
-  window.addEventListener("cart-updated", handleCartUpdate);
+    // تحديث العدد عند تغيّر السلة
+    const handleCartUpdate = () => {
+      loadCartCount();
+    };
 
-  return () => {
-    window.removeEventListener("cart-updated", handleCartUpdate);
-  };
-}, [profile?.id, profile?.role]);
+    window.addEventListener("cart-updated", handleCartUpdate);
+
+    return () => {
+      window.removeEventListener("cart-updated", handleCartUpdate);
+    };
+  }, [profile?.id, profile?.role]);
 
   return (
     <div
       dir="rtl"
-      className="min-h-screen bg-[#f6f9fb] text-slate-900"
+      className="min-h-screen bg-[#f6f9fb] text-slate-900 dark:bg-slate-950 dark:text-slate-100"
     >
       {/* Desktop Sidebar */}
-      <aside className="fixed inset-y-0 right-0 z-40 hidden w-[280px] border-l border-slate-200/70 bg-white shadow-[0_0_40px_rgba(15,23,42,0.04)] lg:flex">
+      <aside className="fixed inset-y-0 right-0 z-40 hidden w-[280px] border-l border-slate-200/70 bg-white shadow-[0_0_40px_rgba(15,23,42,0.04)] dark:border-slate-800 dark:bg-slate-900 dark:shadow-none lg:flex">
         <SidebarContent
           nav={nav}
           roleLabel={roleLabel}
@@ -163,7 +165,7 @@ useEffect(() => {
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
               transition={{ duration: 0.2 }}
-              className="absolute inset-0 bg-slate-950/50 backdrop-blur-sm"
+              className="absolute inset-0 bg-slate-950/50 backdrop-blur-sm dark:bg-black/60"
               onClick={() => setOpen(false)}
             />
 
@@ -176,18 +178,18 @@ useEffect(() => {
                 stiffness: 320,
                 damping: 32,
               }}
-              className="absolute right-0 top-0 h-full w-[290px] max-w-[88vw] overflow-hidden bg-white shadow-2xl"
+              className="absolute right-0 top-0 h-full w-[290px] max-w-[88vw] overflow-hidden bg-white shadow-2xl dark:bg-slate-900"
             >
               <div className="flex h-full flex-col">
-                <div className="flex items-center justify-between border-b border-slate-100 px-5 py-4">
-                  <span className="text-sm font-bold text-slate-500">
+                <div className="flex items-center justify-between border-b border-slate-100 px-5 py-4 dark:border-slate-800">
+                  <span className="text-sm font-bold text-slate-500 dark:text-slate-400">
                     القائمة الرئيسية
                   </span>
 
                   <button
                     onClick={() => setOpen(false)}
                     aria-label="إغلاق القائمة"
-                    className="grid h-9 w-9 place-items-center rounded-xl bg-slate-100 text-slate-500 transition hover:bg-slate-200 hover:text-slate-900"
+                    className="grid h-9 w-9 place-items-center rounded-xl bg-slate-100 text-slate-500 transition hover:bg-slate-200 hover:text-slate-900 dark:bg-slate-800 dark:text-slate-400 dark:hover:bg-slate-700 dark:hover:text-white"
                   >
                     <X className="h-5 w-5" />
                   </button>
@@ -211,35 +213,32 @@ useEffect(() => {
       {/* Main Area */}
       <div className="min-h-screen lg:mr-[280px]">
         {/* Top Header */}
-        <header className="sticky top-0 z-30 border-b border-slate-200/70 bg-white/90 backdrop-blur-xl">
+        <header className="sticky top-0 z-30 border-b border-slate-200/70 bg-white/90 backdrop-blur-xl dark:border-slate-800 dark:bg-slate-950/80">
           <div className="flex h-[76px] items-center justify-between px-4 sm:px-6 lg:px-8">
             {/* Mobile Logo */}
             <div className="flex items-center gap-3 lg:hidden">
               <button
                 onClick={() => setOpen(true)}
                 aria-label="فتح القائمة"
-                className="grid h-10 w-10 place-items-center rounded-xl border border-slate-200 bg-white text-slate-600 shadow-sm transition hover:border-brand-200 hover:bg-brand-50 hover:text-brand-600"
+                className="grid h-10 w-10 place-items-center rounded-xl border border-slate-200 bg-white text-slate-600 shadow-sm transition hover:border-brand-200 hover:bg-brand-50 hover:text-brand-600 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300 dark:hover:border-brand-500/40 dark:hover:bg-brand-500/10 dark:hover:text-brand-300"
               >
                 <Menu className="h-5 w-5" />
               </button>
 
-              <Link
-                to="/"
-                className="flex items-center gap-2.5"
-              >
+              <Link to="/" className="flex items-center gap-2.5">
                 <LogoMark />
-                <span className="text-lg font-black tracking-tight text-slate-900">
-                  Med <span className="text-brand-500">Core</span>
+                <span className="text-lg font-black tracking-tight text-slate-900 dark:text-white">
+                  Med <span className="text-brand-500 dark:text-brand-400">Core</span>
                 </span>
               </Link>
             </div>
 
             {/* Desktop Page Title */}
             <div className="hidden lg:block">
-              <div className="flex items-center gap-2 text-sm text-slate-400">
+              <div className="flex items-center gap-2 text-sm text-slate-400 dark:text-slate-500">
                 <span>Med Core</span>
                 <ChevronLeft className="h-4 w-4" />
-                <span className="font-semibold text-slate-700">
+                <span className="font-semibold text-slate-700 dark:text-slate-200">
                   {activeItem}
                 </span>
               </div>
@@ -247,62 +246,64 @@ useEffect(() => {
 
             {/* Header Actions */}
             <div className="flex items-center gap-2 sm:gap-3">
-{profile?.role === "student" && (
-  <Link
-    to="/app/cart"
-    className={`group relative grid h-10 w-10 place-items-center rounded-xl transition-all ${
-      location.pathname.startsWith("/app/cart")
-        ? "bg-brand-50 text-brand-600"
-        : "text-slate-500 hover:bg-slate-50 hover:text-brand-600"
-    }`}
-    aria-label="السلة"
-  >
-    <ShoppingCart className="h-[18px] w-[18px] transition-transform group-hover:scale-110" />
+              <ThemeToggle />
 
-    <AnimatePresence>
-      {cartCount > 0 && (
-        <motion.span
-          key={cartCount}
-          initial={{ scale: 0, opacity: 0 }}
-          animate={{ scale: 1, opacity: 1 }}
-          exit={{ scale: 0, opacity: 0 }}
-          transition={{
-            type: "spring",
-            stiffness: 500,
-            damping: 20,
-          }}
-          className="absolute -right-1.5 -top-1.5 grid min-h-[20px] min-w-[20px] place-items-center rounded-full border-2 border-white bg-gradient-to-br from-brand-500 to-brand-600 px-1 text-[10px] font-black text-white shadow-md shadow-brand-500/40"
-        >
-          <motion.span
-            className="absolute inset-0 rounded-full bg-brand-400"
-            animate={{
-              scale: [1, 1.6],
-              opacity: [0.6, 0],
-            }}
-            transition={{
-              duration: 1.4,
-              repeat: Infinity,
-              ease: "easeOut",
-            }}
-          />
+              {profile?.role === "student" && (
+                <Link
+                  to="/app/cart"
+                  className={`group relative grid h-10 w-10 place-items-center rounded-xl transition-all ${
+                    location.pathname.startsWith("/app/cart")
+                      ? "bg-brand-50 text-brand-600 dark:bg-brand-500/10 dark:text-brand-300"
+                      : "text-slate-500 hover:bg-slate-50 hover:text-brand-600 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-brand-300"
+                  }`}
+                  aria-label="السلة"
+                >
+                  <ShoppingCart className="h-[18px] w-[18px] transition-transform group-hover:scale-110" />
 
-          <span className="relative z-10">
-            {cartCount > 99 ? "99+" : cartCount}
-          </span>
-        </motion.span>
-      )}
-    </AnimatePresence>
-  </Link>
-)}
+                  <AnimatePresence>
+                    {cartCount > 0 && (
+                      <motion.span
+                        key={cartCount}
+                        initial={{ scale: 0, opacity: 0 }}
+                        animate={{ scale: 1, opacity: 1 }}
+                        exit={{ scale: 0, opacity: 0 }}
+                        transition={{
+                          type: "spring",
+                          stiffness: 500,
+                          damping: 20,
+                        }}
+                        className="absolute -right-1.5 -top-1.5 grid min-h-[20px] min-w-[20px] place-items-center rounded-full border-2 border-white bg-gradient-to-br from-brand-500 to-brand-600 px-1 text-[10px] font-black text-white shadow-md shadow-brand-500/40 dark:border-slate-950"
+                      >
+                        <motion.span
+                          className="absolute inset-0 rounded-full bg-brand-400"
+                          animate={{
+                            scale: [1, 1.6],
+                            opacity: [0.6, 0],
+                          }}
+                          transition={{
+                            duration: 1.4,
+                            repeat: Infinity,
+                            ease: "easeOut",
+                          }}
+                        />
 
-              <div className="hidden h-8 w-px bg-slate-200 sm:block" />
+                        <span className="relative z-10">
+                          {cartCount > 99 ? "99+" : cartCount}
+                        </span>
+                      </motion.span>
+                    )}
+                  </AnimatePresence>
+                </Link>
+              )}
+
+              <div className="hidden h-8 w-px bg-slate-200 dark:bg-slate-800 sm:block" />
 
               <div className="hidden items-center gap-3 sm:flex">
                 <div className="text-left">
-                  <p className="max-w-[150px] truncate text-sm font-bold text-slate-800">
+                  <p className="max-w-[150px] truncate text-sm font-bold text-slate-800 dark:text-slate-100">
                     {profile?.full_name || "مرحبًا بك"}
                   </p>
-                  <p className="text-[11px] font-medium text-brand-500">
+                  <p className="text-[11px] font-medium text-brand-500 dark:text-brand-400">
                     {roleLabel}
                   </p>
                 </div>
@@ -342,9 +343,9 @@ function SidebarContent({
   mobile?: boolean;
 }) {
   return (
-    <div className="flex h-full min-h-0 flex-col">
+    <div className="flex h-full min-h-0 w-full flex-col">
       {/* Brand */}
-      <div className="border-b border-slate-100 px-5 py-5">
+      <div className="border-b border-slate-100 px-5 py-5 dark:border-slate-800">
         <Link
           to="/"
           onClick={onNavigate}
@@ -353,11 +354,11 @@ function SidebarContent({
           <LogoMark />
 
           <div>
-            <div className="text-[19px] font-black tracking-tight text-slate-900">
-              Med <span className="text-brand-500">Core</span>
+            <div className="text-[19px] font-black tracking-tight text-slate-900 dark:text-white">
+              Med <span className="text-brand-500 dark:text-brand-400">Core</span>
             </div>
 
-            <div className="mt-0.5 flex items-center gap-1.5 text-[10px] font-semibold text-slate-400">
+            <div className="mt-0.5 flex items-center gap-1.5 text-[10px] font-semibold text-slate-400 dark:text-slate-500">
               <Sparkles className="h-3 w-3 text-brand-500" />
               منصة التعليم الطبي
             </div>
@@ -367,7 +368,7 @@ function SidebarContent({
 
       {/* Role Card */}
       <div className="px-4 pt-5">
-        <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-brand-600 to-brand-500 p-4 text-white shadow-[0_10px_30px_rgba(20,184,166,0.18)]">
+        <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-brand-600 to-brand-500 p-4 text-white shadow-[0_10px_30px_rgba(20,184,166,0.18)] dark:from-brand-700 dark:to-brand-600 dark:shadow-none">
           <div className="absolute -left-8 -top-8 h-24 w-24 rounded-full bg-white/10" />
           <div className="absolute -bottom-10 -right-5 h-28 w-28 rounded-full bg-white/10" />
 
@@ -388,9 +389,7 @@ function SidebarContent({
               </span>
             </div>
 
-            <p className="relative text-sm font-extrabold">
-              {roleLabel}
-            </p>
+            <p className="relative text-sm font-extrabold">{roleLabel}</p>
 
             <p className="relative mt-1 text-[11px] text-white/70">
               أهلاً بك في Med Core 👋
@@ -401,13 +400,13 @@ function SidebarContent({
 
       {/* Navigation */}
       <div className="mb-2 mt-6 px-5">
-        <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">
+        <p className="text-[10px] font-black uppercase tracking-widest text-slate-400 dark:text-slate-500">
           القائمة
         </p>
       </div>
 
-      <nav className="flex-1 space-y-1 overflow-y-auto px-3 pb-4 scrollbar-thin scrollbar-thumb-slate-200">
-        {nav.map((item, index) => (
+      <nav className="flex-1 space-y-1 overflow-y-auto px-3 pb-4 scrollbar-thin scrollbar-thumb-slate-200 dark:scrollbar-thumb-slate-700">
+        {nav.map((item) => (
           <NavLink
             key={item.to}
             to={item.to}
@@ -417,8 +416,8 @@ function SidebarContent({
               clsx(
                 "group relative flex items-center gap-3 rounded-xl px-3.5 py-3 text-[13px] font-semibold transition-all duration-200",
                 isActive
-                  ? "bg-brand-50 text-brand-700 shadow-sm"
-                  : "text-slate-500 hover:bg-slate-50 hover:text-slate-900"
+                  ? "bg-brand-50 text-brand-700 shadow-sm dark:bg-brand-500/10 dark:text-brand-300 dark:shadow-none"
+                  : "text-slate-500 hover:bg-slate-50 hover:text-slate-900 dark:text-slate-400 dark:hover:bg-slate-800/60 dark:hover:text-slate-100"
               )
             }
           >
@@ -435,8 +434,8 @@ function SidebarContent({
                   className={clsx(
                     "grid h-9 w-9 shrink-0 place-items-center rounded-xl transition-all duration-200",
                     isActive
-                      ? "bg-brand-500 text-white shadow-[0_5px_15px_rgba(20,184,166,0.25)]"
-                      : "bg-slate-50 text-slate-400 group-hover:bg-white group-hover:text-brand-500 group-hover:shadow-sm"
+                      ? "bg-brand-500 text-white shadow-[0_5px_15px_rgba(20,184,166,0.25)] dark:shadow-none"
+                      : "bg-slate-50 text-slate-400 group-hover:bg-white group-hover:text-brand-500 group-hover:shadow-sm dark:bg-slate-800 dark:text-slate-500 dark:group-hover:bg-slate-700 dark:group-hover:text-brand-300 dark:group-hover:shadow-none"
                   )}
                 >
                   <item.icon className="h-[17px] w-[17px]" />
@@ -453,17 +452,19 @@ function SidebarContent({
         ))}
       </nav>
 
-      {/* User / Logout */}
-      <div className="border-t border-slate-100 p-3">
+      {/* Theme + User + Logout */}
+      <div className="border-t border-slate-100 p-3 dark:border-slate-800">
+        <ThemeToggle variant="switch" className="mb-2" />
+
         {profileName && (
-          <div className="mb-2 flex items-center gap-3 rounded-xl bg-slate-50 p-2.5">
+          <div className="mb-2 flex items-center gap-3 rounded-xl bg-slate-50 p-2.5 dark:bg-slate-800/60">
             <UserAvatar name={profileName} size="sm" />
 
             <div className="min-w-0 flex-1">
-              <p className="truncate text-xs font-bold text-slate-700">
+              <p className="truncate text-xs font-bold text-slate-700 dark:text-slate-200">
                 {profileName}
               </p>
-              <p className="mt-0.5 text-[10px] text-slate-400">
+              <p className="mt-0.5 text-[10px] text-slate-400 dark:text-slate-500">
                 {roleLabel}
               </p>
             </div>
@@ -472,9 +473,9 @@ function SidebarContent({
 
         <button
           onClick={onLogout}
-          className="group flex w-full items-center gap-3 rounded-xl px-3 py-3 text-sm font-semibold text-red-500 transition hover:bg-red-50"
+          className="group flex w-full items-center gap-3 rounded-xl px-3 py-3 text-sm font-semibold text-red-500 transition hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-500/10"
         >
-          <span className="grid h-9 w-9 place-items-center rounded-xl bg-red-50 transition group-hover:bg-red-100">
+          <span className="grid h-9 w-9 place-items-center rounded-xl bg-red-50 transition group-hover:bg-red-100 dark:bg-red-500/10 dark:group-hover:bg-red-500/20">
             <LogOut className="h-[17px] w-[17px]" />
           </span>
 
@@ -487,10 +488,14 @@ function SidebarContent({
 
 function LogoMark() {
   return (
-    <div className="relative grid h-10 w-10 shrink-0 place-items-center overflow-hidden rounded-xl bg-gradient-to-br from-brand-500 to-brand-700 text-white shadow-[0_7px_20px_rgba(20,184,166,0.25)]">
+    <div className="relative grid h-10 w-10 shrink-0 place-items-center overflow-hidden rounded-xl bg-gradient-to-br from-brand-500 to-brand-700 text-white shadow-[0_7px_20px_rgba(20,184,166,0.25)] dark:shadow-none">
       <div className="absolute -right-2 -top-2 h-6 w-6 rounded-full bg-white/15" />
 
-      < img src="/logo.png" alt="logo image 404" className="relative h-10 w-10 object-cover" />
+      <img
+        src="/logo.png"
+        alt="logo image 404"
+        className="relative h-10 w-10 object-cover"
+      />
     </div>
   );
 }
@@ -502,8 +507,7 @@ function UserAvatar({
   name?: string;
   size?: "sm" | "md";
 }) {
-  const initial =
-    name?.trim()?.charAt(0)?.toUpperCase() || "M";
+  const initial = name?.trim()?.charAt(0)?.toUpperCase() || "M";
 
   return (
     <div

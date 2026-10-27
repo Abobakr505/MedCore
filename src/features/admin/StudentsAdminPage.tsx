@@ -339,7 +339,7 @@ export default function StudentsAdminPage() {
                   </tr>
                 </thead>
 
-                <tbody className="divide-y divide-slate-100">
+                <tbody className="divide-y divide-slate-100 dark:divide-slate-600">
                   {filteredStudents.map((student) => (
                     <tr
                       key={student.id}

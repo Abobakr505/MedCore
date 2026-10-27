@@ -233,7 +233,7 @@ export default function TeachersAdminPage() {
 
         <div className="relative flex flex-col gap-5 xl:flex-row xl:items-center xl:justify-between">
           <div className="flex items-start gap-4">
-            <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl bg-purple-50 text-purple-600 ring-1 ring-purple-100">
+            <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl bg-purple-50 text-purple-600 ring-1 ring-purple-100 dark:ring-purple-900">
               <GraduationCap className="h-7 w-7" />
             </div>
 
@@ -408,7 +408,7 @@ export default function TeachersAdminPage() {
                   </tr>
                 </thead>
 
-                <tbody className="divide-y divide-slate-100">
+                <tbody className="divide-y divide-slate-100 dark:divide-slate-600">
                   {filteredTeachers.map((teacher) => (
                     <tr
                       key={teacher.id}

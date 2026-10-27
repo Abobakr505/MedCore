@@ -597,7 +597,7 @@ export default function EnrollmentsAdminPage() {
                   </tr>
                 </thead>
 
-                <tbody className="divide-y divide-slate-100">
+                <tbody className="divide-y divide-slate-100 dark:divide-slate-600 ">
                   {filteredRows.map((row) => {
                     const StatusIcon = STATUS_ICONS[row.status] || Clock3;
                     const isNew = newIds.has(row.id);

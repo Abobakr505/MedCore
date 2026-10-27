@@ -54,19 +54,16 @@ const ROLE_ACCENTS = {
     badge: "bg-brand-500 text-brand-100 ring-brand-100",
     panel: "from-brand-600 via-brand-500 to-sky-500",
     chip: "bg-brand-600",
-    glow: "shadow-brand-100",
   },
   teacher: {
     badge: "bg-brand-100 text-brand-900 ring-brand-100",
     panel: "from-brand-900 via-brand-500 to-brand-500",
     chip: "bg-brand-500",
-    glow: "shadow-brand-100",
   },
   admin: {
     badge: "bg-slate-200 text-slate-700 ring-slate-300",
     panel: "from-slate-900 via-slate-800 to-slate-700",
     chip: "bg-slate-700",
-    glow: "shadow-slate-200",
   },
 } as const;
 
@@ -142,7 +139,7 @@ const passed = attempts.filter((a) => {
       <motion.section
         initial={{ opacity: 0, y: 12 }}
         animate={{ opacity: 1, y: 0 }}
-        className={`relative overflow-hidden rounded-[32px] border border-brand-100 bg-gradient-to-br ${accent.panel} p-6 text-white bg-brand-500 shadow-soft ${accent.glow}`}
+        className={`relative overflow-hidden rounded-[32px] border border-brand-100 bg-gradient-to-br ${accent.panel} p-6 text-white bg-brand-500 `}
       >
         <div className="relative flex flex-col gap-6 md:flex-row md:items-end md:justify-between">
           <div className="max-w-xl">
@@ -295,7 +292,7 @@ const collegeLabel =
       <motion.section
         initial={{ opacity: 0, y: 12 }}
         animate={{ opacity: 1, y: 0 }}
-        className={`relative overflow-hidden rounded-[32px] border border-emerald-100 bg-gradient-to-br ${accent.panel} p-6 text-white shadow-soft ${accent.glow}`}
+        className={`relative overflow-hidden rounded-[32px] border border-emerald-100 bg-gradient-to-br ${accent.panel} p-6 text-white`}
       >
         <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_left,rgba(255,255,255,0.18),transparent_24%)]" />
         <div className="relative flex flex-col gap-6 md:flex-row md:items-end md:justify-between">

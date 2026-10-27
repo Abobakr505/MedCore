@@ -225,7 +225,7 @@ const resetFilters = () => {
   const activeSearch = searchParams.get("q") ?? "";
 
   return (
-    <main className="min-h-screen bg-[#f8fafc]">
+    <main className="min-h-screen bg-[#f8fafc] dark:bg-slate-950">
       {/* =====================================================
           HERO
       ====================================================== */}

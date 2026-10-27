@@ -2136,7 +2136,7 @@ export default function CoursesAdminPage() {
                   </tr>
                 </thead>
 
-                <tbody className="divide-y divide-slate-100">
+                <tbody className="divide-y divide-slate-100 dark:divide-slate-600">
                   {filteredCourses.map((c) => {
                     const isNew = newCourseIds.has(c.id);
 

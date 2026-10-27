@@ -321,10 +321,10 @@ function HeroSection() {
   const Icon = roleStyle.icon;
 
   return (
-    <section className="relative isolate overflow-hidden bg-[#f7fbfa]">
+    <section className="relative isolate overflow-hidden bg-[#f7fbfa] dark:bg-slate-950">
       {/* Background */}
       <div className="absolute inset-0 -z-10">
-        <div className="absolute -right-40 -top-40 h-[520px] w-[520px] rounded-full bg-brand-200/30 blur-3xl" />
+        <div className="absolute -right-40 -top-40 h-[520px] w-[520px] rounded-full bg-brand-200/30 dark:bg-brand-800/20  blur-3xl" />
         <div className="absolute -left-40 bottom-0 h-[500px] w-[500px] rounded-full bg-cyan-100/50 blur-3xl" />
 
         <div
@@ -360,7 +360,7 @@ function HeroSection() {
 
           <motion.h1
             variants={fadeUp}
-            className="mx-auto mt-7 max-w-3xl text-4xl font-black leading-[1.2] tracking-tight text-slate-950 sm:text-5xl md:text-6xl lg:mx-0"
+            className="mx-auto mt-7 max-w-3xl text-4xl font-black leading-[1.2] tracking-tight text-slate-950 dark:text-slate-50 sm:text-5xl md:text-6xl lg:mx-0"
           >
             {roleContent.title.split("\n").map((line, index) => (
               <span
@@ -731,7 +731,7 @@ function TrustBar() {
 
   return (
     <section className="border-y border-slate-100 bg-white">
-      <div className="mx-auto grid max-w-7xl grid-cols-2 divide-x divide-slate-100 px-5 py-5 sm:px-6 md:grid-cols-4">
+      <div className="mx-auto grid max-w-7xl grid-cols-2 divide-x divide-slate-100 dark:divide-slate-600 px-5 py-5 sm:px-6 md:grid-cols-4">
         {items.map((item, index) => (
           <motion.div
             key={item.text}
@@ -967,7 +967,7 @@ function WhyMedCoreSection() {
   ];
 
   return (
-    <section className="bg-[#f8fbfa] px-5 py-24 sm:px-6">
+    <section className="bg-[#f8fbfa] px-5 py-24 dark:bg-slate-950 sm:px-6">
       <div className="mx-auto max-w-7xl">
         <SectionHeader
           eyebrow="مصممة لك"
@@ -1209,7 +1209,7 @@ function HowItWorksSection() {
   ];
 
   return (
-    <section className="bg-[#f8fbfa] px-5 py-24 sm:px-6">
+    <section className="bg-[#f8fbfa] px-5 py-24 dark:bg-slate-950 sm:px-6">
       <div className="mx-auto max-w-7xl">
         <SectionHeader
           eyebrow="كيف تبدأ؟"
@@ -1229,7 +1229,7 @@ function HowItWorksSection() {
               variants={fadeUp}
               className="relative rounded-[2rem] border border-slate-100 bg-white p-7 text-center shadow-sm"
             >
-              <div className="relative mx-auto grid h-20 w-20 place-items-center rounded-full border-8 border-[#f8fbfa] bg-brand-50 text-brand-500 shadow-sm">
+              <div className="relative mx-auto grid h-20 w-20 place-items-center rounded-full border-8 border-[#f8fbfa] bg-brand-50 text-brand-500 shadow-sm dark:border-slate-950">
                 <step.icon className="h-7 w-7" />
 
                 <span className="absolute -right-2 -top-2 grid h-7 w-7 place-items-center rounded-full bg-brand-500 text-[9px] font-black text-white">
@@ -1293,7 +1293,7 @@ function TestimonialsSection() {
               custom={index}
               variants={fadeUp}
               whileHover={{ y: -6 }}
-              className="relative rounded-[2rem] border border-slate-100 bg-[#f8fbfa] p-7 transition-all hover:shadow-xl hover:shadow-brand-900/5"
+              className="relative rounded-[2rem] border border-slate-100 bg-[#f8fbfa] p-7 transition-all hover:shadow-xl hover:shadow-brand-900/5 dark:border-slate-800 dark:bg-slate-900"
             >
               <div className="absolute right-6 top-6 opacity-10">
                 <Quote className="h-14 w-14 text-brand-600" />
@@ -1420,7 +1420,7 @@ function SectionHeader({
         {eyebrow}
       </span>
 
-      <h2 className="mt-5 text-3xl font-black tracking-tight text-slate-950 sm:text-4xl">
+      <h2 className="mt-5 text-3xl font-black tracking-tight text-slate-950 dark:text-slate-50 sm:text-4xl">
         {title}
       </h2>
 

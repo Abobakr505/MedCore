@@ -93,7 +93,7 @@ export default function CollegesPage() {
   }, []);
 
   return (
-    <div className="relative min-h-screen overflow-hidden bg-gradient-to-b from-brand-50 via-white to-white pb-20">
+    <div className="relative min-h-screen overflow-hidden bg-gradient-to-b from-brand-50 via-white to-white pb-20 dark:from-slate-900 dark:via-slate-950 dark:to-slate-950">
       <div className="pointer-events-none absolute inset-0 overflow-hidden">
         <motion.div
           animate={{ y: [0, -20, 0], x: [0, 20, 0] }}
