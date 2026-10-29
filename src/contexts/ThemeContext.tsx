@@ -11,6 +11,8 @@ import {
 
 export type Theme = "light" | "dark";
 
+export const DARK_MODE_ENABLED = false;
+
 const STORAGE_KEY = "medcore-theme";
 
 interface ThemeContextValue {
@@ -63,7 +65,10 @@ let themeTransitionTimeout: number | undefined;
 
 export function ThemeProvider({ children }: { children: ReactNode }) {
   const [theme, setThemeState] = useState<Theme>(
-    () => readSaved() ?? getSystemTheme()
+    () =>
+      DARK_MODE_ENABLED
+        ? readSaved() ?? getSystemTheme()
+        : "light"
   );
 
   // هل المستخدم اختار الثيم بنفسه؟ لو لأ، نتابع ثيم الجهاز
@@ -75,6 +80,7 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
 
   // متابعة تغيير ثيم النظام (لو المستخدم لسه مختارش)
   useEffect(() => {
+    if (!DARK_MODE_ENABLED) return;
     if (typeof window.matchMedia !== "function") return;
     const media = window.matchMedia("(prefers-color-scheme: dark)");
 
@@ -90,6 +96,7 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
 
   // مزامنة بين التابات
   useEffect(() => {
+    if (!DARK_MODE_ENABLED) return;
     const onStorage = (e: StorageEvent) => {
       if (e.key !== STORAGE_KEY && e.key !== null) return;
 
@@ -104,12 +111,13 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const setTheme = useCallback((next: Theme) => {
+    const activeTheme = DARK_MODE_ENABLED ? next : "light";
     hasExplicitChoice.current = true;
-    applyTheme(next, true);
-    setThemeState(next);
+    applyTheme(activeTheme, true);
+    setThemeState(activeTheme);
 
     try {
-      localStorage.setItem(STORAGE_KEY, next);
+      localStorage.setItem(STORAGE_KEY, activeTheme);
     } catch {
       /* ignore */
     }

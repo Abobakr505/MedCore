@@ -2,7 +2,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { Moon, Sun } from "lucide-react";
 import clsx from "clsx";
 
-import { useTheme } from "@/contexts/ThemeContext";
+import { DARK_MODE_ENABLED, useTheme } from "@/contexts/ThemeContext";
 
 interface ThemeToggleProps {
   variant?: "icon" | "switch";
@@ -14,6 +14,8 @@ export function ThemeToggle({
   className,
 }: ThemeToggleProps) {
   const { isDark, toggleTheme } = useTheme();
+
+  if (!DARK_MODE_ENABLED) return null;
 
   const label = isDark ? "التبديل للوضع الفاتح" : "التبديل للوضع الداكن";
 
