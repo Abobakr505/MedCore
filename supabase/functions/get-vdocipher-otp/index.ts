@@ -93,7 +93,7 @@ Deno.serve(async (req) => {
     const { data: lesson, error: lessonError } = await admin
       .from("lessons")
       .select(
-        "id, created_at, is_preview, course_sections!inner(course_id, unlock_month, courses!inner(teacher_id))",
+        "id, section_id, created_at, is_preview, course_sections!inner(course_id, unlock_month, courses!inner(teacher_id, is_installment))",
       )
       .eq("vdocipher_video_id", videoId)
       .maybeSingle();
@@ -108,6 +108,7 @@ Deno.serve(async (req) => {
     const section = first<any>((lesson as any).course_sections);
     const course = first<any>(section?.courses);
     const courseId: string | undefined = section?.course_id;
+    const sectionId: string | undefined = (lesson as any).section_id;
 
     const { data: profile } = await admin
       .from("profiles")
@@ -150,15 +151,67 @@ Deno.serve(async (req) => {
           return json({ error: "Forbidden" }, 403);
         }
 
-        canWatch = true;
+        if (enrollment.status === "active") {
+          const { data: sectionAccess, error: sectionAccessError } =
+            await admin.rpc("can_access_section", {
+              p_section_id: sectionId,
+              p_student_id: user.id,
+            });
+
+          if (sectionAccessError) {
+            console.error("Section access check error:", sectionAccessError);
+            return json({ error: "Failed to verify lesson access" }, 500);
+          }
+
+          canWatch = Boolean(sectionAccess);
+        } else {
+          const unlockMonth = Number(section?.unlock_month ?? 1);
+          const isInstallmentCourse = Boolean(course?.is_installment);
+
+          if (!isInstallmentCourse || unlockMonth <= 1) {
+            canWatch = true;
+          } else {
+            const { data: fullPayment, error: fullPaymentError } = await admin
+              .from("payments")
+              .select("id")
+              .eq("student_id", user.id)
+              .eq("course_id", courseId)
+              .eq("status", "approved")
+              .is("installment_id", null)
+              .limit(1)
+              .maybeSingle();
+
+            if (fullPaymentError) {
+              console.error("Full payment lookup error:", fullPaymentError);
+              return json({ error: "Failed to verify payment" }, 500);
+            }
+
+            if (fullPayment) {
+              canWatch = true;
+            } else {
+              const { data: approvedInstallment, error: installmentError } =
+                await admin
+                  .from("student_installments")
+                  .select("id")
+                  .eq("student_id", user.id)
+                  .eq("course_id", courseId)
+                  .eq("month_number", unlockMonth)
+                  .eq("status", "approved")
+                  .maybeSingle();
+
+              if (installmentError) {
+                console.error("Installment lookup error:", installmentError);
+                return json({ error: "Failed to verify installment" }, 500);
+              }
+
+              canWatch = Boolean(approvedInstallment);
+            }
+          }
+        }
       }
     }
 
     if (!canWatch) return json({ error: "Forbidden" }, 403);
-
-    // TODO: تحقق أن القسم غير مقفل حسب section.unlock_month
-    // ونظام التقسيط (الأقساط المعتمدة) بنفس منطق الواجهة.
-    // ابعتلي جدول الأقساط/الدفع وأكمّله.
 
     // =========================
     // 5) العلامة المائية (الاسم + رقم التليفون)
