@@ -13,7 +13,6 @@ import type { Profile, CollegeType, UserRole } from "@/types";
 
 interface DeviceCheckResult {
   allowed: boolean;
-  reason: string;
 }
 
 type SignInBlockReason = "pending_verification" | "suspended" | "rate_limited";
@@ -48,10 +47,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [session, setSession] = useState<Session | null>(null);
   const [profile, setProfile] = useState<Profile | null>(null);
   const [loading, setLoading] = useState(true);
-  const [deviceBlocked, setDeviceBlocked] = useState(false);
+  const [deviceBlockedUserId, setDeviceBlockedUserId] = useState<string | null>(null);
 
-  // يمنع تشغيل فحصين للجهاز في نفس الوقت
-  const deviceCheckInFlight = useRef<Promise<void> | null>(null);
+  const deviceCheckInFlight = useRef<{
+    userId: string;
+    promise: Promise<void>;
+  } | null>(null);
+  const currentUserId = useRef<string | null>(null);
   // أثناء signIn نمنع الـ listener من فحص الجهاز، signIn نفسها هتعمل الفحص بعد التحقق من حالة الحساب
   const signInInProgress = useRef(false);
 
@@ -68,11 +70,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return null;
   }, []);
 
-  const checkDevice = useCallback((): Promise<void> => {
-    // لو فيه فحص شغال، استنى نفس النتيجة بدل ما تبدأ فحص جديد
-    if (deviceCheckInFlight.current) return deviceCheckInFlight.current;
+  const checkDevice = useCallback((userId: string): Promise<void> => {
+    const inFlight = deviceCheckInFlight.current;
+    if (inFlight?.userId === userId) return inFlight.promise;
 
-    const promise = (async () => {
+    let promise: Promise<void>;
+    promise = (async () => {
       try {
         const { data, error } = await supabase.rpc("check_or_register_device", {
           p_device_identifier: getDeviceIdentifier(),
@@ -80,22 +83,28 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         });
 
         if (error || !data) {
-          // خطأ تقني: متحجبش المستخدم ومتغيّرش الحالة
           console.error("device check failed:", error);
           return;
         }
 
-        const result = data as unknown as DeviceCheckResult;
-        // الحجب فقط لو السيرفر قال "مرفوض" صراحة، وبيتشال لو الفحص التالي نجح
-        setDeviceBlocked(result.allowed === false);
+        if (!isDeviceCheckResult(data)) {
+          console.error("device check returned an invalid response:", data);
+          return;
+        }
+
+        if (currentUserId.current === userId) {
+          setDeviceBlockedUserId(data.allowed ? null : userId);
+        }
       } catch (err) {
         console.error("device check exception:", err);
-      } finally {
+      }
+    })().finally(() => {
+      if (deviceCheckInFlight.current?.promise === promise) {
         deviceCheckInFlight.current = null;
       }
-    })();
+    });
 
-    deviceCheckInFlight.current = promise;
+    deviceCheckInFlight.current = { userId, promise };
     return promise;
   }, []);
 
@@ -105,6 +114,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const { data: listener } = supabase.auth.onAuthStateChange((event, newSession) => {
       if (!mounted) return;
 
+      currentUserId.current = newSession?.user.id ?? null;
       setSession(newSession);
 
       // أثناء تسجيل الدخول، signIn هي اللي بتتكفل بالبروفايل وفحص الجهاز
@@ -117,14 +127,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
         // مهم: متعملش await لـ supabase مباشرة داخل الـ callback (ممكن يسبب deadlock)
         setTimeout(async () => {
-          if (!mounted) return;
+          if (!mounted || currentUserId.current !== newSession.user.id) return;
           await loadProfile(newSession.user.id);
-          await checkDevice();
+          if (currentUserId.current !== newSession.user.id) return;
+          await checkDevice(newSession.user.id);
           if (mounted) setLoading(false);
         }, 0);
       } else {
         setProfile(null);
-        setDeviceBlocked(false);
+        setDeviceBlockedUserId(null);
         setLoading(false);
       }
     });
@@ -239,14 +250,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         console.error("SET SESSION ERROR:", setSessionError);
         return { error: "حدث خطأ غير متوقع، يرجى المحاولة مرة أخرى" };
       }
+      currentUserId.current = result.user.id;
 
       // نجيب البروفايل عشان نتأكد من حالة الحساب قبل ما نسمح بالدخول
       const userProfile = await loadProfile(result.user.id);
 
       if (userProfile?.status === "pending_verification") {
         await supabase.auth.signOut();
+        currentUserId.current = null;
         setSession(null);
         setProfile(null);
+        setDeviceBlockedUserId(null);
         return {
           error:
             "حسابك كمعلم لسه قيد المراجعة من الإدارة. هيتم إشعارك بمجرد الموافقة عليه.",
@@ -256,8 +270,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
       if (userProfile?.status === "suspended") {
         await supabase.auth.signOut();
+        currentUserId.current = null;
         setSession(null);
         setProfile(null);
+        setDeviceBlockedUserId(null);
         return {
           error: "تم إيقاف هذا الحساب. تواصل مع الإدارة لمزيد من التفاصيل.",
           reason: "suspended",
@@ -265,7 +281,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
 
       // الحساب سليم: نفحص الجهاز مرة واحدة فقط
-      await checkDevice();
+      await checkDevice(result.user.id);
       setLoading(false);
 
       return { error: null };
@@ -276,9 +292,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const signOut = async () => {
     await supabase.auth.signOut();
+    currentUserId.current = null;
     setProfile(null);
     setSession(null);
-    setDeviceBlocked(false);
+    setDeviceBlockedUserId(null);
   };
 
   const refreshProfile = async () => {
@@ -287,7 +304,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   return (
     <AuthContext.Provider
-      value={{ session, profile, loading, deviceBlocked, signUp, signIn, signOut, refreshProfile }}
+      value={{
+        session,
+        profile,
+        loading,
+        deviceBlocked: session?.user.id === deviceBlockedUserId,
+        signUp,
+        signIn,
+        signOut,
+        refreshProfile,
+      }}
     >
       {children}
     </AuthContext.Provider>
@@ -308,4 +334,13 @@ function translateAuthError(message: string): string {
     "Password should be at least 6 characters": "كلمة المرور يجب أن تكون 6 أحرف على الأقل",
   };
   return map[message] || "حدث خطأ غير متوقع، يرجى المحاولة مرة أخرى";
+}
+
+function isDeviceCheckResult(data: unknown): data is DeviceCheckResult {
+  return (
+    typeof data === "object" &&
+    data !== null &&
+    "allowed" in data &&
+    typeof data.allowed === "boolean"
+  );
 }

@@ -527,6 +527,20 @@ declare
   v_active public.user_devices%rowtype;
   v_allowed boolean;
 begin
+  if auth.uid() is null then
+    raise exception 'Authentication required';
+  end if;
+
+  if p_device_identifier is null or btrim(p_device_identifier) = '' then
+    raise exception 'Device identifier is required';
+  end if;
+
+  -- Serialize checks for this user so simultaneous tabs cannot race to register.
+  perform 1 from public.profiles where id = auth.uid() for update;
+  if not found then
+    raise exception 'User profile not found';
+  end if;
+
   select (value #>> '{}')::boolean into v_enabled from public.platform_settings where key = 'device_lock_enabled';
   if not coalesce(v_enabled, true) then
     return jsonb_build_object('allowed', true, 'reason', 'device_lock_disabled');
