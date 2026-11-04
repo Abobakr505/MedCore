@@ -34,6 +34,10 @@ interface AuthContextValue {
     email: string,
     password: string
   ) => Promise<{ error: string | null; reason?: SignInBlockReason; retryAfterSeconds?: number }>;
+  recoverDevice: (password: string) => Promise<{
+    error: string | null;
+    availableAt?: string;
+  }>;
   signOut: () => Promise<void>;
   refreshProfile: () => Promise<void>;
 }
@@ -290,6 +294,55 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   };
 
+  const recoverDevice: AuthContextValue["recoverDevice"] = async (password) => {
+    if (!session?.user) {
+      return { error: "انتهت جلسة الدخول. سجّل الدخول مرة أخرى." };
+    }
+
+    try {
+      const { data, error } = await supabase.functions.invoke("recover-device", {
+        body: {
+          password,
+          deviceIdentifier: getDeviceIdentifier(),
+          deviceName: getDeviceName(),
+        },
+      });
+
+      if (error) {
+        console.error("DEVICE RECOVERY ERROR:", error);
+        return { error: "تعذر التحقق من الحساب الآن. حاول مرة أخرى." };
+      }
+
+      if (data?.reason === "invalid_password") {
+        return { error: "كلمة المرور غير صحيحة." };
+      }
+
+      if (data?.reason === "rate_limited") {
+        return {
+          error: data.message || "محاولات كثيرة. انتظر قليلًا ثم حاول مرة أخرى.",
+        };
+      }
+
+      if (data?.reason === "cooldown") {
+        return {
+          error: "تم نقل الجهاز مؤخرًا. يمكنك تغيير الجهاز مرة أخرى بعد 30 يومًا.",
+          availableAt: data.available_at,
+        };
+      }
+
+      if (!data?.success) {
+        console.error("DEVICE RECOVERY RETURNED AN INVALID RESPONSE:", data);
+        return { error: "تعذر استعادة الجهاز. حاول مرة أخرى أو تواصل مع الدعم." };
+      }
+
+      setDeviceBlockedUserId(null);
+      return { error: null };
+    } catch (err) {
+      console.error("DEVICE RECOVERY EXCEPTION:", err);
+      return { error: "تعذر الاتصال بالخادم. تحقق من اتصالك بالإنترنت." };
+    }
+  };
+
   const signOut = async () => {
     await supabase.auth.signOut();
     currentUserId.current = null;
@@ -311,6 +364,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         deviceBlocked: session?.user.id === deviceBlockedUserId,
         signUp,
         signIn,
+        recoverDevice,
         signOut,
         refreshProfile,
       }}
