@@ -11,6 +11,7 @@
 
 1. أنشئ مشروع جديد على Supabase.
 2. من SQL Editor، شغّل ملف `database/01-schema.sql` كاملاً (من مخرجات Phase 1).
+   عند استخدام الأقساط على قاعدة موجودة، شغّل `database/08-installment-content-release.sql` بعد `database/03-installments.sql` لربط إتاحة الأقساط بنشر محتوى الشهر من المدرس.
 3. من Storage، تأكد من ظهور الـ Buckets التالية (يُنشئها السكربت تلقائيًا):
    `avatars`, `course-thumbnails`, `course-videos`, `payment-receipts`, `ticket-attachments`.
 4. من Authentication → Settings، فعّل "Confirm email" (مفعّل افتراضيًا).

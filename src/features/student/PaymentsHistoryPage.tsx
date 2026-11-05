@@ -100,29 +100,25 @@ function formatInstallmentLabel(
     : `الشهر ${monthNumber}`;
 }
 
-/**
- * يحسب حالة تنبيه القسط القادم لكورس واحد: التون (ok/warning/overdue)
- * والرسالة المناسبة والقسط نفسه. يُستخدم لعرض banner منفصل داخل كارد كل كورس.
- */
+/** Builds the release/payment banner for the next outstanding installment. */
 function getCourseDueBanner(courseInstallments: StudentInstallment[]) {
-  const due = courseInstallments.filter(
-    (i) => i.status === "scheduled" || i.status === "rejected",
-  );
-
-  const next = due.sort(
-    (a, b) => new Date(a.due_date).getTime() - new Date(b.due_date).getTime(),
-  )[0];
+  const next = courseInstallments
+    .filter(
+      (i) => i.status === "scheduled" || i.status === "rejected",
+    )
+    .sort((a, b) => a.month_number - b.month_number)[0];
 
   if (!next) return null;
-
-  const now = new Date().setHours(0, 0, 0, 0);
-  const dueTime = new Date(next.due_date).getTime();
-  const daysUntilDue = Math.ceil((dueTime - now) / (1000 * 60 * 60 * 24));
 
   const totalForCourse = (next.course as any)?.total_installments as
     | number
     | undefined;
   const label = formatInstallmentLabel(next.month_number, totalForCourse);
+  const previousApproved = courseInstallments
+    .filter((installment) => installment.month_number < next.month_number)
+    .every((installment) => installment.status === "approved");
+  const canPay =
+    (next.month_number === 1 || next.is_released) && previousApproved;
 
   let tone: BannerTone;
   let message: string;
@@ -130,21 +126,20 @@ function getCourseDueBanner(courseInstallments: StudentInstallment[]) {
   if (next.status === "rejected") {
     tone = "overdue";
     message = `تم رفض إيصال ${label}، برجاء إعادة الرفع`;
-  } else if (daysUntilDue < 0) {
-    tone = "overdue";
-    message = `فات معاد ${label} منذ ${Math.abs(daysUntilDue)} يوم`;
-  } else if (daysUntilDue === 0) {
+  } else if (!next.is_released) {
     tone = "warning";
-    message = `${label} مستحق اليوم`;
-  } else if (daysUntilDue <= 3) {
+    message = previousApproved
+      ? `دفع ${label} متاح فور نشر المدرس محتوى الشهر ${next.month_number}`
+      : `يتاح دفع ${label} بعد اعتماد القسط السابق ونشر المدرس محتوى الشهر ${next.month_number}`;
+  } else if (!previousApproved) {
     tone = "warning";
-    message = `${label} مستحق خلال ${daysUntilDue} يوم`;
+    message = `يتاح دفع ${label} بعد اعتماد القسط السابق`;
   } else {
     tone = "ok";
-    message = `${label} مستحق خلال ${daysUntilDue} يوم`;
+    message = `دفع ${label} متاح الآن`;
   }
 
-  return { tone, message, installment: next, daysUntilDue };
+  return { tone, message, installment: next, canPay };
 }
 
 export default function PaymentsHistoryPage() {
@@ -174,9 +169,9 @@ export default function PaymentsHistoryPage() {
     setInstallmentsLoading(true);
     fetchStudentInstallments(session.user.id)
       .then(setInstallments)
-      .catch(() => setInstallments([]))
+      .catch(() => showToast("تعذّر تحميل حالة الأقساط", "error"))
       .finally(() => setInstallmentsLoading(false));
-  }, [session?.user?.id]);
+  }, [session?.user?.id, showToast]);
 
   const reloadInstallments = async () => {
     if (!session?.user) return;
@@ -184,7 +179,7 @@ export default function PaymentsHistoryPage() {
       const data = await fetchStudentInstallments(session.user.id);
       setInstallments(data);
     } catch {
-      // تجاهل صامت، هيتم عرض آخر نسخة محملة
+      showToast("تعذّر تحديث حالة الأقساط", "error");
     }
   };
 
@@ -359,18 +354,20 @@ export default function PaymentsHistoryPage() {
                       <div className="min-w-0 flex-1">
                         <p className="truncate">{dueBanner.message}</p>
                       </div>
-                      <Button
-                        size="sm"
-                        variant="secondary"
-                        onClick={() => setPayTarget(dueBanner.installment)}
-                      >
-                        <UploadCloud className="h-4 w-4" /> ادفع الآن
-                      </Button>
+                      {dueBanner.canPay && (
+                        <Button
+                          size="sm"
+                          variant="secondary"
+                          onClick={() => setPayTarget(dueBanner.installment)}
+                        >
+                          <UploadCloud className="h-4 w-4" /> ادفع الآن
+                        </Button>
+                      )}
                     </div>
                   )}
 
                   {/* Course installments */}
-                  <div className="divide-y divide-slate-100">
+                  <div className="divide-y divide-slate-100 dark:divide-slate-600">
                     {sorted.map((installment) => {
                       const color: "amber" | "green" | "red" =
                         installment.status === "approved"
@@ -380,9 +377,20 @@ export default function PaymentsHistoryPage() {
                             : installment.status === "rejected"
                               ? "red"
                               : "amber";
+                      const previousApproved = sorted
+                        .filter(
+                          (previous) =>
+                            previous.month_number < installment.month_number,
+                        )
+                        .every((previous) => previous.status === "approved");
                       const isPayable =
                         installment.status === "scheduled" ||
                         installment.status === "rejected";
+                      const canPay =
+                        isPayable &&
+                        (installment.month_number === 1 ||
+                          installment.is_released) &&
+                        previousApproved;
 
                       return (
                         <div
@@ -397,27 +405,39 @@ export default function PaymentsHistoryPage() {
                               )}
                             </p>
                             <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-slate-400">
-                              <span className="flex items-center gap-1">
-                                <CalendarDays className="h-3.5 w-3.5" />
-                                {new Date(
-                                  installment.due_date,
-                                ).toLocaleDateString("ar-EG")}
-                              </span>
-                              <span className="hidden h-1 w-1 rounded-full bg-slate-300 sm:block" />
                               <span>{formatCurrency(installment.amount)}</span>
+                              {installment.status === "scheduled" &&
+                                !installment.is_released &&
+                                installment.month_number > 1 && (
+                                  <span>
+                                    {previousApproved
+                                      ? "سيظهر الدفع فور نشر المدرس محتوى هذا الشهر"
+                                      : "يتاح بعد اعتماد القسط السابق ونشر محتوى هذا الشهر"}
+                                  </span>
+                                )}
+                              {installment.status === "scheduled" &&
+                                installment.is_released &&
+                                !previousApproved && (
+                                  <span>متاح بعد اعتماد القسط السابق</span>
+                                )}
                             </div>
                           </div>
                           <div className="flex items-center gap-3">
                             <Badge color={color}>
                               {installment.status === "scheduled"
-                                ? "لم يحن موعده"
+                                ? installment.month_number > 1 &&
+                                  !installment.is_released
+                                  ? "بانتظار نشر المدرس"
+                                  : canPay
+                                    ? "متاح للدفع"
+                                    : "بانتظار اعتماد القسط السابق"
                                 : installment.status === "pending"
                                   ? "قيد المراجعة"
                                   : installment.status === "approved"
                                     ? "مدفوع"
                                     : "مرفوض"}
                             </Badge>
-                            {isPayable && (
+                            {canPay && (
                               <Button
                                 size="sm"
                                 variant="secondary"

@@ -293,15 +293,39 @@ export async function uploadFirstInstallmentAndCreatePlan(params: {
   return payment;
 }
 
-/** جلب كل أقساط الطالب (كل الكورسات) مرتبة بتاريخ الاستحقاق */
+/** Fetch the student's installments and whether the teacher released each month. */
 export async function fetchStudentInstallments(studentId: string) {
   const { data, error } = await supabase
     .from("student_installments")
     .select("*, course:courses(id, title, thumbnail_path)")
     .eq("student_id", studentId)
-    .order("due_date", { ascending: true });
+    .order("month_number", { ascending: true });
   if (error) throw error;
-  return (data ?? []) as unknown as StudentInstallment[];
+
+  const installments = data ?? [];
+  const courseIds = [
+    ...new Set(installments.map((installment) => installment.course_id)),
+  ];
+  if (courseIds.length === 0) return [];
+
+  const { data: sections, error: sectionsError } = await supabase
+    .from("course_sections")
+    .select("course_id, unlock_month")
+    .in("course_id", courseIds);
+  if (sectionsError) throw sectionsError;
+
+  const releasedMonths = new Set(
+    (sections ?? []).map(
+      (section) => `${section.course_id}:${section.unlock_month}`,
+    ),
+  );
+
+  return installments.map((installment) => ({
+    ...installment,
+    is_released:
+      installment.month_number === 1 ||
+      releasedMonths.has(`${installment.course_id}:${installment.month_number}`),
+  })) as unknown as StudentInstallment[];
 }
 
 /** رفع إيصال قسط تالي (شهر 2، 3 ...) */

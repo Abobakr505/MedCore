@@ -245,6 +245,7 @@ export interface StudentInstallment {
   reviewed_at: string | null;
   created_at: string;
   updated_at: string;
+  is_released: boolean;
   course?: Pick<Course, "id" | "title" | "thumbnail_path">;
 }
 
