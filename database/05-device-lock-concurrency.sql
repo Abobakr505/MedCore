@@ -8,6 +8,7 @@ set search_path = public
 as $$
 declare
   v_enabled boolean;
+  v_user_role user_role;
   v_active public.user_devices%rowtype;
   v_allowed boolean;
 begin
@@ -15,13 +16,20 @@ begin
     raise exception 'Authentication required';
   end if;
 
-  if p_device_identifier is null or btrim(p_device_identifier) = '' then
-    raise exception 'Device identifier is required';
-  end if;
-
-  perform 1 from public.profiles where id = auth.uid() for update;
+  select role into v_user_role
+    from public.profiles
+    where id = auth.uid()
+    for update;
   if not found then
     raise exception 'User profile not found';
+  end if;
+
+  if v_user_role = 'admin' then
+    return jsonb_build_object('allowed', true, 'reason', 'admin_device_lock_exempt');
+  end if;
+
+  if p_device_identifier is null or btrim(p_device_identifier) = '' then
+    raise exception 'Device identifier is required';
   end if;
 
   select (value #>> '{}')::boolean

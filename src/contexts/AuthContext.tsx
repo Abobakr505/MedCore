@@ -132,9 +132,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         // مهم: متعملش await لـ supabase مباشرة داخل الـ callback (ممكن يسبب deadlock)
         setTimeout(async () => {
           if (!mounted || currentUserId.current !== newSession.user.id) return;
-          await loadProfile(newSession.user.id);
+          const userProfile = await loadProfile(newSession.user.id);
           if (currentUserId.current !== newSession.user.id) return;
-          await checkDevice(newSession.user.id);
+          if (userProfile?.role === "admin") {
+            setDeviceBlockedUserId(null);
+          } else {
+            await checkDevice(newSession.user.id);
+          }
           if (mounted) setLoading(false);
         }, 0);
       } else {
@@ -284,8 +288,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         };
       }
 
-      // الحساب سليم: نفحص الجهاز مرة واحدة فقط
-      await checkDevice(result.user.id);
+      // لا ينطبق قفل الجهاز على حسابات الإدارة.
+      if (userProfile?.role === "admin") {
+        setDeviceBlockedUserId(null);
+      } else {
+        await checkDevice(result.user.id);
+      }
       setLoading(false);
 
       return { error: null };
